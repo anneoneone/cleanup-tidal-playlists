@@ -91,7 +91,7 @@ def compare_and_delete(mp4_m4a_folder, mp3_folder):
     mp3_files = get_files_from_folder(mp3_folder, {".mp3"})
     
     missing_in_mp4_m4a = mp3_files - mp4_m4a_files
-    print(missing_in_mp4_m4a)
+    # print(missing_in_mp4_m4a)
     
     for file_name in missing_in_mp4_m4a:
         mp3_file_path = Path(mp3_folder) / f"{file_name}.mp3"
@@ -110,19 +110,20 @@ def convert_all_m4a_to_mp3():
 def main():
     session = connect_to_tidal()
     playlists = fetch_all_playlists(session)
+
     for playlist in playlists:
         playlist_folder_m4a = M4A_DIR / "Playlists" / playlist.name
         if not playlist_folder_m4a.exists():
             print(bcolors.WARNING + f"playlist {playlist.name} does not exist in m4a directory" + bcolors.ENDC)
             continue
         tidal_tracks = fetch_tidal_playlist_tracks(playlist)
-        print(playlist.name)
+        # print(playlist.name)
         local_tracks_m4a = get_local_tracks(playlist_folder_m4a, {'.m4a', '.mp4'})
-        print(tidal_tracks)
-        print(local_tracks_m4a)
+        # print(tidal_tracks)
+        # print(local_tracks_m4a)
         to_delete_m4a = compare_tracks(local_tracks_m4a, tidal_tracks)
-        print(to_delete_m4a)
-        print("...")
+        # print(to_delete_m4a)
+        # print("...")
         delete_unmatched_tracks(to_delete_m4a, playlist_folder_m4a, {'.m4a', '.mp4'})
 
         playlist_folder_mp3 = MP3_DIR / "Playlists" / playlist.name

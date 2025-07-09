@@ -83,7 +83,6 @@ def fetch_tidal_playlist_tracks(playlist):
         title = track.name
         tidal_tracks.add(f"{artist} - {title}".lower())
         count = count + 1
-    print(count)
     return tidal_tracks
 
 
