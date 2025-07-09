@@ -77,10 +77,13 @@ def fetch_all_playlists(session):
 def fetch_tidal_playlist_tracks(playlist):
     print(f"Verarbeite Playlist: {playlist.name}")
     tidal_tracks = set()
+    count = 0
     for track in playlist.tracks():  # Klammern hinzufügen, um die Methode auszuführen
         artist = track.artist.name
         title = track.name
         tidal_tracks.add(f"{artist} - {title}".lower())
+        count = count + 1
+    print(count)
     return tidal_tracks
 
 
