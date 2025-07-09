@@ -1,0 +1,3 @@
+tidalapi
+ffmpeg-python
+mutagen
