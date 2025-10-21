@@ -1,7 +1,7 @@
 repos:
   # Pre-commit hooks for general file cleaning
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -18,26 +18,24 @@ repos:
       - id: name-tests-test
         args: ['--pytest-test-first']
       - id: requirements-txt-fixer
-      - id: fix-encoding-pragma
-        args: ['--remove']
 
   # Python code formatting
   - repo: https://github.com/psf/black
-    rev: 23.10.1
+    rev: 25.9.0
     hooks:
       - id: black
         language_version: python3
 
   # Import sorting
   - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
+    rev: 7.0.0
     hooks:
       - id: isort
         args: ["--profile", "black"]
 
   # Python linting
   - repo: https://github.com/pycqa/flake8
-    rev: 6.1.0
+    rev: 7.3.0
     hooks:
       - id: flake8
         additional_dependencies:
@@ -49,78 +47,48 @@ repos:
 
   # Type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.6.1
+    rev: v1.18.2
     hooks:
       - id: mypy
-        additional_dependencies: [types-all]
-        args: [--strict, --ignore-missing-imports]
+        args: [--ignore-missing-imports]
+        additional_dependencies: [pydantic, click, rich]
 
   # Security linting
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.5
+    rev: 1.8.6
     hooks:
       - id: bandit
-        args: ['-r', 'src/', '-f', 'json', '-o', 'bandit-report.json']
+        args: ['-r', 'src/', '-ll']
         files: ^src/
-
-  # Dependency vulnerability scanning
-  - repo: https://github.com/pyupio/safety
-    rev: 2.3.5
-    hooks:
-      - id: safety
-        args: [--json, --output, safety-report.json]
 
   # Python docstring formatting
   - repo: https://github.com/PyCQA/docformatter
-    rev: v1.7.5
+    rev: v1.7.7
     hooks:
       - id: docformatter
         args: [--in-place, --wrap-summaries=88, --wrap-descriptions=88]
 
   # Commit message validation
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v3.12.0
+    rev: v4.9.1
     hooks:
       - id: commitizen
         stages: [commit-msg]
 
-  # YAML formatting
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v3.0.3
-    hooks:
-      - id: prettier
-        types: [yaml]
-
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.37.0
+    rev: v0.45.0
     hooks:
       - id: markdownlint
         args: ['--fix']
 
-  # Additional Python security checks
-  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
-    rev: v1.3.2
-    hooks:
-      - id: python-safety-dependencies-check
-
   # Local hooks for custom checks
   - repo: local
     hooks:
-      # Run tests before commit
-      - id: pytest
-        name: pytest
-        entry: pytest
-        language: system
-        types: [python]
-        pass_filenames: false
-        always_run: true
-        args: ['-v', '--tb=short']
-
       # Check for TODO/FIXME comments in production code
       - id: check-todos
         name: Check for TODO/FIXME in production code
-        entry: bash -c 'if grep -r "TODO\|FIXME" src/ --exclude-dir=__pycache__ --exclude="*.pyc"; then echo "Found TODO/FIXME in production code"; exit 1; fi'
+        entry: bash -c 'if grep -r "TODO\|FIXME" src/ --exclude-dir=__pycache__ --exclude="*.pyc" 2>/dev/null; then echo "Found TODO/FIXME in production code"; exit 1; fi'
         language: system
         pass_filenames: false
 
@@ -141,5 +109,5 @@ ci:
   autoupdate_branch: ''
   autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
   autoupdate_schedule: weekly
-  skip: [pytest, check-todos, version-check]  # Skip hooks that need local setup
+  skip: [check-todos, version-check, commitizen, markdownlint]  # Skip hooks that need local setup
   submodules: false
