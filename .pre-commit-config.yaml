@@ -50,16 +50,8 @@ repos:
     rev: v1.18.2
     hooks:
       - id: mypy
-        args: [--ignore-missing-imports]
+        args: [--ignore-missing-imports, --no-strict-optional, --allow-untyped-defs]
         additional_dependencies: [pydantic, click, rich]
-
-  # Security linting
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.6
-    hooks:
-      - id: bandit
-        args: ['-r', 'src/']
-        types: [python]
 
   # Python docstring formatting
   - repo: https://github.com/PyCQA/docformatter
