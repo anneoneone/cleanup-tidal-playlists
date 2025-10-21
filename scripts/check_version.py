@@ -4,9 +4,10 @@
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 
-def get_version_from_pyproject():
+def get_version_from_pyproject() -> Optional[str]:
     """Get version from pyproject.toml."""
     pyproject_path = Path("pyproject.toml")
     if not pyproject_path.exists():
@@ -17,7 +18,7 @@ def get_version_from_pyproject():
     return match.group(1) if match else None
 
 
-def get_version_from_init():
+def get_version_from_init() -> Optional[str]:
     """Get version from __init__.py."""
     init_path = Path("src/tidal_cleanup/__init__.py")
     if not init_path.exists():
@@ -28,7 +29,7 @@ def get_version_from_init():
     return match.group(1) if match else None
 
 
-def main():
+def main() -> None:
     """Check version consistency."""
     pyproject_version = get_version_from_pyproject()
     init_version = get_version_from_init()

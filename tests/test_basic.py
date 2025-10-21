@@ -1,6 +1,5 @@
 """Basic tests for the refactored Tidal cleanup application."""
 
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -135,7 +134,7 @@ class TestTidalService:
         mock_session.check_login.return_value = True
         mock_session_class.return_value = mock_session
 
-        service = TidalService(token_file)
+        TidalService(token_file)
         # This would test the actual connection logic
         # service.connect()
 

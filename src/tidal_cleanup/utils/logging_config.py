@@ -4,7 +4,7 @@ import logging
 import logging.handlers
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 class ColoredFormatter(logging.Formatter):
@@ -20,7 +20,7 @@ class ColoredFormatter(logging.Formatter):
         "RESET": "\033[0m",  # Reset
     }
 
-    def format(self, record):
+    def format(self, record: Any) -> str:
         """Format log record with colors."""
         log_color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
         reset_color = self.COLORS["RESET"]
@@ -135,7 +135,7 @@ def set_log_level(level: str) -> None:
 
 
 # Silence noisy third-party loggers
-def configure_third_party_loggers():
+def configure_third_party_loggers() -> None:
     """Configure third-party library loggers to reduce noise."""
     # Reduce logging from mutagen
     logging.getLogger("mutagen").setLevel(logging.WARNING)

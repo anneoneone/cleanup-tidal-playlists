@@ -3,12 +3,10 @@
 import logging
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict
 
 from mutagen import File as MutagenFile
 from mutagen.mp3 import HeaderNotFoundError
-
-from ..models.models import FileInfo, Track
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +20,9 @@ class RekordboxGenerationError(Exception):
 class RekordboxService:
     """Service for generating Rekordbox XML files."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Rekordbox service."""
-        self.track_data: Dict[str, dict] = {}
+        self.track_data: Dict[str, dict[str, Any]] = {}
         self.track_id_counter = 1
 
     def generate_xml(
@@ -107,7 +105,7 @@ class RekordboxService:
             Company="AlphaTheta",
         )
 
-        collection = ET.SubElement(dj_playlists, "COLLECTION", Entries="0")
+        ET.SubElement(dj_playlists, "COLLECTION", Entries="0")
         playlists = ET.SubElement(dj_playlists, "PLAYLISTS")
 
         ET.SubElement(playlists, "NODE", Type="0", Name="ROOT", Count="0")
@@ -188,9 +186,7 @@ class RekordboxService:
         except (HeaderNotFoundError, Exception) as e:
             logger.warning(f"Cannot process audio file {file_path}: {e}")
 
-    def _get_metadata_value(
-        self, audio_file: MutagenFile, key: str, default: str = ""
-    ) -> str:
+    def _get_metadata_value(self, audio_file: Any, key: str, default: str = "") -> str:
         """Get metadata value from audio file.
 
         Args:

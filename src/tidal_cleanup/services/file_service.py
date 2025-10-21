@@ -22,7 +22,7 @@ class FileOperationError(Exception):
 class FileService:
     """Service for audio file operations."""
 
-    def __init__(self, supported_extensions: tuple = None):
+    def __init__(self, supported_extensions: Optional[tuple[str, ...]] = None) -> None:
         """Initialize file service.
 
         Args:
@@ -179,7 +179,7 @@ class FileService:
                 str(target_path),
             ]
 
-            result = subprocess.run(
+            subprocess.run(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -243,7 +243,7 @@ class FileService:
         logger.info(f"Converting files from {source_dir} to {target_dir}")
 
         jobs = []
-        source_files = []
+        source_files: list[Path] = []
 
         # Collect all source files
         for ext in [".m4a", ".mp4"]:  # As in original code

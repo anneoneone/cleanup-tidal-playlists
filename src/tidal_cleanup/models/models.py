@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import Any, List, Optional, Set, Union
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -36,7 +36,7 @@ class Track(BaseModel):
 
     @field_validator("file_path", mode="before")
     @classmethod
-    def validate_file_path(cls, v):
+    def validate_file_path(cls, v: Union[str, Path, None]) -> Optional[Path]:
         """Validate file path."""
         if v is not None:
             return Path(v)
@@ -72,7 +72,7 @@ class Playlist(BaseModel):
 
     @field_validator("local_folder", mode="before")
     @classmethod
-    def validate_local_folder(cls, v):
+    def validate_local_folder(cls, v: Union[str, Path, None]) -> Optional[Path]:
         """Validate local folder path."""
         if v is not None:
             return Path(v)
@@ -91,17 +91,17 @@ class FileInfo(BaseModel):
     duration: Optional[int] = None
     bitrate: Optional[int] = None
     sample_rate: Optional[int] = None
-    metadata: Optional[dict] = None
+    metadata: Optional[dict[str, Any]] = None
 
     @property
     def stem(self) -> str:
-        """Get file stem (name without extension)."""
+        """File name without extension."""
         return self.path.stem
 
     @field_validator("path", mode="before")
     @classmethod
-    def validate_path(cls, v):
-        """Validate file path."""
+    def validate_path(cls, v: Union[str, Path]) -> Path:
+        """Convert input to Path object."""
         return Path(v)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -151,7 +151,7 @@ class ConversionJob(BaseModel):
 
     @field_validator("source_path", "target_path", mode="before")
     @classmethod
-    def validate_paths(cls, v):
+    def validate_paths(cls, v: Union[str, Path]) -> Path:
         """Validate file paths."""
         return Path(v)
 

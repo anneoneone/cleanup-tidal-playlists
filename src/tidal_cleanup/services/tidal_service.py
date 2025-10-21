@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import tidalapi
 from tidalapi.exceptions import AuthenticationError
@@ -23,14 +23,14 @@ class TidalConnectionError(Exception):
 class TidalService:
     """Service for interacting with the Tidal API."""
 
-    def __init__(self, token_file: Path):
+    def __init__(self, token_file: Path) -> None:
         """Initialize Tidal service.
 
         Args:
             token_file: Path to the token file for session persistence
         """
         self.token_file = token_file
-        self.session: Optional[tidalapi.Session] = None
+        self.session: Optional[Any] = None  # tidalapi.Session
         self._authenticated = False
 
     def connect(self) -> None:

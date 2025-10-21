@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import click
 from rich.console import Console
@@ -17,7 +17,6 @@ from rich.table import Table
 
 from ..config import get_config
 from ..services import (
-    FileOperationError,
     FileService,
     RekordboxGenerationError,
     RekordboxService,
@@ -34,7 +33,7 @@ logger = logging.getLogger(__name__)
 class TidalCleanupApp:
     """Main application class."""
 
-    def __init__(self, config_override: Optional[dict] = None):
+    def __init__(self, config_override: Optional[dict[str, Any]] = None) -> None:
         """Initialize application.
 
         Args:
@@ -117,7 +116,7 @@ class TidalCleanupApp:
             console.print(f"[red]✗[/red] Synchronization failed: {e}")
             return False
 
-    def _process_playlist(self, playlist, progress, task):
+    def _process_playlist(self, playlist: Any, progress: Any, task: Any) -> None:
         """Process a single playlist."""
         progress.update(task, description=f"Processing {playlist.name}...")
 
@@ -150,7 +149,7 @@ class TidalCleanupApp:
         if mp3_folder.exists():
             self._sync_mp3_folder(m4a_folder, mp3_folder)
 
-    def _delete_tracks(self, folder: Path, tracks_to_delete: set):
+    def _delete_tracks(self, folder: Path, tracks_to_delete: set[str]) -> None:
         """Delete tracks that are not in Tidal playlist."""
         for track_name in tracks_to_delete:
             # Find matching files with fuzzy search
@@ -180,7 +179,7 @@ class TidalCleanupApp:
 
         return click.confirm(f"Delete {file_path.name}?", default=False)
 
-    def _sync_mp3_folder(self, m4a_folder: Path, mp3_folder: Path):
+    def _sync_mp3_folder(self, m4a_folder: Path, mp3_folder: Path) -> None:
         """Sync MP3 folder with M4A folder."""
         # Get track names from both folders
         m4a_tracks = self.file_service.get_track_names(m4a_folder)
@@ -192,11 +191,10 @@ class TidalCleanupApp:
         # Delete orphaned MP3 files
         for track_name in missing_in_m4a:
             mp3_file = mp3_folder / f"{track_name}.mp3"
-            if mp3_file.exists():
-                if self._confirm_deletion(mp3_file):
-                    self.file_service.delete_file(mp3_file, interactive=False)
+            if mp3_file.exists() and self._confirm_deletion(mp3_file):
+                self.file_service.delete_file(mp3_file, interactive=False)
 
-    def _convert_files(self):
+    def _convert_files(self) -> None:
         """Convert M4A files to MP3."""
         console.print("[bold blue]Converting audio files...[/bold blue]")
 
@@ -211,7 +209,8 @@ class TidalCleanupApp:
         failed = len([j for j in jobs if j.status == "failed"])
 
         console.print(
-            f"[green]✓[/green] Conversion complete: {successful} successful, {failed} failed"
+            f"[green]✓[/green] Conversion complete: {successful} successful, "
+            f"{failed} failed"
         )
 
     def generate_rekordbox_xml(self) -> bool:
@@ -242,7 +241,8 @@ class TidalCleanupApp:
                 )
 
             console.print(
-                f"[green]✓[/green] Rekordbox XML generated: {self.config.rekordbox_output_file}"
+                f"[green]✓[/green] Rekordbox XML generated: "
+                f"{self.config.rekordbox_output_file}"
             )
             return True
 
@@ -254,7 +254,7 @@ class TidalCleanupApp:
             console.print(f"[red]✗[/red] Rekordbox generation failed: {e}")
             return False
 
-    def show_status(self):
+    def show_status(self) -> None:
         """Show application status and configuration."""
         table = Table(title="Tidal Cleanup Configuration")
 
@@ -282,7 +282,7 @@ class TidalCleanupApp:
 @click.option("--log-file", type=click.Path(), help="Log to file")
 @click.option("--no-interactive", is_flag=True, help="Disable interactive mode")
 @click.pass_context
-def cli(ctx, log_level, log_file, no_interactive):
+def cli(ctx: Any, log_level: str, log_file: str, no_interactive: bool) -> None:
     """Tidal Playlist Cleanup Tool.
 
     A modern tool for synchronizing Tidal playlists with local audio files.
@@ -302,7 +302,7 @@ def cli(ctx, log_level, log_file, no_interactive):
 
 @cli.command()
 @click.pass_obj
-def sync(app):
+def sync(app: TidalCleanupApp) -> None:
     """Synchronize Tidal playlists with local files."""
     success = app.sync_playlists()
     if not success:
@@ -311,14 +311,14 @@ def sync(app):
 
 @cli.command()
 @click.pass_obj
-def convert(app):
+def convert(app: TidalCleanupApp) -> None:
     """Convert audio files from M4A to MP3."""
     app._convert_files()
 
 
 @cli.command()
 @click.pass_obj
-def rekordbox(app):
+def rekordbox(app: TidalCleanupApp) -> None:
     """Generate Rekordbox XML file."""
     success = app.generate_rekordbox_xml()
     if not success:
@@ -327,14 +327,14 @@ def rekordbox(app):
 
 @cli.command()
 @click.pass_obj
-def status(app):
+def status(app: TidalCleanupApp) -> None:
     """Show configuration and status."""
     app.show_status()
 
 
 @cli.command()
 @click.pass_obj
-def full(app):
+def full(app: TidalCleanupApp) -> None:
     """Run full workflow: sync, convert, and generate Rekordbox XML."""
     console.print("[bold green]Running full workflow...[/bold green]")
 

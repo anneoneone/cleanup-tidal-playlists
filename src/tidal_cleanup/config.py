@@ -2,13 +2,12 @@
 
 import os
 from pathlib import Path
-from typing import Optional
 
 
 class Config:
     """Application configuration."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize configuration from environment variables."""
         # Tidal API settings
         self.tidal_token_file = Path(
@@ -68,7 +67,7 @@ class Config:
         # Ensure directories exist
         self._ensure_directories()
 
-    def _ensure_directories(self):
+    def _ensure_directories(self) -> None:
         """Ensure required directories exist."""
         for directory in [self.m4a_directory, self.mp3_directory]:
             directory.mkdir(parents=True, exist_ok=True)
