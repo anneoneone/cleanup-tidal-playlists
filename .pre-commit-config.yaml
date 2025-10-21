@@ -50,8 +50,9 @@ repos:
     rev: v1.18.2
     hooks:
       - id: mypy
-        args: [--ignore-missing-imports, --no-strict-optional, --allow-untyped-defs]
-        additional_dependencies: [pydantic, click, rich]
+        additional_dependencies: [pydantic, click, rich, tidalapi, mutagen]
+        files: ^src/
+        exclude: ^tests/
 
   # Python docstring formatting
   - repo: https://github.com/PyCQA/docformatter
