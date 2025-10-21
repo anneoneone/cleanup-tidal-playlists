@@ -50,7 +50,7 @@ jobs:
         run: flake8 src/ tests/
 
       - name: Run mypy (type checking)
-        run: mypy src/
+        run: mypy src/ --config-file=pyproject.toml
 
       - name: Run bandit (security linting)
         run: bandit -r src/ -f json -o bandit-report.json || true

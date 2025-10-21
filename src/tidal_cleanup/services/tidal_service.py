@@ -54,7 +54,7 @@ class TidalService:
             with open(self.token_file, "r") as file:
                 data = json.load(file)
 
-            self.session = tidalapi.Session()
+            self.session = tidalapi.Session()  # type: ignore[attr-defined]
             self.session.load_oauth_session(
                 data["token_type"], data["access_token"], data["refresh_token"]
             )
@@ -76,11 +76,11 @@ class TidalService:
     def _create_new_session(self) -> None:
         """Create new Tidal session with OAuth."""
         logger.info("Creating new Tidal session...")
-        self.session = tidalapi.Session()
+        self.session = tidalapi.Session()  # type: ignore[attr-defined]
 
         print("Please scan the QR code or open the link to authenticate:")
-        auth_url = self.session.login_oauth_simple()
-        print(auth_url)
+        self.session.login_oauth_simple()
+        print("Please follow the authentication instructions in your browser.")
 
         # Wait for authentication
         max_wait_time = 60
@@ -100,6 +100,9 @@ class TidalService:
 
     def _save_session(self) -> None:
         """Save session data to token file."""
+        if self.session is None:
+            raise TidalConnectionError("No active session to save")
+
         try:
             session_data = {
                 "token_type": self.session.token_type,

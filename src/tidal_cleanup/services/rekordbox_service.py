@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict
 
-from mutagen import File as MutagenFile
+from mutagen import File as MutagenFile  # type: ignore[attr-defined]
 from mutagen.mp3 import HeaderNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,13 @@ class RekordboxService:
             root = self._create_xml_root(rekordbox_version)
             collection = root.find("COLLECTION")
             playlists_node = root.find("PLAYLISTS")
+
+            if collection is None or playlists_node is None:
+                raise RekordboxGenerationError("Failed to create XML structure")
+
             root_playlist_node = playlists_node.find("NODE")
+            if root_playlist_node is None:
+                raise RekordboxGenerationError("Failed to find root playlist node")
 
             # Process all playlist folders
             playlist_count = 0
