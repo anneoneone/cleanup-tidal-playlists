@@ -2,6 +2,7 @@ import tidalapi
 import os
 import json
 import re
+import time
 
 class bcolors:
     HEADER = '\033[95m'
@@ -27,14 +28,23 @@ def connect_to_tidal():
         with open(TOKEN_FILE, "r") as file:
             data = json.load(file)
         session = tidalapi.Session()
-        session.load_oauth_session(data["token_type"], data["access_token"], data["refresh_token"])
         
-        # Prüfen, ob die Session gültig ist
-        if session.check_login():
-            print("Erfolgreich mit gespeicherter Session angemeldet!")
-            return session
-        else:
-            print("Gespeicherte Session ungültig, starte neuen Login...")
+        try:
+            session.load_oauth_session(data["token_type"], data["access_token"], data["refresh_token"])
+            
+            # Prüfen, ob die Session gültig ist
+            if session.check_login():
+                print("Erfolgreich mit gespeicherter Session angemeldet!")
+                return session
+            else:
+                print("Gespeicherte Session ungültig, starte neuen Login...")
+        except tidalapi.exceptions.AuthenticationError:
+            print("Authentifizierung fehlgeschlagen, entferne alte Token und starte neuen Login...")
+            os.remove(TOKEN_FILE)
+        except Exception as e:
+            print(f"Fehler beim Laden der Session: {e}")
+            print("Entferne alte Token und starte neuen Login...")
+            os.remove(TOKEN_FILE)
     
     # Neues Login, falls kein gültiger Token vorhanden ist
     session = tidalapi.Session()

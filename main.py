@@ -23,7 +23,7 @@ class bcolors:
 # Basispfade zu den Musikordnern
 M4A_DIR = Path("/Users/anton/Music/Tidal/m4a")
 MP3_DIR = Path("/Users/anton/Music/Tidal/mp3")
-TOKEN_FILE = "tidal_session.json"
+TOKEN_FILE = Path("/Users/anton/Documents/tidal_session.json")
 
 # Feste Pfade
 INPUT_FOLDER = "/Users/anton/Music/Tidal/mp3/Playlists"  # Eingabeordner
@@ -31,6 +31,9 @@ OUTPUT_XML = "/Users/anton/Documents/rekordbox/antons_music.xml"  # Ausgabedatei
 
 
 def convert_to_mp3(input_file, output_file):
+    if output_file.exists():
+        return
+
     cmd = ["ffmpeg", "-nostdin", "-i", str(input_file), "-q:a", "2", str(output_file)]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if output_file.exists():
@@ -100,7 +103,7 @@ def compare_and_delete(mp4_m4a_folder, mp3_folder):
 
 
 def convert_all_m4a_to_mp3():
-    print(__name__)
+    print("Konvertiere m4a -> mp3 ...")
     for input_file in list(M4A_DIR.rglob("*.m4a")) + list(M4A_DIR.rglob("*.mp4")):
         relative_path = input_file.relative_to(M4A_DIR)
         output_file = MP3_DIR / relative_path.with_suffix(".mp3")
