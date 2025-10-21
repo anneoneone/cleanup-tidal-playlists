@@ -1,9 +1,9 @@
 """Services for the Tidal cleanup application."""
 
-from .tidal_service import TidalService, TidalConnectionError
-from .file_service import FileService, FileOperationError
+from .file_service import FileOperationError, FileService
+from .rekordbox_service import RekordboxGenerationError, RekordboxService
+from .tidal_service import TidalConnectionError, TidalService
 from .track_comparison_service import TrackComparisonService
-from .rekordbox_service import RekordboxService, RekordboxGenerationError
 
 __all__ = [
     "TidalService",

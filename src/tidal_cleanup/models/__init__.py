@@ -1,10 +1,10 @@
 """Models for the Tidal cleanup application."""
 
-from .models import Track, Playlist, FileInfo, ComparisonResult, ConversionJob
+from .models import ComparisonResult, ConversionJob, FileInfo, Playlist, Track
 
 __all__ = [
     "Track",
-    "Playlist", 
+    "Playlist",
     "FileInfo",
     "ComparisonResult",
     "ConversionJob",
