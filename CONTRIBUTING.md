@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Tidal Cleanup! This document prov
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.9 or higher
 - Git
 - FFmpeg (for audio conversion functionality)
 

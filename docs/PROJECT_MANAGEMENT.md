@@ -87,7 +87,7 @@ Every commit and PR goes through:
 - **pytest**: Test framework
 - **pytest-cov**: Coverage reporting
 - **tox**: Multi-environment testing
-- **Matrix CI**: Python 3.8-3.12 across OS
+- **Matrix CI**: Python 3.9-3.12 across OS
 
 ### Automation
 

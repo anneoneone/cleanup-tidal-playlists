@@ -23,7 +23,7 @@ This project follows modern Python development best practices:
 - **🔍 Code Quality**: Black, isort, flake8, mypy with strict configuration
 - **🛡️ Security**: Bandit, Safety, and automated vulnerability scanning
 - **🧪 Testing**: pytest with 80%+ coverage requirement
-- **🔄 CI/CD**: GitHub Actions with matrix testing across Python 3.8-3.12
+- **🔄 CI/CD**: GitHub Actions with matrix testing across Python 3.9-3.12
 - **📝 Documentation**: Comprehensive guides and API documentation
 - **🪝 Pre-commit**: 15+ automated quality checks before every commit
 
@@ -56,7 +56,7 @@ src/tidal_cleanup/
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.9 or higher
 - FFmpeg (for audio conversion)
 - Git (for development)
 
@@ -83,7 +83,7 @@ make dev-setup
 
 This installs all dependencies, sets up pre-commit hooks, and prepares the development environment.
 
-## Configuration
+## Environment Configuration
 
 The application uses environment variables for configuration. Copy the example configuration:
 
@@ -228,7 +228,7 @@ The modern version maintains compatibility with your existing workflow while pro
 3. **Tidal Integration**: Compatible with existing Tidal sessions
 4. **Rekordbox Output**: Same XML format for Rekordbox
 
-## Configuration
+## Advanced Configuration
 
 The application uses a configuration file that can be customized:
 
@@ -274,10 +274,6 @@ We welcome contributions! Please read `CONTRIBUTING.md` for guidelines on:
 ### Security
 
 For security concerns, please see `SECURITY.md` for reporting guidelines.
-
-## License
-
-MIT License — see LICENSE file for details.
 
 ## License
 
