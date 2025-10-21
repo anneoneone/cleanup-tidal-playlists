@@ -19,7 +19,7 @@ Instead, please report them via email to the maintainers or through GitHub's pri
 
 1. **Email**: Send details to [security contact email]
 2. **GitHub**: Use the "Security" tab to report privately
-3. **Include**: 
+3. **Include**:
    - Description of the vulnerability
    - Steps to reproduce
    - Potential impact
@@ -71,5 +71,6 @@ Security updates are released as:
 ## Contact
 
 For security concerns, contact:
+
 - GitHub Security Advisory (preferred)
 - Email: [to be added]

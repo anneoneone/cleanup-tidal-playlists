@@ -21,7 +21,7 @@ This project follows modern Python development best practices:
 
 - **📦 Modern Packaging**: pyproject.toml with PEP 517/518 build system
 - **🔍 Code Quality**: Black, isort, flake8, mypy with strict configuration
-- **🛡️ Security**: Bandit, Safety, and automated vulnerability scanning  
+- **🛡️ Security**: Bandit, Safety, and automated vulnerability scanning
 - **🧪 Testing**: pytest with 80%+ coverage requirement
 - **🔄 CI/CD**: GitHub Actions with matrix testing across Python 3.8-3.12
 - **📝 Documentation**: Comprehensive guides and API documentation
@@ -197,7 +197,7 @@ for playlist in playlists:
     if playlist.name == "My Favorites":
         tracks = tidal_service.get_tracks(playlist.id)
         print(f"Playlist has {len(tracks)} tracks")
-        
+
         # Convert tracks
         for track in tracks:
             file_path = file_service.convert_track(track)

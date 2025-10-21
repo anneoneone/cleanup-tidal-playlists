@@ -90,6 +90,7 @@ type(scope): description
 ```
 
 Examples:
+
 ```
 feat(cli): add new sync command
 fix(tidal): handle authentication timeout
@@ -118,31 +119,31 @@ logger = logging.getLogger(__name__)
 
 class ExampleClass:
     """Class docstring describing the class purpose.
-    
+
     Args:
         param1: Description of parameter 1.
         param2: Description of parameter 2.
     """
-    
+
     def __init__(self, param1: str, param2: Optional[int] = None) -> None:
         self.param1 = param1
         self.param2 = param2
-    
+
     def example_method(self, data: List[str]) -> bool:
         """Method docstring describing what it does.
-        
+
         Args:
             data: List of strings to process.
-            
+
         Returns:
             True if successful, False otherwise.
-            
+
         Raises:
             ValueError: If data is empty.
         """
         if not data:
             raise ValueError("Data cannot be empty")
-        
+
         logger.info(f"Processing {len(data)} items")
         return True
 ```
@@ -169,21 +170,21 @@ from tidal_cleanup.services.example_service import ExampleService
 
 class TestExampleService:
     """Test cases for ExampleService."""
-    
+
     def setup_method(self):
         """Set up test fixtures."""
         self.service = ExampleService()
-    
+
     def test_example_method_success(self):
         """Test successful operation."""
         result = self.service.example_method(["test"])
         assert result is True
-    
+
     def test_example_method_empty_data(self):
         """Test handling of empty data."""
         with pytest.raises(ValueError, match="Data cannot be empty"):
             self.service.example_method([])
-    
+
     @patch('tidal_cleanup.services.example_service.external_api')
     def test_example_method_with_mock(self, mock_api):
         """Test with mocked external dependency."""

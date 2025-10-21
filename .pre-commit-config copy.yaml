@@ -58,8 +58,8 @@ repos:
     rev: 1.8.6
     hooks:
       - id: bandit
-        args: ['-r', 'src/']
-        types: [python]
+        args: ['-r', 'src/', '-ll']
+        files: ^src/
 
   # Python docstring formatting
   - repo: https://github.com/PyCQA/docformatter

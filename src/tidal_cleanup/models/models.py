@@ -24,11 +24,14 @@ class Track(BaseModel):
     def normalized_name(self) -> str:
         """Get normalized track name for comparison."""
         import re
+
         # Normalize artist name - remove feat. parts and extra text
-        artist = re.sub(r'\s*(feat\.?|featuring|ft\.?)\s+.*', '', self.artist, flags=re.IGNORECASE)
+        artist = re.sub(
+            r"\s*(feat\.?|featuring|ft\.?)\s+.*", "", self.artist, flags=re.IGNORECASE
+        )
         # Normalize title - remove remix, version, etc.
-        title = re.sub(r'\s*\([^)]*\)\s*', '', self.title)
-        title = re.sub(r'\s*\[[^\]]*\]\s*', '', title)
+        title = re.sub(r"\s*\([^)]*\)\s*", "", self.title)
+        title = re.sub(r"\s*\[[^\]]*\]\s*", "", title)
         return f"{artist.lower().strip()} - {title.lower().strip()}"
 
     @field_validator("file_path", mode="before")
