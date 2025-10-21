@@ -1,0 +1,400 @@
+{
+	"folders": [
+		{
+			"name": "Tidal Cleanup",
+			"path": "."
+		}
+	],
+	"settings": {
+		// Python Configuration
+		"python.defaultInterpreterPath": "./venv/bin/python",
+		"python.terminal.activateEnvironment": true,
+		"python.terminal.activateEnvInCurrentTerminal": true,
+
+		// Linting and Formatting
+		"python.linting.enabled": true,
+		"python.linting.pylintEnabled": false,
+		"python.linting.flake8Enabled": true,
+		"python.linting.mypyEnabled": true,
+		"python.linting.banditEnabled": true,
+		"python.linting.lintOnSave": true,
+
+		// Black formatter
+		"python.formatting.provider": "black",
+		"python.formatting.blackArgs": [
+			"--line-length=88",
+			"--target-version=py38"
+		],
+
+		// Import sorting with isort
+		"python.sortImports.args": [
+			"--profile=black",
+			"--line-length=88"
+		],
+
+		// Type checking
+		"python.analysis.typeCheckingMode": "strict",
+		"python.analysis.autoImportCompletions": true,
+		"python.analysis.autoSearchPaths": true,
+		"python.analysis.diagnosticMode": "workspace",
+		"python.analysis.stubPath": "./typings",
+
+		// Testing
+		"python.testing.pytestEnabled": true,
+		"python.testing.unittestEnabled": false,
+		"python.testing.pytestArgs": [
+			"tests"
+		],
+		"python.testing.autoTestDiscoverOnSaveEnabled": true,
+
+		// File associations and exclusions
+		"files.exclude": {
+			"**/__pycache__": true,
+			"**/*.pyc": true,
+			"**/.pytest_cache": true,
+			"**/.mypy_cache": true,
+			"**/.coverage": true,
+			"**/htmlcov": true,
+			"**/.tox": true,
+			"**/dist": true,
+			"**/build": true,
+			"**/*.egg-info": true
+		},
+
+		// Search exclusions
+		"search.exclude": {
+			"**/node_modules": true,
+			"**/bower_components": true,
+			"**/*.code-search": true,
+			"**/__pycache__": true,
+			"**/.pytest_cache": true,
+			"**/.mypy_cache": true,
+			"**/htmlcov": true,
+			"**/.tox": true,
+			"**/dist": true,
+			"**/build": true
+		},
+
+		// Editor settings
+		"editor.formatOnSave": true,
+		"editor.formatOnPaste": false,
+		"editor.codeActionsOnSave": {
+			"source.organizeImports": "explicit",
+			"source.fixAll": "explicit"
+		},
+		"editor.rulers": [88],
+		"editor.tabSize": 4,
+		"editor.insertSpaces": true,
+		"editor.trimAutoWhitespace": true,
+		"files.trimTrailingWhitespace": true,
+		"files.insertFinalNewline": true,
+		"files.trimFinalNewlines": true,
+
+		// Git settings
+		"git.enableSmartCommit": true,
+		"git.confirmSync": false,
+		"git.autofetch": true,
+
+		// Terminal settings
+		"terminal.integrated.defaultProfile.osx": "zsh",
+		"terminal.integrated.cwd": "${workspaceFolder}",
+
+		// Language-specific settings
+		"[python]": {
+			"editor.defaultFormatter": "ms-python.black-formatter",
+			"editor.formatOnSave": true,
+			"editor.codeActionsOnSave": {
+				"source.organizeImports": "explicit"
+			}
+		},
+		"[toml]": {
+			"editor.defaultFormatter": "tamasfe.even-better-toml"
+		},
+		"[yaml]": {
+			"editor.defaultFormatter": "redhat.vscode-yaml"
+		},
+		"[markdown]": {
+			"editor.defaultFormatter": "yzhang.markdown-all-in-one",
+			"editor.wordWrap": "on",
+			"editor.quickSuggestions": {
+				"comments": "off",
+				"strings": "off",
+				"other": "off"
+			}
+		},
+
+		// Integrated terminal env
+		"terminal.integrated.env.osx": {
+			"PYTHONPATH": "${workspaceFolder}/src"
+		},
+
+		// IntelliSense settings
+		"python.analysis.include": [
+			"src/**",
+			"tests/**"
+		],
+		"python.analysis.exclude": [
+			"**/__pycache__",
+			"**/.pytest_cache",
+			"**/.mypy_cache",
+			"**/node_modules",
+			"**/dist",
+			"**/build"
+		],
+
+		// Workspace-specific settings
+		"python.envFile": "${workspaceFolder}/.env",
+		"python.terminal.launchArgs": ["-X", "dev"],
+
+		// Coverage settings
+		"coverage-gutters.coverageFileNames": [
+			"coverage.xml",
+			"coverage.lcov",
+			".coverage"
+		],
+		"coverage-gutters.showLineCoverage": true,
+		"coverage-gutters.showRulerCoverage": true,
+
+		// Markdown settings
+		"markdownlint.config": {
+			"MD013": false,
+			"MD033": false
+		}
+	},
+	"extensions": {
+		"recommendations": [
+			// Python essentials
+			"ms-python.python",
+			"ms-python.black-formatter",
+			"ms-python.isort",
+			"ms-python.flake8",
+			"ms-python.mypy-type-checker",
+
+			// Testing and coverage
+			"ryanluker.vscode-coverage-gutters",
+
+			// TOML support
+			"tamasfe.even-better-toml",
+
+			// YAML support
+			"redhat.vscode-yaml",
+
+			// Markdown
+			"yzhang.markdown-all-in-one",
+
+			// Git
+			"eamodio.gitlens",
+			"mhutchie.git-graph",
+
+			// General productivity
+			"esbenp.prettier-vscode",
+
+			// Documentation
+			"ms-python.docstring-generator"
+		]
+	},
+	"tasks": {
+		"version": "2.0.0",
+		"tasks": [
+			{
+				"label": "Install Dependencies",
+				"type": "shell",
+				"command": "pip",
+				"args": ["install", "-e", ".[dev]"],
+				"group": "build",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Run Tests",
+				"type": "shell",
+				"command": "pytest",
+				"args": ["tests/", "-v", "--cov=src", "--cov-report=html"],
+				"group": "test",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Format Code",
+				"type": "shell",
+				"command": "black",
+				"args": ["src/", "tests/"],
+				"group": "build",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Sort Imports",
+				"type": "shell",
+				"command": "isort",
+				"args": ["src/", "tests/"],
+				"group": "build",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Lint Code",
+				"type": "shell",
+				"command": "flake8",
+				"args": ["src/", "tests/"],
+				"group": "test",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Type Check",
+				"type": "shell",
+				"command": "mypy",
+				"args": ["src/"],
+				"group": "test",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Security Check",
+				"type": "shell",
+				"command": "bandit",
+				"args": ["-r", "src/"],
+				"group": "test",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Pre-commit All",
+				"type": "shell",
+				"command": "pre-commit",
+				"args": ["run", "--all-files"],
+				"group": "test",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Build Package",
+				"type": "shell",
+				"command": "python",
+				"args": ["-m", "build"],
+				"group": "build",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Run Main",
+				"type": "shell",
+				"command": "python",
+				"args": ["-m", "tidal_cleanup"],
+				"group": "build",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			},
+			{
+				"label": "Clean Build Artifacts",
+				"type": "shell",
+				"command": "rm",
+				"args": ["-rf", "dist/", "build/", "*.egg-info/", "__pycache__/", ".pytest_cache/", ".mypy_cache/", "htmlcov/", ".coverage"],
+				"group": "build",
+				"presentation": {
+					"echo": true,
+					"reveal": "always",
+					"focus": false,
+					"panel": "shared"
+				},
+				"problemMatcher": []
+			}
+		]
+	},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			{
+				"name": "Run Tidal Cleanup",
+				"type": "debugpy",
+				"request": "launch",
+				"module": "tidal_cleanup",
+				"console": "integratedTerminal",
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"PYTHONPATH": "${workspaceFolder}/src"
+				},
+				"args": []
+			},
+			{
+				"name": "Run Tests",
+				"type": "debugpy",
+				"request": "launch",
+				"module": "pytest",
+				"console": "integratedTerminal",
+				"cwd": "${workspaceFolder}",
+				"args": [
+					"tests/",
+					"-v",
+					"--cov=src",
+					"--cov-report=html"
+				],
+				"env": {
+					"PYTHONPATH": "${workspaceFolder}/src"
+				}
+			},
+			{
+				"name": "Debug Current File",
+				"type": "debugpy",
+				"request": "launch",
+				"program": "${file}",
+				"console": "integratedTerminal",
+				"cwd": "${workspaceFolder}",
+				"env": {
+					"PYTHONPATH": "${workspaceFolder}/src"
+				}
+			}
+		]
+	}
+}
