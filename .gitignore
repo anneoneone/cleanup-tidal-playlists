@@ -1,5 +1,6 @@
 # dont push credentials
-tidal_session.json
+**/tidal_session*.json
+tidal_session*.json
 
 .vscode
 
