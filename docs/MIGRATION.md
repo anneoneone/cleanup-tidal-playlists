@@ -5,6 +5,7 @@ This guide helps you transition from the legacy monolithic code to the new moder
 ## Summary of Changes
 
 ### Before (Legacy)
+
 - Single large files with mixed responsibilities
 - Hardcoded file paths throughout the code
 - No proper error handling or logging
@@ -14,6 +15,7 @@ This guide helps you transition from the legacy monolithic code to the new moder
 - Manual deletion confirmation loops
 
 ### After (Modern Architecture)
+
 - Modular design with clear separation of concerns
 - Environment-based configuration
 - Comprehensive error handling and logging
@@ -33,23 +35,27 @@ This guide helps you transition from the legacy monolithic code to the new moder
 ## Step-by-Step Migration
 
 ### 1. Backup Your Current Setup
+
 ```bash
 # Backup your current working directory
 cp -r cleanup-tidal-playlists cleanup-tidal-playlists-backup
 ```
 
 ### 2. Install New Dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ### 3. Configure Environment
+
 ```bash
 cp config/.env.example .env
 # Edit .env with your specific paths
 ```
 
 ### 4. Test the New System
+
 ```bash
 # Test configuration
 python -m src.tidal_cleanup.cli.main status
@@ -59,6 +65,7 @@ python -m src.tidal_cleanup.cli.main sync --help
 ```
 
 ### 5. Run Side-by-Side Comparison
+
 Before fully switching, you can run both versions to compare results:
 
 ```bash
@@ -72,24 +79,29 @@ python -m src.tidal_cleanup.cli.main full
 ## Key Behavioral Changes
 
 ### Authentication
+
 - **Legacy**: Token saved to hardcoded path
 - **New**: Configurable token file location
 
 ### File Operations
+
 - **Legacy**: Immediate file operations with inline confirmations
 - **New**: Batch operations with optional confirmation mode
 
 ### Error Handling
+
 - **Legacy**: Crashes on errors
 - **New**: Graceful error handling with detailed logging
 
 ### Logging
+
 - **Legacy**: Print statements and colored console output
 - **New**: Structured logging with file rotation and configurable levels
 
 ## Configuration Migration
 
 ### Legacy Hardcoded Paths
+
 ```python
 M4A_DIR = Path("/Users/anton/Music/Tidal/m4a")
 MP3_DIR = Path("/Users/anton/Music/Tidal/mp3")
@@ -97,6 +109,7 @@ TOKEN_FILE = Path("/Users/anton/Documents/tidal_session.json")
 ```
 
 ### New Environment Configuration
+
 ```bash
 TIDAL_CLEANUP_M4A_DIRECTORY=/Users/anton/Music/Tidal/m4a
 TIDAL_CLEANUP_MP3_DIRECTORY=/Users/anton/Music/Tidal/mp3
@@ -107,38 +120,41 @@ TIDAL_CLEANUP_TIDAL_TOKEN_FILE=/Users/anton/Documents/tidal_session.json
 
 All core functionality is preserved:
 
-✅ **Tidal API Integration**: Same authentication and playlist fetching  
-✅ **Track Normalization**: Enhanced version of the original algorithm  
-✅ **File Conversion**: Same FFmpeg-based conversion  
-✅ **Rekordbox XML**: Compatible output format  
-✅ **Interactive Deletion**: Optional confirmation mode  
+✅ **Tidal API Integration**: Same authentication and playlist fetching
+✅ **Track Normalization**: Enhanced version of the original algorithm
+✅ **File Conversion**: Same FFmpeg-based conversion
+✅ **Rekordbox XML**: Compatible output format
+✅ **Interactive Deletion**: Optional confirmation mode
 
 ## New Features
 
-🆕 **Rich CLI**: Beautiful terminal interface with progress bars  
-🆕 **Configurable Settings**: Environment-based configuration  
-🆕 **Better Error Handling**: Detailed error messages and recovery  
-🆕 **Logging**: File and console logging with rotation  
-🆕 **Fuzzy Matching**: Better track matching algorithms  
-🆕 **Type Safety**: Pydantic models for data validation  
+🆕 **Rich CLI**: Beautiful terminal interface with progress bars
+🆕 **Configurable Settings**: Environment-based configuration
+🆕 **Better Error Handling**: Detailed error messages and recovery
+🆕 **Logging**: File and console logging with rotation
+🆕 **Fuzzy Matching**: Better track matching algorithms
+🆕 **Type Safety**: Pydantic models for data validation
 
 ## Troubleshooting Migration
 
 ### Common Issues
 
 1. **Import Errors**
+
    ```bash
    # Make sure you're in the project root
    export PYTHONPATH=$PWD:$PYTHONPATH
    ```
 
 2. **Configuration Not Found**
+
    ```bash
    # Check your .env file exists and has correct values
    cat .env
    ```
 
 3. **Permission Issues**
+
    ```bash
    # Check directory permissions
    ls -la ~/Music/Tidal/

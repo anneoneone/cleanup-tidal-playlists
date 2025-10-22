@@ -1,0 +1,106 @@
+repos:
+  # Pre-commit hooks for general file cleaning
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-xml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-docstring-first
+      - id: debug-statements
+      - id: name-tests-test
+        args: ['--pytest-test-first']
+      - id: requirements-txt-fixer
+
+  # Python code formatting
+  - repo: https://github.com/psf/black
+    rev: 25.9.0
+    hooks:
+      - id: black
+        language_version: python3
+
+  # Import sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 7.0.0
+    hooks:
+      - id: isort
+        args: ["--profile", "black"]
+
+  # Python linting
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8
+        additional_dependencies:
+          - flake8-docstrings
+          - flake8-bugbear
+          - flake8-comprehensions
+          - flake8-simplify
+          - flake8-bandit
+
+  # Type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        additional_dependencies: [pydantic, click, rich, tidalapi, mutagen]
+        files: ^src/
+        exclude: ^tests/
+
+  # Python docstring formatting
+  - repo: https://github.com/PyCQA/docformatter
+    rev: v1.7.7
+    hooks:
+      - id: docformatter
+        args: [--in-place, --wrap-summaries=88, --wrap-descriptions=88]
+
+  # Commit message validation
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.9.1
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.45.0
+    hooks:
+      - id: markdownlint
+        args: ['--fix']
+
+  # Local hooks for custom checks
+  - repo: local
+    hooks:
+      # Check for TODO/FIXME comments in production code
+      - id: check-todos
+        name: Check for TODO/FIXME in production code
+        entry: bash -c 'if grep -r "TODO\|FIXME" src/ --exclude-dir=__pycache__ --exclude="*.pyc" 2>/dev/null; then echo "Found TODO/FIXME in production code"; exit 1; fi'
+        language: system
+        pass_filenames: false
+
+      # Ensure version consistency
+      - id: version-check
+        name: Version consistency check
+        entry: python scripts/check_version.py
+        language: system
+        files: ^(pyproject\.toml|src/tidal_cleanup/__init__\.py)$
+
+# Configuration
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: [check-todos, version-check, commitizen, markdownlint]  # Skip hooks that need local setup
+  submodules: false

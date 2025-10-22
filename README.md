@@ -1,6 +1,6 @@
 # Tidal Playlist Cleanup Tool
 
-A modern, refactored tool for synchronizing Tidal playlists with local audio files, featuring audio conversion and Rekordbox XML generation.
+A modern, professional tool for synchronizing Tidal playlists with local audio files, featuring audio conversion, Rekordbox XML generation, and enterprise-grade development practices.
 
 ## Features
 
@@ -12,6 +12,20 @@ A modern, refactored tool for synchronizing Tidal playlists with local audio fil
 - **Configurable**: Environment-based configuration with sensible defaults
 - **Logging**: Comprehensive logging with file rotation and colored console output
 - **Error Handling**: Robust error handling with detailed error messages
+- **Quality Assurance**: Comprehensive testing, linting, and security scanning
+- **Modern Development**: Professional development workflow with automated quality gates
+
+## Development Standards
+
+This project follows modern Python development best practices:
+
+- **📦 Modern Packaging**: pyproject.toml with PEP 517/518 build system
+- **🔍 Code Quality**: Black, isort, flake8, mypy with strict configuration
+- **🛡️ Security**: Bandit, Safety, and automated vulnerability scanning
+- **🧪 Testing**: pytest with 80%+ coverage requirement
+- **🔄 CI/CD**: GitHub Actions with matrix testing across Python 3.9-3.12
+- **📝 Documentation**: Comprehensive guides and API documentation
+- **🪝 Pre-commit**: 15+ automated quality checks before every commit
 
 ## Architecture
 
@@ -42,22 +56,34 @@ src/tidal_cleanup/
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.9 or higher
 - FFmpeg (for audio conversion)
+- Git (for development)
 
-### Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### Install as Package
+### Quick Install
 
 ```bash
+# Install from source
 pip install -e .
+
+# Or install with development dependencies
+pip install -e ".[dev]"
 ```
 
-## Configuration
+### Development Setup
+
+For contributors and developers:
+
+```bash
+# Clone and setup development environment
+git clone https://github.com/anneoneone/cleanup-tidal-playlists.git
+cd cleanup-tidal-playlists
+make dev-setup
+```
+
+This installs all dependencies, sets up pre-commit hooks, and prepares the development environment.
+
+## Environment Configuration
 
 The application uses environment variables for configuration. Copy the example configuration:
 
@@ -88,13 +114,13 @@ TIDAL_CLEANUP_LOG_LEVEL=INFO
 
 ### Command Line Interface
 
-The new CLI provides several commands:
+The CLI provides several commands for different workflows:
 
 ```bash
-# Show help
+# Show help and available commands
 tidal-cleanup --help
 
-# Show current configuration
+# Show current configuration and status
 tidal-cleanup status
 
 # Synchronize playlists only
@@ -112,11 +138,41 @@ tidal-cleanup full
 # Run with debug logging
 tidal-cleanup --log-level DEBUG full
 
-# Run non-interactively
+# Run non-interactively (no prompts)
 tidal-cleanup --no-interactive sync
+
+# Log to file
+tidal-cleanup --log-file app.log full
+```
+
+### Development Commands
+
+For developers working on the project:
+
+```bash
+# Development setup
+make dev-setup  # Complete development environment setup
+make help  # Show all available commands
+
+# Code quality
+make format  # Format code with Black and isort
+make lint  # Run all linting (flake8, mypy, bandit)
+make security  # Run security checks
+make pr-check  # Full validation before creating PR
+
+# Testing
+make test  # Run tests
+make test-cov  # Run tests with coverage report
+make test-all  # Run tests across all Python versions
+
+# Building and releasing
+make build  # Build package
+make clean  # Clean build artifacts
 ```
 
 ### Python API
+
+### Programmatic Usage
 
 You can also use the services directly in Python:
 
@@ -135,54 +191,59 @@ tidal_service.connect()
 # Get playlists
 playlists = tidal_service.get_playlists()
 print(f"Found {len(playlists)} playlists")
+
+# Process specific playlist
+for playlist in playlists:
+    if playlist.name == "My Favorites":
+        tracks = tidal_service.get_tracks(playlist.id)
+        print(f"Playlist has {len(tracks)} tracks")
+
+        # Convert tracks
+        for track in tracks:
+            file_path = file_service.convert_track(track)
+            print(f"Converted: {file_path}")
 ```
 
-## Migration from Legacy Code
+## Architecture & Migration
 
-The refactored version maintains compatibility with your existing workflow while providing significant improvements:
+The modern version maintains compatibility with your existing workflow while providing significant improvements:
 
-### What's Changed
+### Key Improvements
 
 1. **Modular Architecture**: Code is organized into logical modules
-2. **Configuration Management**: Hardcoded paths replaced with configurable settings
+2. **Configuration Management**: Hard-coded paths replaced with configurable settings
 3. **Error Handling**: Comprehensive error handling throughout
 4. **Logging**: Structured logging with different levels
 5. **CLI Interface**: Rich terminal interface with progress indicators
 6. **Type Safety**: Pydantic models for data validation
-7. **Testing**: Prepared for unit and integration tests
+7. **Testing**: Comprehensive test coverage with pytest
+8. **Quality Assurance**: Pre-commit hooks and CI/CD pipeline
+9. **Security**: Automated vulnerability scanning
+10. **Documentation**: Complete API documentation and examples
 
-### What's Preserved
+### Backward Compatibility
 
 1. **Core Functionality**: All original features are maintained
 2. **File Formats**: Same audio format support
 3. **Tidal Integration**: Compatible with existing Tidal sessions
 4. **Rekordbox Output**: Same XML format for Rekordbox
 
-## Development
+## Advanced Configuration
 
-### Running Tests
+The application uses a configuration file that can be customized:
 
-```bash
-pytest tests/
+```python
+# Default configuration (can be overridden)
+{
+    "tidal_token_file": "tidal_session.json",
+    "output_directory": "./output",
+    "rekordbox_xml_path": "./rekordbox.xml",
+    "log_level": "INFO",
+    "max_workers": 4
+}
 ```
 
-### Code Formatting
-
-```bash
-black src/
-```
-
-### Linting
-
-```bash
-flake8 src/
-```
-
-### Type Checking
-
-```bash
-mypy src/
-```
+You can customize settings by creating a `config.yaml` file or using environment variables.
 
 ## Troubleshooting
 
@@ -201,21 +262,19 @@ Enable debug logging for detailed troubleshooting:
 tidal-cleanup --log-level DEBUG --log-file debug.log full
 ```
 
-## License
-
-MIT License - see LICENSE file for details.
-
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+We welcome contributions! Please read `CONTRIBUTING.md` for guidelines on:
 
-## Acknowledgments
+- Setting up the development environment
+- Running tests and quality checks
+- Submitting pull requests
+- Code style and standards
 
-- Original codebase foundation
-- Tidal API developers
-- FFmpeg project
-- Rich library for beautiful terminal output
+### Security
+
+For security concerns, please see `SECURITY.md` for reporting guidelines.
+
+## License
+
+MIT License — see LICENSE file for details.
