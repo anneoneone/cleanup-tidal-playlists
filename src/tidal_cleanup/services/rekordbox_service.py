@@ -1,7 +1,7 @@
 """Rekordbox XML generation service."""
 
 import logging
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405 - XML generation only
 from pathlib import Path
 from typing import Any, Dict
 

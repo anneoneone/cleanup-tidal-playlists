@@ -1,7 +1,7 @@
 """File operations service for audio file management and conversion."""
 
 import logging
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 from typing import List, Optional, Set
 
@@ -36,6 +36,60 @@ class FileService:
             ".m4a",
             ".mp4",
         )
+
+    def _validate_audio_paths(self, source_path: Path, target_path: Path) -> None:
+        """Validate audio file paths for security.
+
+        Args:
+            source_path: Source audio file path
+            target_path: Target audio file path
+
+        Raises:
+            FileOperationError: If paths are invalid or potentially unsafe
+        """
+        # Ensure paths are absolute and resolved
+        source_path = source_path.resolve()
+        target_path = target_path.resolve()
+
+        # Check that source file exists
+        if not source_path.exists():
+            raise FileOperationError(f"Source file does not exist: {source_path}")
+
+        # Check that source file has a valid audio extension
+        valid_source_exts = (".m4a", ".mp4", ".flac", ".wav", ".aac", ".mp3")
+        if source_path.suffix.lower() not in valid_source_exts:
+            raise FileOperationError(
+                f"Invalid source file extension: {source_path.suffix}"
+            )
+
+        # Check that target has a valid audio extension
+        valid_target_exts = (".mp3", ".flac", ".wav", ".aac")
+        if target_path.suffix.lower() not in valid_target_exts:
+            raise FileOperationError(
+                f"Invalid target file extension: {target_path.suffix}"
+            )
+
+        # Ensure paths don't contain suspicious patterns
+        for path in [source_path, target_path]:
+            path_str = str(path)
+            if any(char in path_str for char in [";", "|", "&", "$", "`"]):
+                raise FileOperationError(f"Path contains suspicious characters: {path}")
+
+    def _validate_quality_parameter(self, quality: str) -> None:
+        """Validate ffmpeg quality parameter.
+
+        Args:
+            quality: Quality parameter (should be 0-9)
+
+        Raises:
+            FileOperationError: If quality parameter is invalid
+        """
+        try:
+            quality_int = int(quality)
+            if not 0 <= quality_int <= 9:
+                raise FileOperationError(f"Quality must be 0-9, got: {quality}")
+        except ValueError:
+            raise FileOperationError(f"Quality must be numeric, got: {quality}")
 
     def scan_directory(self, directory: Path) -> List[FileInfo]:
         """Scan directory for audio files.
@@ -147,6 +201,10 @@ class FileService:
         Returns:
             ConversionJob object with conversion status
         """
+        # Validate inputs for security
+        self._validate_audio_paths(source_path, target_path)
+        self._validate_quality_parameter(quality)
+
         job = ConversionJob(
             source_path=source_path,
             target_path=target_path,
@@ -169,6 +227,7 @@ class FileService:
             job.status = "processing"
 
             # Run ffmpeg conversion
+            # Note: Paths are validated above for security
             cmd = [
                 "ffmpeg",
                 "-nostdin",
@@ -179,7 +238,7 @@ class FileService:
                 str(target_path),
             ]
 
-            subprocess.run(
+            subprocess.run(  # nosec B603
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -192,6 +251,85 @@ class FileService:
                 job.status = "completed"
 
                 # Replace source with empty file (as in original code)
+                self._replace_with_empty_file(source_path)
+            else:
+                job.status = "failed"
+                job.error_message = "Target file was not created"
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"ffmpeg conversion failed: {e.stderr}")
+            job.status = "failed"
+            job.error_message = f"ffmpeg error: {e.stderr}"
+
+        except Exception as e:
+            logger.error(f"Conversion failed: {e}")
+            job.status = "failed"
+            job.error_message = str(e)
+
+        return job
+
+    def convert_audio_with_playlist_logic(
+        self, source_path: Path, target_path: Path, quality: str = "2"
+    ) -> ConversionJob:
+        """Convert audio file with playlist-specific logic.
+
+        This method implements the behavior where:
+        1. Run ffmpeg conversion if target doesn't exist
+        2. Only replace source with empty file if conversion was successful
+
+        Args:
+            source_path: Source audio file
+            target_path: Target audio file
+            quality: Audio quality setting
+
+        Returns:
+            ConversionJob object with conversion status
+        """
+        # Validate inputs for security
+        self._validate_audio_paths(source_path, target_path)
+        self._validate_quality_parameter(quality)
+
+        job = ConversionJob(
+            source_path=source_path,
+            target_path=target_path,
+            source_format=source_path.suffix.lower(),
+            target_format=target_path.suffix.lower(),
+            quality=quality,
+        )
+
+        # Create target directory if needed
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            logger.info(f"Converting {source_path} -> {target_path}")
+            job.status = "processing"
+
+            # Run ffmpeg conversion
+            # Note: Paths are validated above for security
+            cmd = [
+                "ffmpeg",
+                "-nostdin",
+                "-i",
+                str(source_path),
+                "-q:a",
+                quality,
+                str(target_path),
+            ]
+
+            subprocess.run(  # nosec B603
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+
+            # Check if conversion was successful
+            if target_path.exists():
+                logger.info(f"Successfully converted: {source_path}")
+                job.status = "completed"
+
+                # Only replace source with empty file if conversion was successful
                 self._replace_with_empty_file(source_path)
             else:
                 job.status = "failed"
@@ -254,8 +392,26 @@ class FileService:
             relative_path = source_file.relative_to(source_dir)
             target_file = target_dir / relative_path.with_suffix(target_format)
 
+            # Check if file exists in both directories (playlist-based logic)
+            if target_file.exists():
+                logger.info(f"Target file already exists, skipping: {target_file}")
+                # Create a job to track that we skipped this file
+                job = ConversionJob(
+                    source_path=source_file,
+                    target_path=target_file,
+                    source_format=source_file.suffix.lower(),
+                    target_format=target_format,
+                    quality=quality,
+                    status="completed",
+                    was_skipped=True,
+                )
+                jobs.append(job)
+                continue
+
             # Convert file
-            job = self.convert_audio(source_file, target_file, quality)
+            job = self.convert_audio_with_playlist_logic(
+                source_file, target_file, quality
+            )
             jobs.append(job)
 
         completed = len([j for j in jobs if j.status == "completed"])
@@ -264,6 +420,88 @@ class FileService:
         logger.info(f"Conversion complete: {completed} successful, {failed} failed")
 
         return jobs
+
+    def convert_directory_with_playlist_reporting(
+        self,
+        source_dir: Path,
+        target_dir: Path,
+        target_format: str = ".mp3",
+        quality: str = "2",
+    ) -> dict[str, List[ConversionJob]]:
+        """Convert all audio files with playlist-based reporting.
+
+        Args:
+            source_dir: Source directory
+            target_dir: Target directory
+            target_format: Target file format (e.g., ".mp3")
+            quality: Audio quality setting
+
+        Returns:
+            Dictionary mapping playlist names to lists of ConversionJob objects
+        """
+        logger.info(f"Converting files from {source_dir} to {target_dir}")
+
+        playlist_jobs: dict[str, List[ConversionJob]] = {}
+        source_files: list[Path] = []
+
+        # Collect all source files
+        for ext in [".m4a", ".mp4"]:
+            source_files.extend(source_dir.rglob(f"*{ext}"))
+
+        for source_file in source_files:
+            # Calculate relative path and target path
+            relative_path = source_file.relative_to(source_dir)
+            target_file = target_dir / relative_path.with_suffix(target_format)
+
+            # Extract playlist name from relative path
+            # Handle structure like: Playlists/PLAYLIST_NAME/track.m4a
+            if len(relative_path.parts) > 1 and relative_path.parts[0] == "Playlists":
+                playlist_name = relative_path.parts[1]
+            else:
+                # Direct structure like: PLAYLIST_NAME/track.m4a
+                playlist_name = (
+                    relative_path.parts[0] if relative_path.parts else "Unknown"
+                )
+
+            if playlist_name not in playlist_jobs:
+                playlist_jobs[playlist_name] = []
+
+            # Check if file exists in both directories (playlist-based logic)
+            if target_file.exists():
+                logger.info(f"Target file already exists, skipping: {target_file}")
+                # Create a job to track that we skipped this file
+                job = ConversionJob(
+                    source_path=source_file,
+                    target_path=target_file,
+                    source_format=source_file.suffix.lower(),
+                    target_format=target_format,
+                    quality=quality,
+                    status="completed",
+                    was_skipped=True,
+                )
+                playlist_jobs[playlist_name].append(job)
+                continue
+
+            # Convert file
+            job = self.convert_audio_with_playlist_logic(
+                source_file, target_file, quality
+            )
+            playlist_jobs[playlist_name].append(job)
+
+        # Log summary by playlist
+        for playlist_name, jobs in playlist_jobs.items():
+            converted = len(
+                [j for j in jobs if j.status == "completed" and not j.was_skipped]
+            )
+            skipped = len([j for j in jobs if j.was_skipped])
+            failed = len([j for j in jobs if j.status == "failed"])
+
+            logger.info(
+                f"Playlist '{playlist_name}': {converted} converted, "
+                f"{skipped} skipped, {failed} failed"
+            )
+
+        return playlist_jobs
 
     def delete_file(self, file_path: Path, interactive: bool = True) -> bool:
         """Delete a file with optional confirmation.
