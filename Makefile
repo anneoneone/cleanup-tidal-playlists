@@ -44,7 +44,7 @@ clean:
 # Code quality
 lint:
 	flake8 src/ tests/
-	mypy src/
+	mypy --package tidal_cleanup
 	bandit -r src/
 
 format:

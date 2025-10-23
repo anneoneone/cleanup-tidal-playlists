@@ -2,11 +2,11 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
   release:
-    types: [ published ]
+    types: [published]
 
 env:
   PYTHON_VERSION_DEFAULT: "3.11"
@@ -50,7 +50,7 @@ jobs:
         run: flake8 src/ tests/
 
       - name: Run mypy (type checking)
-        run: mypy src/ --config-file=pyproject.toml
+        run: mypy --package tidal_cleanup --config-file=pyproject.toml
 
       - name: Run bandit (security linting)
         run: bandit -r src/ -f json -o bandit-report.json || true
@@ -206,7 +206,7 @@ jobs:
     if: github.event_name == 'release' && github.event.action == 'published'
     environment: release
     permissions:
-      id-token: write  # For trusted publishing
+      id-token: write # For trusted publishing
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
