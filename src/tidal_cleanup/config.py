@@ -3,6 +3,20 @@
 import os
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+
+    # Load .env file from config directory or project root
+    config_env = Path(__file__).parent.parent.parent / "config" / ".env"
+    if config_env.exists():
+        load_dotenv(config_env)
+    else:
+        # Fallback to project root .env
+        load_dotenv()
+except ImportError:
+    # python-dotenv not available, skip loading
+    pass
+
 
 class Config:
     """Application configuration."""
