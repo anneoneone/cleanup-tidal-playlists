@@ -34,6 +34,7 @@ dependencies = [
     "mutagen>=1.45.0",
     "ffmpeg-python>=0.2.0",
     "python-dotenv>=1.0.0",
+    "pyrekordbox>=0.1.0",
 ]
 
 [project.optional-dependencies]
