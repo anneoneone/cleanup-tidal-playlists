@@ -184,13 +184,26 @@ class TidalService:
 
             tracks = []
             for tidal_track in tidal_tracks:
+                # Extract year from album if available
+                year = None
+                if hasattr(tidal_track.album, "year") and tidal_track.album.year:
+                    year = tidal_track.album.year
+                elif (
+                    hasattr(tidal_track.album, "release_date")
+                    and tidal_track.album.release_date
+                ):
+                    release_date = tidal_track.album.release_date
+                    year = release_date.year if release_date else None
+
                 track = Track(
                     title=tidal_track.name,
                     artist=tidal_track.artist.name,
                     album=tidal_track.album.name if tidal_track.album else None,
+                    year=year,
                     duration=tidal_track.duration,
                     tidal_id=str(tidal_track.id),
                 )
+                # Remove this line since year is now in the model
                 tracks.append(track)
 
             logger.info(f"Retrieved {len(tracks)} tracks from playlist {playlist_id}")

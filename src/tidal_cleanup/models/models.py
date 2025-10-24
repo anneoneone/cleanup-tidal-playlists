@@ -13,6 +13,7 @@ class Track(BaseModel):
     title: str
     artist: str
     album: Optional[str] = None
+    year: Optional[int] = None
     genre: Optional[str] = None
     duration: Optional[int] = None  # Duration in seconds
     file_path: Optional[Path] = None
@@ -33,6 +34,54 @@ class Track(BaseModel):
         title = re.sub(r"\s*\([^)]*\)\s*", "", self.title)
         title = re.sub(r"\s*\[[^\]]*\]\s*", "", title)
         return f"{artist.lower().strip()} - {title.lower().strip()}"
+
+    @property
+    def duration_formatted(self) -> str:
+        """Get formatted duration string (mm:ss)."""
+        if self.duration is None:
+            return "Unknown"
+        minutes = self.duration // 60
+        seconds = self.duration % 60
+        return f"{minutes}:{seconds:02d}"
+
+    @property
+    def mix_info(self) -> Optional[str]:
+        """Extract mix/version information from title."""
+        import re
+
+        # Look for mix information in parentheses or brackets
+        mix_patterns = [
+            r"\(([^)]*(?:mix|remix|edit|version|dub|extended|radio|club|original)"
+            r"[^)]*)\)",
+            r"\[([^\]]*(?:mix|remix|edit|version|dub|extended|radio|club|original)"
+            r"[^\]]*)\]",
+        ]
+
+        for pattern in mix_patterns:
+            match = re.search(pattern, self.title, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+
+        return None
+
+    def get_detailed_info(self) -> str:
+        """Get detailed track information for display."""
+        parts = [f"{self.artist} - {self.title}"]
+
+        if self.album:
+            album_str = self.album
+            if self.year:
+                album_str += f" ({self.year})"
+            parts.append(f"Album: {album_str}")
+
+        if self.duration:
+            parts.append(f"Duration: {self.duration_formatted}")
+
+        mix = self.mix_info
+        if mix:
+            parts.append(f"Mix: {mix}")
+
+        return " | ".join(parts)
 
     @field_validator("file_path", mode="before")
     @classmethod

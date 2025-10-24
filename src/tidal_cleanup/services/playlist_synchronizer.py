@@ -3,7 +3,7 @@
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import click
 from rich.console import Console
@@ -14,6 +14,7 @@ from rich.progress import (
     TaskProgressColumn,
     TextColumn,
 )
+from rich.table import Table
 from thefuzz import process
 
 from tidal_cleanup.models.models import ComparisonResult
@@ -127,21 +128,39 @@ class PlaylistProcessor:
 
         # Get Tidal tracks
         tidal_tracks = self.tidal_service.get_playlist_tracks(playlist.tidal_id)
-
-        # Get local tracks
-        local_track_names = self.file_service.get_track_names(m4a_folder)
         tidal_track_names = {track.normalized_name for track in tidal_tracks}
+
+        # Get local tracks with metadata from MP3 folder if it exists
+        local_tracks_with_metadata = []
+        local_track_names = set()
+        mp3_folder = self.config.mp3_directory / "Playlists" / playlist.name
+        if mp3_folder.exists():
+            local_tracks_with_metadata = self.file_service.get_tracks_with_metadata(
+                mp3_folder
+            )
+            # Use normalized names from MP3 tracks for comparison
+            local_track_names = {
+                track.normalized_name for track in local_tracks_with_metadata
+            }
+        else:
+            # Fall back to M4A folder if MP3 folder doesn't exist
+            local_track_names = self.file_service.get_track_names(m4a_folder)
 
         # Compare tracks
         comparison = self.comparison_service.compare_track_sets(
             local_track_names, tidal_track_names, playlist.name
         )
 
-        # Display comparison results
-        self._display_comparison_results(comparison)
+        # Display comparison results with detailed track info
+        self._display_comparison_results(
+            comparison, tidal_tracks, local_tracks_with_metadata
+        )
 
         # Get tracks to delete
         tracks_to_delete = self.comparison_service.get_tracks_to_delete(comparison)
+
+        # Determine which folder to operate on for deletions
+        target_folder = mp3_folder if mp3_folder.exists() else m4a_folder
 
         # Handle track deletion outside of progress context if user input is needed
         if tracks_to_delete and self.deletion_mode == DeletionMode.ASK:
@@ -151,7 +170,7 @@ class PlaylistProcessor:
 
             # Collect deletion decisions
             deletion_decisions = self._collect_deletion_decisions(
-                m4a_folder, tracks_to_delete
+                target_folder, tracks_to_delete
             )
 
             # Resume progress
@@ -162,18 +181,25 @@ class PlaylistProcessor:
             self._execute_deletions(deletion_decisions)
         else:
             # For auto modes, just delete directly
-            self._delete_tracks_auto(m4a_folder, tracks_to_delete)
+            self._delete_tracks_auto(target_folder, tracks_to_delete)
 
         # Also process MP3 folder
         mp3_folder = self.config.mp3_directory / "Playlists" / playlist.name
         if mp3_folder.exists():
             self._sync_mp3_folder(m4a_folder, mp3_folder)
 
-    def _display_comparison_results(self, comparison: ComparisonResult) -> None:
+    def _display_comparison_results(
+        self,
+        comparison: ComparisonResult,
+        tidal_tracks: Optional[List[Any]] = None,
+        local_tracks: Optional[List[Any]] = None,
+    ) -> None:
         """Display comparison results to console.
 
         Args:
             comparison: ComparisonResult object
+            tidal_tracks: List of Track objects from Tidal (optional)
+            local_tracks: List of Track objects from local files with metadata
         """
         # Display main comparison summary
         console.print(
@@ -183,19 +209,144 @@ class PlaylistProcessor:
             f"{comparison.tidal_count} tidal only"
         )
 
-        # Display local-only tracks if any
-        if comparison.local_count > 0:
-            console.print(
-                f"[yellow]Local-only tracks ({comparison.local_count}):[/yellow]"
-            )
-            for track in sorted(comparison.local_only):
-                console.print(f"  • {track}")
+        # Create mappings for detailed info
+        tidal_track_map = self._create_track_map(tidal_tracks)
+        local_track_map = self._create_track_map(local_tracks)
 
-        # Display tidal-only tracks if any
-        if comparison.tidal_count > 0:
-            console.print(f"[cyan]Tidal-only tracks ({comparison.tidal_count}):[/cyan]")
-            for track in sorted(comparison.tidal_only):
-                console.print(f"  • {track}")
+        # Display local-only and tidal-only tracks
+        self._display_local_only_tracks(comparison, local_track_map, local_tracks)
+        self._display_tidal_only_tracks(comparison, tidal_track_map)
+
+    def _create_track_map(self, tracks: Optional[List[Any]]) -> Dict[str, Any]:
+        """Create a mapping from normalized track names to track objects.
+
+        Args:
+            tracks: List of track objects
+
+        Returns:
+            Dictionary mapping normalized names to track objects
+        """
+        track_map = {}
+        if tracks:
+            for track in tracks:
+                track_map[track.normalized_name] = track
+        return track_map
+
+    def _display_local_only_tracks(
+        self,
+        comparison: ComparisonResult,
+        local_track_map: Dict[str, Any],
+        local_tracks: Optional[List[Any]],
+    ) -> None:
+        """Display local-only tracks table.
+
+        Args:
+            comparison: ComparisonResult object
+            local_track_map: Map of normalized names to local track objects
+            local_tracks: List of local track objects
+        """
+        if comparison.local_count == 0:
+            return
+
+        console.print()
+        console.print(f"[yellow]Local-only tracks ({comparison.local_count}):[/yellow]")
+
+        # Create detailed table for local tracks if metadata available
+        local_table = Table(show_header=True, header_style="bold yellow")
+
+        if local_tracks and local_track_map:
+            self._add_detailed_columns(local_table)
+            self._add_local_track_rows(
+                local_table, comparison.local_only, local_track_map
+            )
+        else:
+            # Use simple track name display if no metadata available
+            local_table.add_column("Track Name", style="white")
+            for track_name in sorted(comparison.local_only):
+                local_table.add_row(track_name)
+
+        console.print(local_table)
+
+    def _display_tidal_only_tracks(
+        self, comparison: ComparisonResult, tidal_track_map: Dict[str, Any]
+    ) -> None:
+        """Display tidal-only tracks table.
+
+        Args:
+            comparison: ComparisonResult object
+            tidal_track_map: Map of normalized names to tidal track objects
+        """
+        if comparison.tidal_count == 0:
+            return
+
+        console.print()
+        console.print(f"[cyan]Tidal-only tracks ({comparison.tidal_count}):[/cyan]")
+
+        # Create detailed table for Tidal tracks
+        tidal_table = Table(show_header=True, header_style="bold cyan")
+        self._add_detailed_columns(tidal_table)
+        self._add_tidal_track_rows(tidal_table, comparison.tidal_only, tidal_track_map)
+        console.print(tidal_table)
+
+    def _add_detailed_columns(self, table: Table) -> None:
+        """Add detailed columns to a track table.
+
+        Args:
+            table: Table to add columns to
+        """
+        table.add_column("Title", style="white", no_wrap=False)
+        table.add_column("Artist", style="green", no_wrap=False)
+        table.add_column("Duration", style="blue", justify="center")
+        table.add_column("Album", style="magenta", no_wrap=False)
+        table.add_column("Year", style="yellow", justify="center")
+
+    def _add_local_track_rows(
+        self, table: Table, track_names: Set[str], track_map: Dict[str, Any]
+    ) -> None:
+        """Add local track rows to table.
+
+        Args:
+            table: Table to add rows to
+            track_names: Set of track names to display
+            track_map: Map of normalized names to track objects
+        """
+        for track_name in sorted(track_names):
+            if track_name in track_map:
+                track = track_map[track_name]
+                table.add_row(
+                    track.title,
+                    track.artist,
+                    track.duration_formatted if track.duration else "Unknown",
+                    track.album or "Unknown",
+                    str(track.year) if track.year else "Unknown",
+                )
+            else:
+                # Fallback for tracks without detailed info
+                table.add_row(track_name, "Unknown", "Unknown", "Unknown", "Unknown")
+
+    def _add_tidal_track_rows(
+        self, table: Table, track_names: Set[str], track_map: Dict[str, Any]
+    ) -> None:
+        """Add tidal track rows to table.
+
+        Args:
+            table: Table to add rows to
+            track_names: Set of track names to display
+            track_map: Map of normalized names to track objects
+        """
+        for track_name in sorted(track_names):
+            if track_name in track_map:
+                track = track_map[track_name]
+                table.add_row(
+                    track.title,
+                    track.artist,
+                    track.duration_formatted if track.duration else "Unknown",
+                    track.album or "Unknown",
+                    str(track.year) if track.year else "Unknown",
+                )
+            else:
+                # Fallback for tracks without detailed info
+                table.add_row(track_name, "Unknown", "Unknown", "Unknown", "Unknown")
 
     def _collect_deletion_decisions(
         self, folder: Path, tracks_to_delete: Set[str]
