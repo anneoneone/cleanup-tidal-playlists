@@ -218,9 +218,9 @@ class TidalCleanupApp:
 @click.group()
 @click.option(
     "--log-level",
-    default="INFO",
+    default=None,  # Will use config default if not specified
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
-    help="Set logging level",
+    help="Set logging level (overrides TIDAL_CLEANUP_LOG_LEVEL env var)",
 )
 @click.option("--log-file", type=click.Path(), help="Log to file")
 @click.option("--no-interactive", is_flag=True, help="Disable interactive mode")
@@ -230,8 +230,18 @@ def cli(ctx: Any, log_level: str, log_file: str, no_interactive: bool) -> None:
 
     A modern tool for synchronizing Tidal playlists with local audio files.
     """
+    # Get config to access environment-based defaults
+    config = get_config()
+
+    # Use config log level if not specified via CLI
+    effective_log_level = log_level or config.log_level
+    effective_log_file = log_file or config.log_file
+
     # Set up logging
-    setup_logging(log_level=log_level, log_file=Path(log_file) if log_file else None)
+    setup_logging(
+        log_level=effective_log_level,
+        log_file=Path(effective_log_file) if effective_log_file else None,
+    )
     configure_third_party_loggers()
 
     # Create app instance
