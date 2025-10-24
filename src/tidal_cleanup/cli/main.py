@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import click
 from rich.console import Console
@@ -14,6 +14,8 @@ from rich.progress import (
     TextColumn,
 )
 from rich.table import Table
+
+from tidal_cleanup.models.models import ConversionJob
 
 from ..config import get_config
 from ..services import (
@@ -198,20 +200,14 @@ class TidalCleanupApp:
         """Convert M4A files to MP3."""
         console.print("[bold blue]Converting audio files...[/bold blue]")
 
-        jobs = self.file_service.convert_directory(
+        playlist_jobs = self.file_service.convert_directory_with_playlist_reporting(
             self.config.m4a_directory,
             self.config.mp3_directory,
             target_format=".mp3",
             quality=self.config.ffmpeg_quality,
         )
 
-        successful = len([j for j in jobs if j.status == "completed"])
-        failed = len([j for j in jobs if j.status == "failed"])
-
-        console.print(
-            f"[green]✓[/green] Conversion complete: {successful} successful, "
-            f"{failed} failed"
-        )
+        self.show_result_table(playlist_jobs)
 
     def generate_rekordbox_xml(self) -> bool:
         """Generate Rekordbox XML file.
@@ -253,6 +249,69 @@ class TidalCleanupApp:
             logger.exception("Rekordbox XML generation failed")
             console.print(f"[red]✗[/red] Rekordbox generation failed: {e}")
             return False
+
+    def show_result_table(self, playlist_jobs: dict[str, List[ConversionJob]]) -> None:
+        """Show result of playlist conversion."""
+        total_converted = 0
+        total_skipped = 0
+        total_failed = 0
+
+        console.print("\nConversion complete:")
+
+        # Collect all stats first
+        playlist_stats = {}
+        for playlist_name, jobs in playlist_jobs.items():
+            converted = len(
+                [j for j in jobs if j.status == "completed" and not j.was_skipped]
+            )
+            skipped = len([j for j in jobs if j.was_skipped])
+            failed = len([j for j in jobs if j.status == "failed"])
+
+            playlist_stats[playlist_name] = {
+                "converted": converted,
+                "skipped": skipped,
+                "failed": failed,
+            }
+
+            total_converted += converted
+            total_skipped += skipped
+            total_failed += failed
+
+        # Create a table for proper alignment
+        table = Table(show_header=False, box=None, padding=(0, 1))
+        table.add_column("Playlist", style="bold white", no_wrap=True)
+        table.add_column("Converted", style="green", justify="right")
+        table.add_column("", style="none")  # "converted" text
+        table.add_column("Skipped", style="yellow", justify="right")
+        table.add_column("", style="none")  # "skipped" text
+        table.add_column("Failed", style="red", justify="right")
+        table.add_column("", style="none")  # "failed" text
+
+        # Add playlist rows
+        for playlist_name, stats in playlist_stats.items():
+            table.add_row(
+                playlist_name,
+                str(stats["converted"]),
+                "converted",
+                str(stats["skipped"]),
+                "skipped",
+                str(stats["failed"]),
+                "failed",
+            )
+
+        # Add overall summary row
+        table.add_row("", "", "", "", "", "", "")  # Empty row for spacing
+        table.add_row(
+            "[bold cyan]Overall Summary[/bold cyan]",
+            f"[green]{total_converted}[/green]",
+            "converted",
+            f"[yellow]{total_skipped}[/yellow]",
+            "skipped",
+            f"[red]{total_failed}[/red]",
+            "failed",
+        )
+
+        console.print(table)
 
     def show_status(self) -> None:
         """Show application status and configuration."""

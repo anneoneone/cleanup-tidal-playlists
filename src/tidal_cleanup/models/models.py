@@ -145,6 +145,7 @@ class ConversionJob(BaseModel):
     target_format: str
     quality: str = "2"
     status: str = "pending"  # pending, processing, completed, failed
+    was_skipped: bool = False  # True if conversion was skipped
     error_message: Optional[str] = None
     created_at: datetime = datetime.now()
     completed_at: Optional[datetime] = None
