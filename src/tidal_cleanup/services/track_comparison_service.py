@@ -120,13 +120,6 @@ class TrackComparisonService:
             matched=matched,
         )
 
-        logger.info(
-            f"Comparison for '{playlist_name}': "
-            f"{result.matched_count} matched, "
-            f"{result.local_count} local only, "
-            f"{result.tidal_count} tidal only"
-        )
-
         return result
 
     def find_best_match(

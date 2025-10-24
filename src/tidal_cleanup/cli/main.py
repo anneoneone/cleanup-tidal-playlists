@@ -12,6 +12,7 @@ from tidal_cleanup.models.models import ConversionJob
 
 from ..config import get_config
 from ..services import (
+    DeletionMode,
     FileService,
     PlaylistSynchronizer,
     RekordboxGenerationError,
@@ -49,19 +50,35 @@ class TidalCleanupApp:
 
         # Initialize playlist synchronizer
         self.playlist_synchronizer = PlaylistSynchronizer(
-            self.tidal_service, self.file_service, self.comparison_service, self.config
+            self.tidal_service,
+            self.file_service,
+            self.comparison_service,
+            self.config,
         )
 
-    def sync_playlists(self, playlist_filter: Optional[str] = None) -> bool:
+    def sync_playlists(
+        self,
+        playlist_filter: Optional[str] = None,
+        deletion_mode: DeletionMode = DeletionMode.ASK,
+    ) -> bool:
         """Synchronize Tidal playlists with local files.
 
         Args:
             playlist_filter: Optional playlist name to filter by (uses fuzzy matching)
+            deletion_mode: Mode for handling track deletion
 
         Returns:
             True if successful, False otherwise
         """
-        return self.playlist_synchronizer.sync_playlists(playlist_filter)
+        # Create a new synchronizer with the specified deletion mode
+        synchronizer = PlaylistSynchronizer(
+            self.tidal_service,
+            self.file_service,
+            self.comparison_service,
+            self.config,
+            deletion_mode,
+        )
+        return synchronizer.sync_playlists(playlist_filter)
 
     def _convert_files(self) -> None:
         """Convert M4A files to MP3."""
@@ -230,10 +247,39 @@ def cli(ctx: Any, log_level: str, log_file: str, no_interactive: bool) -> None:
 @click.option(
     "--playlist", "-p", help="Sync only a specific playlist (uses fuzzy matching)"
 )
+@click.option(
+    "--auto-delete",
+    is_flag=True,
+    help="Automatically delete local tracks not in Tidal playlist without asking",
+)
+@click.option(
+    "--auto-skip",
+    is_flag=True,
+    help="Skip deletion of local tracks not in Tidal playlist without asking",
+)
 @click.pass_obj
-def sync(app: TidalCleanupApp, playlist: Optional[str]) -> None:
+def sync(
+    app: TidalCleanupApp,
+    playlist: Optional[str],
+    auto_delete: bool,
+    auto_skip: bool,
+) -> None:
     """Synchronize Tidal playlists with local files."""
-    success = app.sync_playlists(playlist_filter=playlist)
+    # Validate conflicting options
+    if auto_delete and auto_skip:
+        raise click.ClickException(
+            "Cannot use both --auto-delete and --auto-skip at the same time"
+        )
+
+    # Determine deletion mode
+    if auto_delete:
+        deletion_mode = DeletionMode.AUTO_DELETE
+    elif auto_skip:
+        deletion_mode = DeletionMode.AUTO_SKIP
+    else:
+        deletion_mode = DeletionMode.ASK
+
+    success = app.sync_playlists(playlist_filter=playlist, deletion_mode=deletion_mode)
     if not success:
         raise click.ClickException("Synchronization failed")
 

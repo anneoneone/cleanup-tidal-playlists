@@ -1,9 +1,11 @@
 """Playlist synchronization service with object-oriented design."""
 
 import logging
+from enum import Enum
 from pathlib import Path
 from typing import Any, List, Optional, Set
 
+import click
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -14,12 +16,22 @@ from rich.progress import (
 )
 from thefuzz import process
 
+from tidal_cleanup.models.models import ComparisonResult
+
 from .file_service import FileService
 from .tidal_service import TidalConnectionError, TidalService
 from .track_comparison_service import TrackComparisonService
 
 console = Console()
 logger = logging.getLogger(__name__)
+
+
+class DeletionMode(Enum):
+    """Modes for handling track deletion."""
+
+    ASK = "ask"  # Ask user for each file (default)
+    AUTO_DELETE = "auto_delete"  # Delete without asking
+    AUTO_SKIP = "auto_skip"  # Skip deletion without asking
 
 
 class PlaylistFilter:
@@ -80,6 +92,7 @@ class PlaylistProcessor:
         file_service: FileService,
         comparison_service: TrackComparisonService,
         config: Any,
+        deletion_mode: DeletionMode = DeletionMode.ASK,
     ):
         """Initialize playlist processor.
 
@@ -88,11 +101,13 @@ class PlaylistProcessor:
             file_service: Service for file operations
             comparison_service: Service for track comparison
             config: Application configuration
+            deletion_mode: Mode for handling track deletion
         """
         self.tidal_service = tidal_service
         self.file_service = file_service
         self.comparison_service = comparison_service
         self.config = config
+        self.deletion_mode = deletion_mode
 
     def process_playlist(self, playlist: Any, progress: Any, task: Any) -> None:
         """Process a single playlist.
@@ -122,24 +137,80 @@ class PlaylistProcessor:
             local_track_names, tidal_track_names, playlist.name
         )
 
+        # Display comparison results
+        self._display_comparison_results(comparison)
+
         # Get tracks to delete
         tracks_to_delete = self.comparison_service.get_tracks_to_delete(comparison)
 
-        # Delete unmatched tracks
-        self._delete_tracks(m4a_folder, tracks_to_delete)
+        # Handle track deletion outside of progress context if user input is needed
+        if tracks_to_delete and self.deletion_mode == DeletionMode.ASK:
+            # Pause progress for user input
+            progress.stop()
+            console.print()  # Add a blank line for better readability
+
+            # Collect deletion decisions
+            deletion_decisions = self._collect_deletion_decisions(
+                m4a_folder, tracks_to_delete
+            )
+
+            # Resume progress
+            progress.start()
+            progress.update(task, description=f"Deleting files from {playlist.name}...")
+
+            # Execute deletions
+            self._execute_deletions(deletion_decisions)
+        else:
+            # For auto modes, just delete directly
+            self._delete_tracks_auto(m4a_folder, tracks_to_delete)
 
         # Also process MP3 folder
         mp3_folder = self.config.mp3_directory / "Playlists" / playlist.name
         if mp3_folder.exists():
             self._sync_mp3_folder(m4a_folder, mp3_folder)
 
-    def _delete_tracks(self, folder: Path, tracks_to_delete: Set[str]) -> None:
-        """Delete tracks that are not in Tidal playlist.
+    def _display_comparison_results(self, comparison: ComparisonResult) -> None:
+        """Display comparison results to console.
+
+        Args:
+            comparison: ComparisonResult object
+        """
+        # Display main comparison summary
+        console.print(
+            f"Comparison for '{comparison.playlist_name}': "
+            f"{comparison.matched_count} matched, "
+            f"{comparison.local_count} local only, "
+            f"{comparison.tidal_count} tidal only"
+        )
+
+        # Display local-only tracks if any
+        if comparison.local_count > 0:
+            console.print(
+                f"[yellow]Local-only tracks ({comparison.local_count}):[/yellow]"
+            )
+            for track in sorted(comparison.local_only):
+                console.print(f"  • {track}")
+
+        # Display tidal-only tracks if any
+        if comparison.tidal_count > 0:
+            console.print(f"[cyan]Tidal-only tracks ({comparison.tidal_count}):[/cyan]")
+            for track in sorted(comparison.tidal_only):
+                console.print(f"  • {track}")
+
+    def _collect_deletion_decisions(
+        self, folder: Path, tracks_to_delete: Set[str]
+    ) -> List[Path]:
+        """Collect user decisions about which files to delete.
 
         Args:
             folder: Folder containing tracks
             tracks_to_delete: Set of track names to delete
+
+        Returns:
+            List of file paths that should be deleted
         """
+        files_to_delete = []
+
         for track_name in tracks_to_delete:
             # Find matching files with fuzzy search
             match_result = self.comparison_service.find_best_match(
@@ -159,12 +230,101 @@ class PlaylistProcessor:
                         file_path.stem == matched_file_stem
                         and file_path.suffix.lower() in self.config.audio_extensions
                     ):
-                        try:
-                            file_path.unlink()
-                            logger.info(f"Deleted: {file_path}")
-                        except OSError as e:
-                            logger.error(f"Failed to delete {file_path}: {e}")
+                        should_delete = click.confirm(
+                            f"Delete '{file_path.name}' (not in Tidal playlist)?",
+                            default=False,
+                        )
+                        if should_delete:
+                            files_to_delete.append(file_path)
                         break
+
+        return files_to_delete
+
+    def _execute_deletions(self, files_to_delete: List[Path]) -> None:
+        """Execute file deletions.
+
+        Args:
+            files_to_delete: List of file paths to delete
+        """
+        for file_path in files_to_delete:
+            try:
+                file_path.unlink()
+                console.print(f"[red]Deleted:[/red] {file_path.name}")
+            except OSError as e:
+                logger.error(f"Failed to delete {file_path}: {e}")
+                console.print(f"[red]Error deleting {file_path.name}: {e}[/red]")
+
+    def _delete_tracks_auto(self, folder: Path, tracks_to_delete: Set[str]) -> None:
+        """Delete tracks automatically based on deletion mode.
+
+        Args:
+            folder: Folder containing tracks
+            tracks_to_delete: Set of track names to delete
+        """
+        if not tracks_to_delete:
+            return
+
+        if self.deletion_mode == DeletionMode.AUTO_SKIP:
+            console.print(
+                f"[yellow]Skipping deletion of {len(tracks_to_delete)} tracks[/yellow]"
+            )
+            return
+
+        for track_name in tracks_to_delete:
+            # Find matching files with fuzzy search
+            match_result = self.comparison_service.find_best_match(
+                track_name,
+                [
+                    f.stem
+                    for f in folder.rglob("*")
+                    if f.suffix.lower() in self.config.audio_extensions
+                ],
+            )
+
+            if match_result:
+                matched_file_stem, score = match_result
+                # Find the actual file with this stem
+                for file_path in folder.rglob("*"):
+                    if (
+                        file_path.stem == matched_file_stem
+                        and file_path.suffix.lower() in self.config.audio_extensions
+                    ):
+                        if self.deletion_mode == DeletionMode.AUTO_DELETE:
+                            try:
+                                file_path.unlink()
+                                console.print(f"[red]Deleted:[/red] {file_path.name}")
+                            except OSError as e:
+                                logger.error(f"Failed to delete {file_path}: {e}")
+                                console.print(
+                                    f"[red]Error deleting {file_path.name}: {e}[/red]"
+                                )
+                        break
+
+    def _should_delete_file(self, file_path: Path, progress: Any) -> bool:
+        """Determine if a file should be deleted based on deletion mode.
+
+        Args:
+            file_path: Path to the file to potentially delete
+            progress: Rich progress instance to pause during user input
+
+        Returns:
+            True if file should be deleted, False otherwise
+        """
+        if self.deletion_mode == DeletionMode.AUTO_DELETE:
+            return True
+        elif self.deletion_mode == DeletionMode.AUTO_SKIP:
+            return False
+        else:  # DeletionMode.ASK
+            # Pause the progress display for user input
+            progress.stop()
+            try:
+                result = click.confirm(
+                    f"Delete '{file_path.name}' (not in Tidal playlist)?", default=False
+                )
+                return result
+            finally:
+                # Resume the progress display
+                progress.start()
 
     def _sync_mp3_folder(self, m4a_folder: Path, mp3_folder: Path) -> None:
         """Synchronize MP3 folder with M4A folder.
@@ -198,6 +358,7 @@ class PlaylistSynchronizer:
         file_service: FileService,
         comparison_service: TrackComparisonService,
         config: Any,
+        deletion_mode: DeletionMode = DeletionMode.ASK,
     ):
         """Initialize playlist synchronizer.
 
@@ -206,13 +367,15 @@ class PlaylistSynchronizer:
             file_service: Service for file operations
             comparison_service: Service for track comparison
             config: Application configuration
+            deletion_mode: Mode for handling track deletion
         """
         self.tidal_service = tidal_service
         self.config = config
+        self.deletion_mode = deletion_mode
 
         self.playlist_filter = PlaylistFilter()
         self.playlist_processor = PlaylistProcessor(
-            tidal_service, file_service, comparison_service, config
+            tidal_service, file_service, comparison_service, config, deletion_mode
         )
 
     def sync_playlists(self, playlist_filter: Optional[str] = None) -> bool:
