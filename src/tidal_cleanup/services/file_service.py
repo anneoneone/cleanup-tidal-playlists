@@ -188,6 +188,51 @@ class FileService:
             logger.error(f"Failed to get track names from {directory}: {e}")
             return set()
 
+    def get_tracks_with_metadata(self, directory: Path) -> List[Track]:
+        """Get Track objects with metadata from directory.
+
+        Args:
+            directory: Directory to scan
+
+        Returns:
+            List of Track objects with metadata
+        """
+        tracks = []
+        try:
+            file_infos = self.scan_directory(directory)
+            for file_info in file_infos:
+                track = self.create_track_from_file(file_info)
+                if track:
+                    tracks.append(track)
+                else:
+                    # Create a basic track from filename if no metadata available
+                    # Parse filename like "artist - title.ext"
+                    stem = file_info.stem
+                    if " - " in stem:
+                        parts = stem.split(" - ", 1)
+                        artist = parts[0].strip()
+                        title = parts[1].strip()
+                    else:
+                        artist = "Unknown Artist"
+                        title = stem
+
+                    track = Track(
+                        title=title,
+                        artist=artist,
+                        album=None,
+                        year=None,
+                        duration=file_info.duration,
+                        file_path=file_info.path,
+                        file_size=file_info.size,
+                        file_format=file_info.format,
+                    )
+                    tracks.append(track)
+
+            return tracks
+        except Exception as e:
+            logger.error(f"Failed to get tracks with metadata from {directory}: {e}")
+            return []
+
     def convert_audio(
         self, source_path: Path, target_path: Path, quality: str = "2"
     ) -> ConversionJob:
