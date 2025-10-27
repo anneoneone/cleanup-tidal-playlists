@@ -5,7 +5,7 @@ import subprocess  # nosec B404
 from pathlib import Path
 from typing import List, Optional, Set
 
-from mutagen import File as MutagenFile  # type: ignore[attr-defined]
+from mutagen import File as MutagenFile
 from mutagen.mp3 import HeaderNotFoundError
 
 from ..models.models import ConversionJob, FileInfo, Track
