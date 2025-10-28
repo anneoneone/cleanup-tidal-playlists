@@ -131,7 +131,9 @@ mypy_path = "src"
 [[tool.mypy.overrides]]
 module = [
     "tidalapi.*",
+    "tidalapi",
     "mutagen.*",
+    "mutagen",
     "ffmpeg.*",
     "thefuzz.*",
     "dotenv.*",
@@ -156,6 +158,8 @@ disallow_subclassing_any = false
 [[tool.mypy.overrides]]
 module = ["src.tidal_cleanup.services.*", "tidal_cleanup.services.*"]
 disallow_untyped_calls = false
+# Suppress attr-defined errors for third-party library imports
+disable_error_code = ["attr-defined"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
