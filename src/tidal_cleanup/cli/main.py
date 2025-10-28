@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import click
 from rich.console import Console
@@ -24,18 +24,6 @@ from ..utils.logging_config import configure_third_party_loggers, setup_logging
 
 console = Console()
 logger = logging.getLogger(__name__)
-
-# Try to import and register the sync-playlist command
-sync_playlist: Optional[click.Command]
-try:
-    from .rekordbox import sync_playlist
-
-    SYNC_PLAYLIST_AVAILABLE = True
-    logger.debug("sync-playlist command imported successfully")
-except ImportError as e:
-    logger.debug(f"sync-playlist command not available: {e}")
-    SYNC_PLAYLIST_AVAILABLE = False
-    sync_playlist = None
 
 
 class TidalCleanupApp:
@@ -257,43 +245,174 @@ def cli(ctx: Any, log_level: str, log_file: str, no_interactive: bool) -> None:
 
 @cli.command()
 @click.option(
-    "--playlist", "-p", help="Sync only a specific playlist (uses fuzzy matching)"
+    "--playlist",
+    "-p",
+    help="Sync only a specific playlist (exact folder name in MP3 directory)",
 )
 @click.option(
-    "--auto-delete",
-    is_flag=True,
-    help="Automatically delete local tracks not in Tidal playlist without asking",
-)
-@click.option(
-    "--auto-skip",
-    is_flag=True,
-    help="Skip deletion of local tracks not in Tidal playlist without asking",
+    "--emoji-config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to emoji-to-MyTag mapping config (uses default if not specified)",
 )
 @click.pass_obj
+def _sync_all_playlists(
+    rekordbox_service: RekordboxService,
+    playlists_dir: Path,
+    emoji_config: Optional[Path],
+) -> None:
+    """Sync all playlists in the playlists directory."""
+    console.print("\n[bold cyan]🎵 Syncing all playlists to Rekordbox[/bold cyan]")
+    console.print("=" * 60)
+
+    if not playlists_dir.exists():
+        console.print(f"[red]❌ Playlists directory not found: {playlists_dir}[/red]")
+        raise click.Abort()
+
+    # Get all playlist folders
+    playlist_folders = [d for d in playlists_dir.iterdir() if d.is_dir()]
+
+    if not playlist_folders:
+        console.print("[yellow]⚠️ No playlist folders found[/yellow]")
+        return
+
+    console.print(f"\n[bold]Found {len(playlist_folders)} playlists[/bold]\n")
+
+    # Pre-create all genre/party folders
+    console.print("[cyan]📁 Creating genre/party folders...[/cyan]")
+    rekordbox_service.ensure_genre_party_folders(emoji_config_path=emoji_config)
+    console.print("[green]✓ Folders ready[/green]\n")
+
+    results = []
+    for playlist_folder in sorted(playlist_folders):
+        playlist_name = playlist_folder.name
+        console.print(f"\n[cyan]Syncing: {playlist_name}[/cyan]")
+
+        try:
+            result = rekordbox_service.sync_playlist_with_mytags(
+                playlist_name, emoji_config_path=emoji_config
+            )
+            results.append(result)
+            _display_sync_result(result, compact=True)
+        except Exception as e:
+            console.print(f"[red]❌ Error: {e}[/red]")
+            logger.error(f"Failed to sync playlist {playlist_name}: {e}")
+
+    # Display summary
+    _display_batch_summary(results)
+
+
+def _display_batch_summary(results: List[Dict[str, Any]]) -> None:
+    """Display summary of batch sync operation."""
+    console.print("\n[bold green]📊 Sync Summary[/bold green]")
+    console.print("=" * 60)
+
+    total_added = sum(r["tracks_added"] for r in results)
+    total_removed = sum(r["tracks_removed"] for r in results)
+    deleted_count = sum(1 for r in results if r.get("playlist_deleted"))
+
+    summary_table = Table(show_header=False)
+    summary_table.add_column("Metric", style="cyan")
+    summary_table.add_column("Value", style="green", justify="right")
+
+    summary_table.add_row("Total Playlists", str(len(results)))
+    summary_table.add_row("Total Tracks Added", str(total_added))
+    summary_table.add_row("Total Tracks Removed", str(total_removed))
+    if deleted_count > 0:
+        summary_table.add_row(
+            "Playlists Deleted (empty)",
+            f"[yellow]{deleted_count}[/yellow]",
+        )
+
+    console.print(summary_table)
+    console.print()
+
+
 def sync(
     app: TidalCleanupApp,
     playlist: Optional[str],
-    auto_delete: bool,
-    auto_skip: bool,
+    emoji_config: Optional[Path],
 ) -> None:
-    """Synchronize Tidal playlists with local files."""
-    # Validate conflicting options
-    if auto_delete and auto_skip:
-        raise click.ClickException(
-            "Cannot use both --auto-delete and --auto-skip at the same time"
+    """Synchronize MP3 playlists to Rekordbox with emoji-based MyTag management.
+
+    By default, syncs ALL playlists found in your MP3 Playlists folder.
+    Use --playlist to sync only a specific playlist.
+
+    Playlist Name Pattern: "NAME [GENRE/PARTY-EMOJI] [ENERGY-EMOJI] [STATUS-EMOJI]"
+
+    Examples:
+      - "House Italo R 🇮🇹❓" → Genre: House Italo, Status: Recherche
+      - "Jazz D 🎷💾" → Genre: Jazz, Status: Archived
+
+    Features:
+      - Adds/removes tracks based on MP3 folder contents
+      - Applies MyTags from emoji patterns in playlist names
+      - Handles tracks in multiple playlists (accumulates tags)
+      - Removes playlist-specific tags when tracks are removed
+      - Deletes empty playlists automatically
+    """
+    try:
+        rekordbox_service = RekordboxService(app.config)
+
+        if playlist:
+            # Sync single playlist
+            console.print(f"\n[bold cyan]🎵 Syncing playlist: {playlist}[/bold cyan]")
+            console.print("=" * 60)
+
+            result = rekordbox_service.sync_playlist_with_mytags(
+                playlist, emoji_config_path=emoji_config
+            )
+            _display_sync_result(result)
+        else:
+            # Sync all playlists
+            playlists_dir = app.config.mp3_directory / "Playlists"
+            _sync_all_playlists(rekordbox_service, playlists_dir, emoji_config)
+
+    except FileNotFoundError as e:
+        logger.error(f"❌ {e}")
+        raise click.Abort()
+    except Exception as e:
+        logger.error(f"❌ Error syncing: {e}")
+        import traceback
+
+        traceback.print_exc()
+        raise click.Abort()
+
+
+def _display_sync_result(result: dict[str, Any], compact: bool = False) -> None:
+    """Display sync results."""
+    if compact:
+        # Compact display for batch sync
+        status = "✅"
+        if result.get("playlist_deleted"):
+            status = "⚠️ (deleted)"
+
+        console.print(
+            f"  {status} Added: {result['tracks_added']}, "
+            f"Removed: {result['tracks_removed']}, "
+            f"Final: {result['final_track_count']} tracks"
         )
-
-    # Determine deletion mode
-    if auto_delete:
-        deletion_mode = DeletionMode.AUTO_DELETE
-    elif auto_skip:
-        deletion_mode = DeletionMode.AUTO_SKIP
     else:
-        deletion_mode = DeletionMode.ASK
+        # Full display for single sync
+        console.print("\n[bold green]✅ Sync completed successfully![/bold green]\n")
 
-    success = app.sync_playlists(playlist_filter=playlist, deletion_mode=deletion_mode)
-    if not success:
-        raise click.ClickException("Synchronization failed")
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Metric", style="cyan", width=30)
+        table.add_column("Value", style="green", justify="right")
+
+        table.add_row("Playlist Name", result["playlist_name"])
+        table.add_row("MP3 Tracks", str(result["mp3_tracks_count"]))
+        table.add_row("Tracks Before", str(result["rekordbox_tracks_before"]))
+        table.add_row("Tracks Added", str(result["tracks_added"]))
+        table.add_row("Tracks Removed", str(result["tracks_removed"]))
+
+        if result.get("playlist_deleted"):
+            table.add_row("Status", "[yellow]⚠️ Playlist deleted (empty)[/yellow]")
+            table.add_row("Final Track Count", "0")
+        else:
+            table.add_row("Final Track Count", str(result["final_track_count"]))
+
+        console.print(table)
+        console.print()
 
 
 @cli.command()
@@ -334,11 +453,6 @@ def full(app: TidalCleanupApp) -> None:
         raise click.ClickException("Rekordbox XML generation failed")
 
     console.print("[bold green]✓ Full workflow completed successfully![/bold green]")
-
-
-# Register the sync-playlist command if available
-if sync_playlist is not None:
-    cli.add_command(sync_playlist, name="sync-playlist")
 
 
 if __name__ == "__main__":

@@ -51,6 +51,54 @@ class RekordboxPlaylistSynchronizer:
         # Supported audio extensions
         self.audio_extensions = {".mp3", ".flac", ".wav", ".aac", ".m4a"}
 
+        # Cache for folders (folder_name -> folder_id)
+        self._folder_cache: Dict[str, str] = {}
+
+    def ensure_folders_exist(self) -> None:
+        """Pre-create all genre/party folders by scanning all playlists.
+
+        This should be called once before syncing multiple playlists to avoid redundant
+        folder creation checks during each playlist sync.
+        """
+        logger.info("Pre-creating genre/party folders...")
+
+        # Scan all playlist folders
+        if not self.mp3_playlists_root.exists():
+            logger.warning(
+                f"MP3 playlists root does not exist: {self.mp3_playlists_root}"
+            )
+            return
+
+        all_folder_names: Set[str] = set()
+
+        # Iterate through all playlist directories
+        for playlist_dir in self.mp3_playlists_root.iterdir():
+            if not playlist_dir.is_dir():
+                continue
+
+            try:
+                # Parse the playlist name
+                metadata = self.name_parser.parse_playlist_name(playlist_dir.name)
+
+                # Collect all genre and party tags
+                all_folder_names.update(metadata.genre_tags)
+                all_folder_names.update(metadata.party_tags)
+
+            except Exception as e:
+                logger.debug(f"Could not parse playlist '{playlist_dir.name}': {e}")
+                continue
+
+        # Create all folders
+        if all_folder_names:
+            logger.info(f"Creating {len(all_folder_names)} genre/party folders...")
+            for folder_name in sorted(all_folder_names):
+                folder = self._get_or_create_folder(folder_name)
+                self._folder_cache[folder_name] = str(folder.ID)
+                logger.info(f"  ✓ Folder '{folder_name}' (ID: {folder.ID})")
+
+        self.db.commit()
+        logger.info(f"Pre-created {len(all_folder_names)} folders")
+
     def sync_playlist(self, playlist_name: str) -> Dict[str, Any]:
         """Synchronize a playlist from MP3 folder to Rekordbox database.
 
@@ -80,14 +128,19 @@ class RekordboxPlaylistSynchronizer:
         # Step 2: Parse playlist name for metadata
         playlist_metadata = self.name_parser.parse_playlist_name(playlist_name)
 
-        # Step 3: Get MP3 tracks
+        # Step 3: Determine parent folder based on genre/party tags
+        parent_folder_id = self._get_folder_for_playlist(playlist_metadata)
+
+        # Step 4: Get MP3 tracks
         mp3_tracks = self._scan_mp3_folder(mp3_playlist_dir)
         logger.info(f"Found {len(mp3_tracks)} tracks in MP3 folder")
 
-        # Step 4: Get or create Rekordbox playlist
-        rekordbox_playlist = self._get_or_create_playlist(playlist_name)
+        # Step 5: Get or create Rekordbox playlist (in appropriate folder)
+        rekordbox_playlist = self._get_or_create_playlist(
+            playlist_name, parent_folder_id
+        )
 
-        # Step 5: Get current Rekordbox tracks
+        # Step 6: Get current Rekordbox tracks
         rekordbox_tracks = self._get_playlist_tracks(rekordbox_playlist)
         logger.info(f"Found {len(rekordbox_tracks)} tracks in Rekordbox playlist")
 
@@ -410,25 +463,124 @@ class RekordboxPlaylistSynchronizer:
 
         return tracks
 
-    def _get_or_create_playlist(self, name: str) -> Any:
+    def _get_folder_for_playlist(self, metadata: PlaylistMetadata) -> Optional[str]:
+        """Determine which folder a playlist should belong to based on metadata.
+
+        Uses first available tag (genre takes priority over party).
+        Folders should be pre-created using ensure_folders_exist().
+
+        Args:
+            metadata: Playlist metadata with parsed tags
+
+        Returns:
+            Folder ID or None for root folder
+        """
+        # Determine folder name from tags
+        folder_name = None
+
+        # Prioritize genre tags, then party tags
+        if metadata.genre_tags:
+            folder_name = sorted(metadata.genre_tags)[0]  # Use first alphabetically
+        elif metadata.party_tags:
+            folder_name = sorted(metadata.party_tags)[0]
+
+        # If no genre/party tag, place in root
+        if not folder_name:
+            logger.debug(
+                f"No genre/party tags for '{metadata.playlist_name}', using root"
+            )
+            return None
+
+        # Check cache first
+        if folder_name in self._folder_cache:
+            folder_id = self._folder_cache[folder_name]
+            logger.debug(
+                f"Using cached folder '{folder_name}' (ID: {folder_id}) "
+                f"for playlist '{metadata.playlist_name}'"
+            )
+            return folder_id
+
+        # Fallback: create folder if not in cache
+        folder = self._get_or_create_folder(folder_name)
+        folder_id = str(folder.ID)
+        self._folder_cache[folder_name] = folder_id
+
+        logger.info(
+            f"Playlist '{metadata.playlist_name}' will be placed in "
+            f"folder '{folder_name}' (ID: {folder_id})"
+        )
+        return folder_id
+
+    def _get_or_create_folder(self, folder_name: str) -> Any:
+        """Get existing folder or create new one.
+
+        Args:
+            folder_name: Folder name
+
+        Returns:
+            DjmdPlaylist instance with Attribute=1 (folder)
+        """
+        # Try to find existing folder
+        folder = self.db.get_playlist(Name=folder_name, Attribute=1).first()
+
+        if folder:
+            logger.debug(f"Found existing folder: {folder_name}")
+            return folder
+
+        # Create new folder
+        logger.info(f"Creating new folder: {folder_name}")
+        folder = self.db.create_playlist_folder(folder_name)
+        self.db.flush()
+
+        return folder
+
+    def _get_or_create_playlist(
+        self, name: str, parent_folder_id: Optional[str] = None
+    ) -> Any:
         """Get existing playlist or create new one.
 
         Args:
             name: Playlist name
+            parent_folder_id: Optional parent folder ID (None = root)
 
         Returns:
             DjmdPlaylist instance
         """
         # Try to find existing playlist
-        playlist = self.db.get_playlist(Name=name).first()
+        query = self.db.get_playlist(Name=name)
+
+        # Filter by parent if specified
+        if parent_folder_id:
+            playlist = query.filter(
+                db6.DjmdPlaylist.ParentID == parent_folder_id
+            ).first()
+        else:
+            playlist = query.first()
 
         if playlist:
-            logger.info(f"Found existing playlist: {name}")
+            # If found but in wrong parent, move it
+            if parent_folder_id and playlist.ParentID != parent_folder_id:
+                logger.info(
+                    f"Moving playlist '{name}' to folder "
+                    f"(ParentID: {parent_folder_id})"
+                )
+                self.db.move_playlist(playlist, parent=parent_folder_id)
+                self.db.flush()
+            else:
+                logger.info(f"Found existing playlist: {name}")
             return playlist
 
-        # Create new playlist
-        logger.info(f"Creating new playlist: {name}")
-        playlist = self.db.create_playlist(name)
+        # Create new playlist in specified folder
+        if parent_folder_id:
+            logger.info(
+                f"Creating new playlist '{name}' in folder "
+                f"(ParentID: {parent_folder_id})"
+            )
+            playlist = self.db.create_playlist(name, parent=parent_folder_id)
+        else:
+            logger.info(f"Creating new playlist: {name}")
+            playlist = self.db.create_playlist(name)
+
         self.db.flush()
 
         return playlist

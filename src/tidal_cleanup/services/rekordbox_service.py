@@ -122,6 +122,54 @@ class RekordboxService:
         logger.info(f"Playlist sync completed: {result}")
         return result
 
+    def ensure_genre_party_folders(
+        self, emoji_config_path: Optional[Path] = None
+    ) -> None:
+        """Pre-create all genre/party folders by scanning playlist names.
+
+        This should be called before syncing multiple playlists to avoid
+        redundant folder creation during each sync.
+
+        Args:
+            emoji_config_path: Path to emoji mapping config (uses default if None)
+        """
+        if not self.db:
+            raise RuntimeError("Database connection not available")
+
+        if not self.config:
+            raise RuntimeError("Config not available")
+
+        # Default emoji config path
+        if emoji_config_path is None:
+            service_dir = Path(__file__).resolve().parent
+            tidal_cleanup_dir = service_dir.parent
+            src_dir = tidal_cleanup_dir.parent
+            project_root = src_dir.parent
+            emoji_config_path = project_root / "config" / "rekordbox_mytag_mapping.json"
+
+            if not emoji_config_path.exists():
+                cwd_config = Path.cwd() / "config" / "rekordbox_mytag_mapping.json"
+                if cwd_config.exists():
+                    emoji_config_path = cwd_config
+                else:
+                    raise RuntimeError(
+                        f"Cannot find emoji config at {emoji_config_path} "
+                        f"or {cwd_config}"
+                    )
+
+        # MP3 playlists root
+        mp3_playlists_root = self.config.mp3_directory / "Playlists"
+
+        # Create synchronizer
+        synchronizer = RekordboxPlaylistSynchronizer(
+            db=self.db,
+            mp3_playlists_root=mp3_playlists_root,
+            emoji_config_path=emoji_config_path,
+        )
+
+        # Ensure folders exist
+        synchronizer.ensure_folders_exist()
+
     def find_playlist(self, name: str) -> Optional[Any]:
         """Find a playlist in the Rekordbox database by name.
 
