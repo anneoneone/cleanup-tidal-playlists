@@ -17,6 +17,8 @@ except ImportError:
     PYREKORDBOX_AVAILABLE = False
     Rekordbox6Database = None
 
+from .rekordbox_playlist_sync import RekordboxPlaylistSynchronizer
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,6 +54,73 @@ class RekordboxService:
                 return None
 
         return self._db
+
+    def sync_playlist_with_mytags(
+        self, playlist_name: str, emoji_config_path: Optional[Path] = None
+    ) -> Dict[str, Any]:
+        """Synchronize a playlist from MP3 folder to Rekordbox with MyTag management.
+
+        This is the new refactored method that:
+        1. Validates MP3 playlist folder exists
+        2. Parses playlist name for emoji-based metadata
+        3. Creates/updates Rekordbox playlist
+        4. Adds missing tracks with MyTags
+        5. Removes extra tracks and their MyTags
+        6. Deletes playlist if empty after sync
+
+        Args:
+            playlist_name: Name of the playlist (folder name in MP3 playlists)
+            emoji_config_path: Path to emoji mapping config (uses default if None)
+
+        Returns:
+            Dictionary with sync results
+
+        Raises:
+            RuntimeError: If database or config is not available
+        """
+        if not self.db:
+            raise RuntimeError("Database connection not available")
+
+        if not self.config:
+            raise RuntimeError("Config not available")
+
+        # Default emoji config path
+        if emoji_config_path is None:
+            # Try to find config relative to this file
+            # Go up from src/tidal_cleanup/services/ to project root
+            service_dir = Path(__file__).resolve().parent
+            tidal_cleanup_dir = service_dir.parent
+            src_dir = tidal_cleanup_dir.parent
+            project_root = src_dir.parent
+            emoji_config_path = project_root / "config" / "rekordbox_mytag_mapping.json"
+
+            # If that doesn't exist, try alternative location
+            if not emoji_config_path.exists():
+                # Maybe we're in an installed package, look in cwd
+                cwd_config = Path.cwd() / "config" / "rekordbox_mytag_mapping.json"
+                if cwd_config.exists():
+                    emoji_config_path = cwd_config
+                else:
+                    raise RuntimeError(
+                        f"Cannot find emoji config at {emoji_config_path} "
+                        f"or {cwd_config}"
+                    )
+
+        # MP3 playlists root
+        mp3_playlists_root = self.config.mp3_directory / "Playlists"
+
+        # Create synchronizer
+        synchronizer = RekordboxPlaylistSynchronizer(
+            db=self.db,
+            mp3_playlists_root=mp3_playlists_root,
+            emoji_config_path=emoji_config_path,
+        )
+
+        # Perform sync
+        result = synchronizer.sync_playlist(playlist_name)
+
+        logger.info(f"Playlist sync completed: {result}")
+        return result
 
     def find_playlist(self, name: str) -> Optional[Any]:
         """Find a playlist in the Rekordbox database by name.
