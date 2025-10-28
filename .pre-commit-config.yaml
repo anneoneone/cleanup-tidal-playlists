@@ -54,7 +54,7 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies: [types-requests]
-        exclude: ^(tests/|scripts/.*_spike\.py$|spikes/.*)
+        exclude: ^(tests/|scripts/|spikes/.*)
 
   # Docstring formatting
   - repo: https://github.com/pycqa/docformatter
