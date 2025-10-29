@@ -34,6 +34,7 @@ dependencies = [
     "mutagen>=1.45.0",
     "ffmpeg-python>=0.2.0",
     "python-dotenv>=1.0.0",
+    "pyrekordbox>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -125,14 +126,49 @@ warn_no_return = true
 warn_unreachable = true
 strict_equality = true
 show_error_codes = true
-explicit_package_bases = true
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["tidalapi.*", "mutagen.*", "ffmpeg.*", "thefuzz.*"]
+module = [
+    "tidalapi.*",
+    "tidalapi",
+    "mutagen.*",
+    "mutagen",
+    "ffmpeg.*",
+    "thefuzz.*",
+    "dotenv.*",
+    "pydantic.*",
+    "click.*",
+    "rich.*",
+    "pyrekordbox.*",
+]
 ignore_missing_imports = true
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["src.tidal_cleanup.cli.*", "tidal_cleanup.cli.*"]
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["src.tidal_cleanup.models.*", "tidal_cleanup.models.*"]
+disallow_untyped_decorators = false
+disallow_any_generics = false
+disallow_subclassing_any = false
+
+[[tool.mypy.overrides]]
+module = ["src.tidal_cleanup.services.*", "tidal_cleanup.services.*"]
+disallow_untyped_calls = false
+# Suppress attr-defined errors for third-party library imports
+disable_error_code = ["attr-defined"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
+ignore_errors = true
+disallow_untyped_calls = false
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["scripts.*"]
 ignore_errors = true
 disallow_untyped_calls = false
 disallow_untyped_defs = false

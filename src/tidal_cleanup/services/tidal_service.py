@@ -54,7 +54,7 @@ class TidalService:
             with open(self.token_file, "r") as file:
                 data = json.load(file)
 
-            self.session = tidalapi.Session()  # type: ignore[attr-defined]
+            self.session = tidalapi.Session()
             self.session.load_oauth_session(
                 data["token_type"], data["access_token"], data["refresh_token"]
             )
@@ -76,7 +76,7 @@ class TidalService:
     def _create_new_session(self) -> None:
         """Create new Tidal session with OAuth."""
         logger.info("Creating new Tidal session...")
-        self.session = tidalapi.Session()  # type: ignore[attr-defined]
+        self.session = tidalapi.Session()
 
         print("Please scan the QR code or open the link to authenticate:")
         self.session.login_oauth_simple()

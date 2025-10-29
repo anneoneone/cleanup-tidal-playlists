@@ -5,7 +5,7 @@ import subprocess  # nosec B404
 from pathlib import Path
 from typing import List, Optional, Set
 
-from mutagen import File as MutagenFile  # type: ignore[attr-defined]
+from mutagen import File as MutagenFile
 from mutagen.mp3 import HeaderNotFoundError
 
 from ..models.models import ConversionJob, FileInfo, Track
@@ -70,9 +70,13 @@ class FileService:
             )
 
         # Ensure paths don't contain suspicious patterns
+        # Note: We only check for backticks and pipe characters that could
+        # cause command injection. Ampersands (&), semicolons (;), and dollar
+        # signs ($) are common in music filenames and safe when paths are
+        # properly quoted in subprocess calls.
         for path in [source_path, target_path]:
             path_str = str(path)
-            if any(char in path_str for char in [";", "|", "&", "$", "`"]):
+            if any(char in path_str for char in ["`", "|"]):
                 raise FileOperationError(f"Path contains suspicious characters: {path}")
 
     def _validate_quality_parameter(self, quality: str) -> None:

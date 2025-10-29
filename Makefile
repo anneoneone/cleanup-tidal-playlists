@@ -1,24 +1,25 @@
 # Makefile for Tidal Cleanup development
 
-.PHONY: help install install-dev clean lint format test test-cov test-all security docs build release pre-commit
+.PHONY: help install install-dev clean lint format test test-cov test-all security docs build release pre-commit pipeline-check
 
 # Default target
 help:
 	@echo "Available targets:"
-	@echo "  help          Show this help message"
-	@echo "  install       Install package in development mode"
-	@echo "  install-dev   Install with development dependencies"
-	@echo "  clean         Clean build artifacts and cache"
-	@echo "  lint          Run all linting tools"
-	@echo "  format        Run code formatters"
-	@echo "  test          Run tests"
-	@echo "  test-cov      Run tests with coverage"
-	@echo "  test-all      Run tests across all environments"
-	@echo "  security      Run security checks"
-	@echo "  docs          Build documentation"
-	@echo "  build         Build package"
-	@echo "  release       Create release"
-	@echo "  pre-commit    Install and run pre-commit hooks"
+	@echo "  help           Show this help message"
+	@echo "  install        Install package in development mode"
+	@echo "  install-dev    Install with development dependencies"
+	@echo "  clean          Clean build artifacts and cache"
+	@echo "  lint           Run all linting tools"
+	@echo "  pipeline-check Run exact same checks as CI/CD pipeline"
+	@echo "  format         Run code formatters"
+	@echo "  test           Run tests"
+	@echo "  test-cov       Run tests with coverage"
+	@echo "  test-all       Run tests across all environments"
+	@echo "  security       Run security checks"
+	@echo "  docs           Build documentation"
+	@echo "  build          Build package"
+	@echo "  release        Create release"
+	@echo "  pre-commit     Install and run pre-commit hooks"
 
 # Installation targets
 install:
@@ -44,8 +45,17 @@ clean:
 # Code quality
 lint:
 	flake8 src/ tests/
-	mypy --package tidal_cleanup
+	mypy --package tidal_cleanup --config-file=pyproject.toml
 	bandit -r src/
+
+# Run the exact same checks as the CI/CD pipeline
+pipeline-check:
+	@echo "Running pipeline quality checks..."
+	black --check --diff src/ tests/
+	isort --check-only --diff src/ tests/
+	flake8 src/ tests/
+	mypy --package tidal_cleanup --config-file=pyproject.toml
+	@echo "✅ All pipeline checks passed!"
 
 format:
 	black src/ tests/

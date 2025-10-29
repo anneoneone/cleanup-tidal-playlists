@@ -1,12 +1,23 @@
-"""Rekordbox XML generation service."""
+"""Rekordbox XML generation and database management service."""
 
 import logging
 import xml.etree.ElementTree as ET  # nosec B405 - XML generation only
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
-from mutagen import File as MutagenFile  # type: ignore[attr-defined]
+from mutagen import File as MutagenFile
 from mutagen.mp3 import HeaderNotFoundError
+
+try:
+    from pyrekordbox import Rekordbox6Database
+
+    PYREKORDBOX_AVAILABLE = True
+except ImportError:
+    PYREKORDBOX_AVAILABLE = False
+    Rekordbox6Database = None
+
+from .rekordbox_playlist_sync import RekordboxPlaylistSynchronizer
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +29,537 @@ class RekordboxGenerationError(Exception):
 
 
 class RekordboxService:
-    """Service for generating Rekordbox XML files."""
+    """Service for generating Rekordbox XML files and managing database."""
 
-    def __init__(self) -> None:
+    def __init__(self, config: Any = None) -> None:
         """Initialize Rekordbox service."""
         self.track_data: Dict[str, dict[str, Any]] = {}
         self.track_id_counter = 1
+        self.config = config
+        self._db: Optional[Rekordbox6Database] = None
+
+    @property
+    def db(self) -> Optional[Rekordbox6Database]:
+        """Get database connection, creating if needed."""
+        if not PYREKORDBOX_AVAILABLE:
+            logger.warning("pyrekordbox not available, database operations disabled")
+            return None
+
+        if self._db is None:
+            try:
+                self._db = Rekordbox6Database()
+                logger.info("Connected to Rekordbox database")
+            except Exception as e:
+                logger.error(f"Failed to connect to Rekordbox database: {e}")
+                return None
+
+        return self._db
+
+    def sync_playlist_with_mytags(
+        self, playlist_name: str, emoji_config_path: Optional[Path] = None
+    ) -> Dict[str, Any]:
+        """Synchronize a playlist from MP3 folder to Rekordbox with MyTag management.
+
+        This is the new refactored method that:
+        1. Validates MP3 playlist folder exists
+        2. Parses playlist name for emoji-based metadata
+        3. Creates/updates Rekordbox playlist
+        4. Adds missing tracks with MyTags
+        5. Removes extra tracks and their MyTags
+        6. Deletes playlist if empty after sync
+
+        Args:
+            playlist_name: Name of the playlist (folder name in MP3 playlists)
+            emoji_config_path: Path to emoji mapping config (uses default if None)
+
+        Returns:
+            Dictionary with sync results
+
+        Raises:
+            RuntimeError: If database or config is not available
+        """
+        if not self.db:
+            raise RuntimeError("Database connection not available")
+
+        if not self.config:
+            raise RuntimeError("Config not available")
+
+        # Default emoji config path
+        if emoji_config_path is None:
+            # Try to find config relative to this file
+            # Go up from src/tidal_cleanup/services/ to project root
+            service_dir = Path(__file__).resolve().parent
+            tidal_cleanup_dir = service_dir.parent
+            src_dir = tidal_cleanup_dir.parent
+            project_root = src_dir.parent
+            emoji_config_path = project_root / "config" / "rekordbox_mytag_mapping.json"
+
+            # If that doesn't exist, try alternative location
+            if not emoji_config_path.exists():
+                # Maybe we're in an installed package, look in cwd
+                cwd_config = Path.cwd() / "config" / "rekordbox_mytag_mapping.json"
+                if cwd_config.exists():
+                    emoji_config_path = cwd_config
+                else:
+                    raise RuntimeError(
+                        f"Cannot find emoji config at {emoji_config_path} "
+                        f"or {cwd_config}"
+                    )
+
+        # MP3 playlists root
+        mp3_playlists_root = self.config.mp3_directory / "Playlists"
+
+        # Create synchronizer
+        synchronizer = RekordboxPlaylistSynchronizer(
+            db=self.db,
+            mp3_playlists_root=mp3_playlists_root,
+            emoji_config_path=emoji_config_path,
+        )
+
+        # Perform sync
+        result = synchronizer.sync_playlist(playlist_name)
+
+        logger.info(f"Playlist sync completed: {result}")
+        return result
+
+    def ensure_genre_party_folders(
+        self, emoji_config_path: Optional[Path] = None
+    ) -> None:
+        """Pre-create all genre/party folders by scanning playlist names.
+
+        This should be called before syncing multiple playlists to avoid
+        redundant folder creation during each sync.
+
+        Args:
+            emoji_config_path: Path to emoji mapping config (uses default if None)
+        """
+        if not self.db:
+            raise RuntimeError("Database connection not available")
+
+        if not self.config:
+            raise RuntimeError("Config not available")
+
+        # Default emoji config path
+        if emoji_config_path is None:
+            service_dir = Path(__file__).resolve().parent
+            tidal_cleanup_dir = service_dir.parent
+            src_dir = tidal_cleanup_dir.parent
+            project_root = src_dir.parent
+            emoji_config_path = project_root / "config" / "rekordbox_mytag_mapping.json"
+
+            if not emoji_config_path.exists():
+                cwd_config = Path.cwd() / "config" / "rekordbox_mytag_mapping.json"
+                if cwd_config.exists():
+                    emoji_config_path = cwd_config
+                else:
+                    raise RuntimeError(
+                        f"Cannot find emoji config at {emoji_config_path} "
+                        f"or {cwd_config}"
+                    )
+
+        # MP3 playlists root
+        mp3_playlists_root = self.config.mp3_directory / "Playlists"
+
+        # Create synchronizer
+        synchronizer = RekordboxPlaylistSynchronizer(
+            db=self.db,
+            mp3_playlists_root=mp3_playlists_root,
+            emoji_config_path=emoji_config_path,
+        )
+
+        # Ensure folders exist
+        synchronizer.ensure_folders_exist()
+
+    def find_playlist(self, name: str) -> Optional[Any]:
+        """Find a playlist in the Rekordbox database by name.
+
+        Args:
+            name: Playlist name to search for
+
+        Returns:
+            Playlist object if found, None otherwise
+        """
+        if not self.db:
+            return None
+
+        try:
+            playlist = self.db.get_playlist(Name=name).first()
+            return playlist
+        except Exception as e:
+            logger.debug(f"Playlist '{name}' not found: {e}")
+            return None
+
+    def create_playlist(self, name: str, tracks: List[Path]) -> Optional[Any]:
+        """Create a new playlist in Rekordbox with the given tracks.
+
+        Args:
+            name: Name of the new playlist
+            tracks: List of track file paths to add
+
+        Returns:
+            Created playlist object or None if failed
+        """
+        if not self.db:
+            logger.error("Database not available")
+            return None
+
+        try:
+            # Create the playlist
+            playlist = self.db.create_playlist(name)
+            logger.info(f"Created playlist: {name}")
+
+            # Add tracks to the playlist
+            added_count = 0
+            for track_path in tracks:
+                if self._add_track_to_playlist(playlist, track_path):
+                    added_count += 1
+
+            # Commit changes
+            self.db.commit()
+            logger.info(f"Added {added_count} tracks to playlist '{name}'")
+
+            return playlist
+
+        except Exception as e:
+            logger.error(f"Failed to create playlist '{name}': {e}")
+            if self.db:
+                self.db.rollback()
+            return None
+
+    def update_playlist(self, playlist: Any, tracks: List[Path]) -> Optional[Any]:
+        """Update an existing playlist with new tracks.
+
+        Args:
+            playlist: Existing playlist object
+            tracks: List of track file paths to set as playlist content
+
+        Returns:
+            Updated playlist object or None if failed
+        """
+        if not self.db:
+            logger.error("Database not available")
+            return None
+
+        try:
+            # Clear existing tracks from playlist
+            for song in playlist.Songs:
+                self.db.remove_from_playlist(playlist, song)
+
+            # Add new tracks
+            added_count = 0
+            for track_path in tracks:
+                if self._add_track_to_playlist(playlist, track_path):
+                    added_count += 1
+
+            # Commit changes
+            self.db.commit()
+            logger.info(f"Updated playlist '{playlist.Name}' with {added_count} tracks")
+
+            return playlist
+
+        except Exception as e:
+            logger.error(f"Failed to update playlist '{playlist.Name}': {e}")
+            if self.db:
+                self.db.rollback()
+            return None
+
+    def _add_track_to_playlist(self, playlist: Any, track_path: Path) -> bool:
+        """Add a single track to a playlist.
+
+        Args:
+            playlist: Playlist object to add to
+            track_path: Path to the track file
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.db:
+            return False
+
+        try:
+            # Check if track already exists in database
+            existing_content = self.db.get_content(FolderPath=str(track_path)).first()
+
+            if existing_content:
+                # Track exists, add to playlist
+                self.db.add_to_playlist(playlist, existing_content)
+                return True
+            else:
+                # Track doesn't exist, add to database with full metadata
+                logger.debug(f"Adding new track to database: {track_path}")
+
+                # Extract comprehensive metadata
+                metadata = self._extract_track_metadata(track_path)
+
+                # Add content with metadata
+                new_content = self.db.add_content(str(track_path), **metadata)
+                if new_content:
+                    logger.debug(
+                        "Successfully added content with metadata, "
+                        "now adding to playlist"
+                    )
+                    self.db.add_to_playlist(playlist, new_content)
+                    return True
+                else:
+                    logger.warning(f"Failed to add track to database: {track_path}")
+                    return False
+
+        except Exception as e:
+            logger.warning(f"Failed to add track {track_path} to playlist: {e}")
+            return False
+
+    def _extract_track_metadata(self, file_path: Path) -> Dict[str, Any]:
+        """Extract comprehensive metadata from an audio file for Rekordbox.
+
+        Args:
+            file_path: Path to the audio file
+
+        Returns:
+            Dictionary containing track metadata with DjmdContent field names
+        """
+        # Initialize with defaults - only include fields that can be set directly
+        # Exclude association proxy fields (ArtistName, AlbumName, GenreName etc.)
+        metadata = {
+            "Title": file_path.stem,
+            "ReleaseYear": 0,
+            "TrackNo": 0,
+            "BPM": 0,  # Will be in hundredths (multiply by 100)
+            "Commnt": "",  # Comments field
+            "Subtitle": "",  # Mix/version info
+            "ISRC": "",
+            "DiscNo": 0,
+        }
+
+        try:
+            audio_file = MutagenFile(str(file_path))
+            if audio_file is not None:
+                # Extract metadata that can be set directly
+                self._extract_direct_metadata(audio_file, metadata)
+        except Exception as e:
+            logger.warning(f"Failed to extract metadata from {file_path}: {e}")
+
+        return metadata
+
+    def _extract_direct_metadata(  # noqa: C901
+        self, audio_file: Any, metadata: Dict[str, Any]
+    ) -> None:
+        """Extract metadata fields that can be set directly in pyrekordbox."""
+        # Title
+        for key in ["TIT2", "TITLE", "\xa9nam", "title"]:
+            if key in audio_file:
+                metadata["Title"] = str(audio_file[key][0])
+                break
+
+        # Release year
+        year_keys = [
+            ("TDRC", lambda x: int(str(x)[:4])),
+            ("TYER", lambda x: int(str(x))),
+            ("DATE", lambda x: int(str(x)[:4])),
+            ("\xa9day", lambda x: int(str(x)[:4])),
+            ("date", lambda x: int(str(x)[:4])),
+        ]
+
+        for key, converter in year_keys:
+            if key in audio_file:
+                with suppress(ValueError, IndexError):
+                    metadata["ReleaseYear"] = converter(audio_file[key][0])
+                    break
+
+        # Track number
+        if "TRCK" in audio_file:
+            with suppress(ValueError, IndexError):
+                track_info = str(audio_file["TRCK"][0]).split("/")[0]
+                metadata["TrackNo"] = int(track_info)
+        elif "TRACKNUMBER" in audio_file:
+            with suppress(ValueError, IndexError):
+                metadata["TrackNo"] = int(str(audio_file["TRACKNUMBER"][0]))
+        elif "tracknumber" in audio_file:
+            with suppress(ValueError, IndexError):
+                metadata["TrackNo"] = int(str(audio_file["tracknumber"][0]))
+        elif "trkn" in audio_file:
+            with suppress(ValueError, IndexError, TypeError):
+                metadata["TrackNo"] = int(audio_file["trkn"][0][0])
+
+        # Disc number
+        if "TPOS" in audio_file:
+            with suppress(ValueError, IndexError):
+                disc_info = str(audio_file["TPOS"][0]).split("/")[0]
+                metadata["DiscNo"] = int(disc_info)
+        elif "DISCNUMBER" in audio_file:
+            with suppress(ValueError, IndexError):
+                metadata["DiscNo"] = int(str(audio_file["DISCNUMBER"][0]))
+        elif "discnumber" in audio_file:
+            with suppress(ValueError, IndexError):
+                metadata["DiscNo"] = int(str(audio_file["discnumber"][0]))
+
+        # BPM (Rekordbox stores in hundredths, so multiply by 100)
+        bpm_keys = [
+            ("TBPM", lambda x: int(float(str(x)) * 100)),
+            ("BPM", lambda x: int(float(str(x)) * 100)),
+            ("bpm", lambda x: int(float(str(x)) * 100)),
+            (
+                "tmpo",
+                lambda x: int(x) if isinstance(x, int) else int(float(str(x)) * 100),
+            ),
+        ]
+
+        for key, converter in bpm_keys:
+            if key in audio_file:
+                with suppress(ValueError, IndexError, TypeError):
+                    metadata["BPM"] = converter(audio_file[key][0])
+                    break
+
+        # Comments - collect all available info including artist/album
+        comments = []
+
+        # Add artist info to comments since we can't set ArtistName directly
+        for key in ["TPE1", "ARTIST", "\xa9ART", "artist"]:
+            if key in audio_file:
+                artist = str(audio_file[key][0])
+                comments.append(f"Artist: {artist}")
+                break
+
+        # Add album info to comments
+        for key in ["TALB", "ALBUM", "\xa9alb", "album"]:
+            if key in audio_file:
+                album = str(audio_file[key][0])
+                comments.append(f"Album: {album}")
+                break
+
+        # Add genre info to comments
+        for key in ["TCON", "GENRE", "\xa9gen", "genre"]:
+            if key in audio_file:
+                genre = str(audio_file[key][0])
+                comments.append(f"Genre: {genre}")
+                break
+
+        # Add original comments
+        for key in ["COMM::eng", "COMMENT", "\xa9cmt", "comment"]:
+            if key in audio_file:
+                original_comment = str(audio_file[key][0])
+                comments.append(original_comment)
+                break
+
+        # Add Tidal-specific info to comments
+        tidal_fields = ["TXXX:URL", "TXXX:UPC", "TXXX:rating"]
+        for field in tidal_fields:
+            if field in audio_file:
+                value = str(audio_file[field][0])
+                field_name = field.split(":")[-1]
+                comments.append(f"Tidal {field_name}: {value}")
+
+        if comments:
+            metadata["Commnt"] = " | ".join(comments)
+
+        # Subtitle/Mix version
+        for key in ["TIT3", "SUBTITLE", "subtitle"]:
+            if key in audio_file:
+                metadata["Subtitle"] = str(audio_file[key][0])
+                break
+
+        # ISRC
+        for key in ["TSRC", "ISRC", "isrc"]:
+            if key in audio_file:
+                metadata["ISRC"] = str(audio_file[key][0])
+                break
+
+    def _extract_numeric_metadata(  # noqa: C901
+        self, audio_file: Any, metadata: Dict[str, Any]
+    ) -> None:
+        """Extract numeric metadata fields."""
+        # Release year
+        year_keys = [
+            ("TDRC", lambda x: int(str(x)[:4])),
+            ("TYER", lambda x: int(str(x))),
+            ("DATE", lambda x: int(str(x)[:4])),
+            ("\xa9day", lambda x: int(str(x)[:4])),
+            ("date", lambda x: int(str(x)[:4])),
+        ]
+
+        for key, converter in year_keys:
+            if key in audio_file:
+                with suppress(ValueError, IndexError):
+                    metadata["ReleaseYear"] = converter(audio_file[key][0])
+                    break
+
+        # Track number
+        if "TRCK" in audio_file:
+            with suppress(ValueError, IndexError):
+                track_info = str(audio_file["TRCK"][0]).split("/")[0]
+                metadata["TrackNo"] = int(track_info)
+        elif "TRACKNUMBER" in audio_file:
+            with suppress(ValueError, IndexError):
+                metadata["TrackNo"] = int(str(audio_file["TRACKNUMBER"][0]))
+        elif "tracknumber" in audio_file:
+            with suppress(ValueError, IndexError):
+                metadata["TrackNo"] = int(str(audio_file["tracknumber"][0]))
+        elif "trkn" in audio_file:
+            with suppress(ValueError, IndexError, TypeError):
+                metadata["TrackNo"] = int(audio_file["trkn"][0][0])
+
+        # Disc number
+        if "TPOS" in audio_file:
+            with suppress(ValueError, IndexError):
+                disc_info = str(audio_file["TPOS"][0]).split("/")[0]
+                metadata["DiscNo"] = int(disc_info)
+        elif "DISCNUMBER" in audio_file:
+            with suppress(ValueError, IndexError):
+                metadata["DiscNo"] = int(str(audio_file["DISCNUMBER"][0]))
+        elif "discnumber" in audio_file:
+            with suppress(ValueError, IndexError):
+                metadata["DiscNo"] = int(str(audio_file["discnumber"][0]))
+
+        # BPM (Rekordbox stores in hundredths, so multiply by 100)
+        bpm_keys = [
+            ("TBPM", lambda x: int(float(str(x)) * 100)),
+            ("BPM", lambda x: int(float(str(x)) * 100)),
+            ("bpm", lambda x: int(float(str(x)) * 100)),
+            (
+                "tmpo",
+                lambda x: int(x) if isinstance(x, int) else int(float(str(x)) * 100),
+            ),
+        ]
+
+        for key, converter in bpm_keys:
+            if key in audio_file:
+                with suppress(ValueError, IndexError, TypeError):
+                    metadata["BPM"] = converter(audio_file[key][0])
+                    break
+
+    def _extract_additional_metadata(
+        self, audio_file: Any, metadata: Dict[str, Any]
+    ) -> None:
+        """Extract additional metadata specific to Tidal or other sources."""
+        # Look for Tidal-specific tags
+        tidal_fields = [
+            "TXXX:URL",
+            "TXXX:UPC",
+            "TXXX:rating",
+            "TXXX:major_brand",
+            "TXXX:minor_version",
+            "TXXX:compatible_brands",
+        ]
+
+        tidal_info = []
+        for field in tidal_fields:
+            if field in audio_file:
+                value = str(audio_file[field][0])
+                tidal_info.append(f"{field.split(':')[-1]}: {value}")
+
+        # Append Tidal info to comments if found
+        if tidal_info:
+            existing_comment = metadata.get("Commnt", "")
+            tidal_comment = " | ".join(tidal_info)
+            if existing_comment:
+                metadata["Commnt"] = f"{existing_comment} | {tidal_comment}"
+            else:
+                metadata["Commnt"] = tidal_comment
+
+    def close(self) -> None:
+        """Close database connection."""
+        if self._db:
+            self._db.close()
+            self._db = None
 
     def generate_xml(
         self, input_folder: Path, output_file: Path, rekordbox_version: str = "7.0.4"

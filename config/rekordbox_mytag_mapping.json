@@ -1,0 +1,55 @@
+{
+  "emoji_to_mytag_mapping": {
+    "Genre": {
+      "🎷": "Jazz",
+      "🧱": "Breaks",
+      "🐌": "Downbeat",
+      "🇬🇧": "UK Garage",
+      "🛋️": "Lounge",
+      "🏖️": "Beach",
+      "🎭": "Techhouse",
+      "🏢": "Techno",
+      "🐋": "Techno Dub",
+      "⚡": "Hardgroove",
+      "🌚": "Ambient",
+      "📺": "NDW",
+      "🌴": "Jungle",
+      "🎹": "Disco Synth",
+      "🎈": "Disco Nu",
+      "🪩": "Disco Classy",
+      "🕺": "Disco",
+      "🏃🏼‍♂️": "House Progressive",
+      "🥊": "House Ghetto",
+      "🇮🇹": "House Italo",
+      "🪇": "House Groove",
+      "🌃": "House Deep",
+      "🤖": "House Disco",
+      "🌀": "House Tool",
+      "🎧": "House LoFi",
+      "🧘🏼‍♂️": "House Chill",
+      "☀️": "House House",
+      "🪘": "Groove"
+    },
+    "Party": {
+      "🎉": "Party",
+      "🎶": "Set",
+      "🎙️": "Moafunk"
+    },
+    "Energy": {
+      "⬆️": "High",
+      "↗️": "Up",
+      "➡️": "Medium",
+      "↘️": "Low"
+    },
+    "Status": {
+      "💾": "Archived",
+      "❓": "Recherche",
+      "👵🏻": "Old"
+    }
+  },
+  "no_genre_tag": {
+    "group": "Genre",
+    "value": "NoGenre"
+  },
+  "description": "Mapping configuration for converting playlist name emojis to Rekordbox MyTag groups and values. Playlists follow the pattern: 'PLAYLIST NAME [GENRE-EMOJI] or [PARTY-EMOJI] [ENERGY-EMOJI] [STATUS-EMOJI]'. Either Genre or Party emoji must be present, while Energy and Status are optional."
+}

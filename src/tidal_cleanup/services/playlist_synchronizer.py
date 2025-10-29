@@ -472,7 +472,7 @@ class PlaylistProcessor:
                 result = click.confirm(
                     f"Delete '{file_path.name}' (not in Tidal playlist)?", default=False
                 )
-                return result
+                return bool(result)
             finally:
                 # Resume the progress display
                 progress.start()
