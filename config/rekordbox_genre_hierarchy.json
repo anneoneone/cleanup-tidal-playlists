@@ -1,0 +1,27 @@
+{
+  "genre_hierarchy": {
+    "House": [
+      "House House",
+      "House Italo",
+      "House Deep",
+      "House Disco",
+      "House Chill",
+      "House Tool",
+      "House Progressive",
+      "House Ghetto",
+      "House Groove",
+      "House LoFi",
+      "Groove",
+      "Breaks"
+    ],
+    "Techno": ["Techno", "Techno Dub", "Hardgroove", "Techhouse"],
+    "Disco": ["Disco", "Disco Classy", "Disco Nu", "Disco Synth"],
+    "Jazz": ["Jazz"],
+    "Ambient": ["Ambient", "Downbeat"],
+    "Other Genres": ["Beach", "Lounge", "UK Garage", "Jungle", "NDW"],
+    "Partys": ["Party"],
+    "Sets": ["Set"],
+    "Radio Moafunk": ["Moafunk"]
+  },
+  "default_category": "etc"
+}

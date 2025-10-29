@@ -1,39 +1,44 @@
 {
-  "emoji_to_mytag_mapping": {
+  "Track-Metadata": {
     "Genre": {
-      "🎷": "Jazz",
-      "🧱": "Breaks",
-      "🐌": "Downbeat",
-      "🇬🇧": "UK Garage",
-      "🛋️": "Lounge",
-      "🏖️": "Beach",
-      "🎭": "Techhouse",
-      "🏢": "Techno",
-      "🐋": "Techno Dub",
-      "⚡": "Hardgroove",
-      "🌚": "Ambient",
-      "📺": "NDW",
-      "🌴": "Jungle",
-      "🎹": "Disco Synth",
-      "🎈": "Disco Nu",
-      "🪩": "Disco Classy",
-      "🕺": "Disco",
-      "🏃🏼‍♂️": "House Progressive",
-      "🥊": "House Ghetto",
-      "🇮🇹": "House Italo",
-      "🪇": "House Groove",
-      "🌃": "House Deep",
-      "🤖": "House Disco",
-      "🌀": "House Tool",
-      "🎧": "House LoFi",
-      "🧘🏼‍♂️": "House Chill",
-      "☀️": "House House",
-      "🪘": "Groove"
-    },
-    "Party": {
-      "🎉": "Party",
-      "🎶": "Set",
-      "🎙️": "Moafunk"
+      "House": {
+        "🏃🏼‍♂️": "House Progressive",
+        "🥊": "House Ghetto",
+        "🇮🇹": "House Italo",
+        "🪇": "House Groove",
+        "🤖": "House Disco",
+        "🌀": "House Tool",
+        "☀️": "House House",
+        "🪘": "Groove"
+      },
+      "Deep House": {
+        "🧘🏼‍♂️": "House Chill",
+        "🎧": "House LoFi",
+        "🌃": "House Deep",
+        "🧱": "Breaks",
+        "🛋️": "Lounge",
+        "🌚": "Ambient"
+      },
+      "Techno": {
+        "🎭": "Techhouse",
+        "🏢": "Techno",
+        "🐋": "Techno Dub",
+        "⚡": "Hardgroove"
+      },
+      "Disco": {
+        "🎹": "Disco Synth",
+        "🎈": "Disco Nu",
+        "🪩": "Disco Classy",
+        "🕺": "Disco"
+      },
+      "Other Genres": {
+        "🎷": "Jazz",
+        "🐌": "Downbeat",
+        "🇬🇧": "UK Garage",
+        "🏖️": "Beach",
+        "📺": "NDW",
+        "🌴": "Jungle"
+      }
     },
     "Energy": {
       "⬆️": "High",
@@ -46,6 +51,16 @@
       "❓": "Recherche",
       "👵🏻": "Old"
     }
+  },
+  "Event-Metadata": {
+    "🎉": "Party",
+    "🎶": "Set",
+    "🎙️": "Radio Moafunk"
+  },
+  "Source": {
+    "🪴": "Tidal",
+    "💻": "External",
+    "💿": "Discogs"
   },
   "no_genre_tag": {
     "group": "Genre",
