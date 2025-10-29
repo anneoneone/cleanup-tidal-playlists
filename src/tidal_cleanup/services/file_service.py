@@ -9,6 +9,7 @@ from mutagen import File as MutagenFile
 from mutagen.mp3 import HeaderNotFoundError
 
 from ..models.models import ConversionJob, FileInfo, Track
+from .directory_diff_service import DirectoryDiffService
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class FileService:
             ".m4a",
             ".mp4",
         )
+        self.diff_service = DirectoryDiffService()
 
     def _validate_audio_paths(self, source_path: Path, target_path: Path) -> None:
         """Validate audio file paths for security.
@@ -479,6 +481,11 @@ class FileService:
     ) -> dict[str, List[ConversionJob]]:
         """Convert all audio files with playlist-based reporting.
 
+        Uses directory diff mechanism to only process files that differ:
+        - Converts files that exist in source but not in target
+        - Deletes files that exist in target but not in source
+        - Skips files that already exist in both
+
         Args:
             source_dir: Source directory
             target_dir: Target directory
@@ -488,54 +495,112 @@ class FileService:
         Returns:
             Dictionary mapping playlist names to lists of ConversionJob objects
         """
-        logger.info(f"Converting files from {source_dir} to {target_dir}")
+        logger.info(
+            f"Converting files from {source_dir} to {target_dir} "
+            f"using diff-based optimization"
+        )
 
         playlist_jobs: dict[str, List[ConversionJob]] = {}
-        source_files: list[Path] = []
 
-        # Collect all source files
-        for ext in [".m4a", ".mp4"]:
-            source_files.extend(source_dir.rglob(f"*{ext}"))
+        # Get all playlist directories under source
+        playlists_dir = source_dir / "Playlists"
+        if not playlists_dir.exists():
+            logger.warning(
+                f"No 'Playlists' directory found in {source_dir}, "
+                f"falling back to direct directory scanning"
+            )
+            playlists_dir = source_dir
 
-        for source_file in source_files:
-            # Calculate relative path and target path
-            relative_path = source_file.relative_to(source_dir)
-            target_file = target_dir / relative_path.with_suffix(target_format)
+        # Find all playlist directories
+        playlist_dirs = (
+            [d for d in playlists_dir.iterdir() if d.is_dir()]
+            if playlists_dir.exists()
+            else []
+        )
 
-            # Extract playlist name from relative path
-            # Handle structure like: Playlists/PLAYLIST_NAME/track.m4a
-            if len(relative_path.parts) > 1 and relative_path.parts[0] == "Playlists":
-                playlist_name = relative_path.parts[1]
-            else:
-                # Direct structure like: PLAYLIST_NAME/track.m4a
-                playlist_name = (
-                    relative_path.parts[0] if relative_path.parts else "Unknown"
+        if not playlist_dirs:
+            logger.warning(f"No playlist directories found in {playlists_dir}")
+            return playlist_jobs
+
+        # Process each playlist directory
+        for playlist_dir in playlist_dirs:
+            playlist_name = playlist_dir.name
+            playlist_jobs[playlist_name] = []
+
+            # Calculate corresponding target directory
+            relative_path = playlist_dir.relative_to(source_dir)
+            target_playlist_dir = target_dir / relative_path
+
+            logger.info(f"Processing playlist: {playlist_name}")
+
+            # Use diff service to compare directories
+            diff = self.diff_service.compare_by_stem_with_extension_mapping(
+                source_dir=playlist_dir,
+                target_dir=target_playlist_dir,
+                source_extensions=(".m4a", ".mp4"),
+                target_extensions=(target_format,),
+            )
+
+            logger.info(
+                f"Playlist '{playlist_name}': {len(diff.only_in_source)} to convert, "
+                f"{len(diff.only_in_target)} to delete, "
+                f"{len(diff.in_both)} already converted"
+            )
+
+            # Convert files that exist only in source
+            for file_stem in diff.only_in_source:
+                source_file_identity = diff.source_identities[file_stem]
+                source_file = source_file_identity.path
+
+                # Calculate target path
+                relative_to_playlist = source_file.relative_to(playlist_dir)
+                target_file = (target_playlist_dir / relative_to_playlist).with_suffix(
+                    target_format
                 )
 
-            if playlist_name not in playlist_jobs:
-                playlist_jobs[playlist_name] = []
+                # Convert file
+                job = self.convert_audio_with_playlist_logic(
+                    source_file, target_file, quality
+                )
+                playlist_jobs[playlist_name].append(job)
 
-            # Check if file exists in both directories (playlist-based logic)
-            if target_file.exists():
-                logger.info(f"Target file already exists, skipping: {target_file}")
-                # Create a job to track that we skipped this file
+            # Delete files that exist only in target (orphaned files)
+            for file_stem in diff.only_in_target:
+                target_file_identity = diff.target_identities[file_stem]
+                target_file = target_file_identity.path
+
+                try:
+                    target_file.unlink()
+                    logger.info(f"Deleted orphaned target file: {target_file}")
+                    # Track as a special job type
+                    job = ConversionJob(
+                        source_path=Path(""),  # No source for deletion
+                        target_path=target_file,
+                        source_format="",
+                        target_format=target_format,
+                        quality=quality,
+                        status="deleted",
+                        was_skipped=False,
+                    )
+                    playlist_jobs[playlist_name].append(job)
+                except OSError as e:
+                    logger.error(f"Failed to delete {target_file}: {e}")
+
+            # Track skipped files (already exist in both)
+            for file_stem in diff.in_both:
+                source_file_identity = diff.source_identities[file_stem]
+                target_file_identity = diff.target_identities[file_stem]
+
                 job = ConversionJob(
-                    source_path=source_file,
-                    target_path=target_file,
-                    source_format=source_file.suffix.lower(),
+                    source_path=source_file_identity.path,
+                    target_path=target_file_identity.path,
+                    source_format=source_file_identity.path.suffix.lower(),
                     target_format=target_format,
                     quality=quality,
                     status="completed",
                     was_skipped=True,
                 )
                 playlist_jobs[playlist_name].append(job)
-                continue
-
-            # Convert file
-            job = self.convert_audio_with_playlist_logic(
-                source_file, target_file, quality
-            )
-            playlist_jobs[playlist_name].append(job)
 
         # Log summary by playlist
         for playlist_name, jobs in playlist_jobs.items():
@@ -543,11 +608,12 @@ class FileService:
                 [j for j in jobs if j.status == "completed" and not j.was_skipped]
             )
             skipped = len([j for j in jobs if j.was_skipped])
+            deleted = len([j for j in jobs if j.status == "deleted"])
             failed = len([j for j in jobs if j.status == "failed"])
 
             logger.info(
                 f"Playlist '{playlist_name}': {converted} converted, "
-                f"{skipped} skipped, {failed} failed"
+                f"{skipped} skipped, {deleted} deleted, {failed} failed"
             )
 
         return playlist_jobs

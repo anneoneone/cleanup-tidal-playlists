@@ -138,6 +138,7 @@ class TidalCleanupApp:
         """Show result of playlist conversion."""
         total_converted = 0
         total_skipped = 0
+        total_deleted = 0
         total_failed = 0
 
         console.print("\nConversion complete:")
@@ -149,16 +150,19 @@ class TidalCleanupApp:
                 [j for j in jobs if j.status == "completed" and not j.was_skipped]
             )
             skipped = len([j for j in jobs if j.was_skipped])
+            deleted = len([j for j in jobs if j.status == "deleted"])
             failed = len([j for j in jobs if j.status == "failed"])
 
             playlist_stats[playlist_name] = {
                 "converted": converted,
                 "skipped": skipped,
+                "deleted": deleted,
                 "failed": failed,
             }
 
             total_converted += converted
             total_skipped += skipped
+            total_deleted += deleted
             total_failed += failed
 
         # Create a table for proper alignment
@@ -168,6 +172,8 @@ class TidalCleanupApp:
         table.add_column("", style="none")  # "converted" text
         table.add_column("Skipped", style="yellow", justify="right")
         table.add_column("", style="none")  # "skipped" text
+        table.add_column("Deleted", style="red", justify="right")
+        table.add_column("", style="none")  # "deleted" text
         table.add_column("Failed", style="red", justify="right")
         table.add_column("", style="none")  # "failed" text
 
@@ -179,18 +185,22 @@ class TidalCleanupApp:
                 "converted",
                 str(stats["skipped"]),
                 "skipped",
+                str(stats["deleted"]),
+                "deleted",
                 str(stats["failed"]),
                 "failed",
             )
 
         # Add overall summary row
-        table.add_row("", "", "", "", "", "", "")  # Empty row for spacing
+        table.add_row("", "", "", "", "", "", "", "", "")  # Empty row for spacing
         table.add_row(
             "[bold cyan]Overall Summary[/bold cyan]",
             f"[green]{total_converted}[/green]",
             "converted",
             f"[yellow]{total_skipped}[/yellow]",
             "skipped",
+            f"[red]{total_deleted}[/red]",
+            "deleted",
             f"[red]{total_failed}[/red]",
             "failed",
         )

@@ -1,5 +1,6 @@
 """Services for the Tidal cleanup application."""
 
+from .directory_diff_service import DirectoryDiff, DirectoryDiffService, FileIdentity
 from .file_service import FileOperationError, FileService
 from .playlist_synchronizer import DeletionMode, PlaylistSynchronizer
 from .rekordbox_service import RekordboxGenerationError, RekordboxService
@@ -16,4 +17,7 @@ __all__ = [
     "RekordboxGenerationError",
     "PlaylistSynchronizer",
     "DeletionMode",
+    "DirectoryDiffService",
+    "DirectoryDiff",
+    "FileIdentity",
 ]
