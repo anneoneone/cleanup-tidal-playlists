@@ -18,13 +18,28 @@ class PlaylistMetadata:
     raw_name: str
     genre_tags: Set[str]
     party_tags: Set[str]
+    set_tags: Set[str]
+    radio_moafunk_tags: Set[str]
     energy_tags: Set[str]
     status_tags: Set[str]
 
     @property
+    def has_genre_or_event(self) -> bool:
+        """Check if playlist has at least one genre or event tag."""
+        return bool(
+            self.genre_tags
+            or self.party_tags
+            or self.set_tags
+            or self.radio_moafunk_tags
+        )
+
+    @property
     def has_genre_or_party(self) -> bool:
-        """Check if playlist has at least one genre or party tag."""
-        return bool(self.genre_tags or self.party_tags)
+        """Check if playlist has at least one genre or party tag.
+
+        Deprecated: Use has_genre_or_event instead.
+        """
+        return self.has_genre_or_event
 
     @property
     def all_tags(self) -> Dict[str, Set[str]]:
@@ -32,8 +47,19 @@ class PlaylistMetadata:
         return {
             "Genre": self.genre_tags,
             "Party": self.party_tags,
+            "Set": self.set_tags,
+            "Radio Moafunk": self.radio_moafunk_tags,
             "Energy": self.energy_tags,
             "Status": self.status_tags,
+        }
+
+    @property
+    def event_tags(self) -> Dict[str, Set[str]]:
+        """Get only event tags (Party, Set, Radio Moafunk)."""
+        return {
+            "Party": self.party_tags,
+            "Set": self.set_tags,
+            "Radio Moafunk": self.radio_moafunk_tags,
         }
 
     def get_tags_for_group(self, group: str) -> Set[str]:
@@ -63,9 +89,13 @@ class PlaylistNameParser:
                 config = json.load(f)
 
             self.emoji_mapping = config.get("Track-Metadata", {})
+            self.event_mapping = config.get("Event-Metadata", {})
             self.no_genre_config = config.get("no_genre_tag", {})
 
-            logger.info(f"Loaded emoji mapping with {len(self.emoji_mapping)} groups")
+            logger.info(
+                f"Loaded emoji mapping with {len(self.emoji_mapping)} "
+                f"track groups and {len(self.event_mapping)} event types"
+            )
 
         except Exception as e:
             logger.error(f"Failed to load emoji mapping config: {e}")
@@ -99,6 +129,7 @@ class PlaylistNameParser:
         """Build reverse mapping from emoji to (group, tag_name)."""
         self.emoji_to_group_tag: Dict[str, tuple[str, str]] = {}
 
+        # Process Track-Metadata
         for group, content in self.emoji_mapping.items():
             # Handle nested structure for Genre group
             if group == "Genre" and isinstance(content, dict):
@@ -127,6 +158,17 @@ class PlaylistNameParser:
                         f"Mapped emoji '{emoji}' -> '{normalized}' -> {tag_name}"
                     )
 
+        # Process Event-Metadata (🎉: Party, 🎶: Set, 🎙️: Radio Moafunk)
+        # Each event type is its own MyTag group
+        for emoji, event_type in self.event_mapping.items():
+            normalized = self._normalize_emoji(emoji)
+            # The event_type itself is the group name (Party, Set, Radio Moafunk)
+            self.emoji_to_group_tag[normalized] = (event_type, event_type)
+            logger.debug(
+                f"Mapped event emoji '{emoji}' -> "
+                f"'{normalized}' -> group={event_type}"
+            )
+
         logger.debug(
             f"Built reverse mapping with {len(self.emoji_to_group_tag)} emojis"
         )
@@ -146,9 +188,14 @@ class PlaylistNameParser:
         # Extract all emojis from the playlist name
         emojis = self._extract_emojis(playlist_name)
 
+        # Extract clean name (without emojis) for event playlists
+        clean_name = self._extract_clean_name(playlist_name)
+
         # Initialize tag sets
         genre_tags: Set[str] = set()
         party_tags: Set[str] = set()
+        set_tags: Set[str] = set()
+        radio_moafunk_tags: Set[str] = set()
         energy_tags: Set[str] = set()
         status_tags: Set[str] = set()
 
@@ -163,7 +210,14 @@ class PlaylistNameParser:
                 if group == "Genre":
                     genre_tags.add(tag_name)
                 elif group == "Party":
-                    party_tags.add(tag_name)
+                    # For event playlists, use the clean playlist name as tag
+                    party_tags.add(clean_name)
+                elif group == "Set":
+                    # For event playlists, use the clean playlist name as tag
+                    set_tags.add(clean_name)
+                elif group == "Radio Moafunk":
+                    # For event playlists, use the clean playlist name as tag
+                    radio_moafunk_tags.add(clean_name)
                 elif group == "Energy":
                     energy_tags.add(tag_name)
                 elif group == "Status":
@@ -175,24 +229,27 @@ class PlaylistNameParser:
                 )
 
         metadata = PlaylistMetadata(
-            playlist_name=self._extract_clean_name(playlist_name),
+            playlist_name=clean_name,
             raw_name=playlist_name,
             genre_tags=genre_tags,
             party_tags=party_tags,
+            set_tags=set_tags,
+            radio_moafunk_tags=radio_moafunk_tags,
             energy_tags=energy_tags,
             status_tags=status_tags,
         )
 
-        # Validate that at least Genre or Party is present
-        if not metadata.has_genre_or_party:
+        # Validate that at least Genre or Event is present
+        if not metadata.has_genre_or_event:
             logger.warning(
-                f"Playlist '{playlist_name}' has no Genre or Party tags. "
+                f"Playlist '{playlist_name}' has no Genre or Event tags. "
                 "At least one is expected."
             )
 
         logger.info(
             f"Parsed playlist '{playlist_name}': "
-            f"Genre={genre_tags}, Party={party_tags}, "
+            f"Genre={genre_tags}, Party={party_tags}, Set={set_tags}, "
+            f"Radio Moafunk={radio_moafunk_tags}, "
             f"Energy={energy_tags}, Status={status_tags}"
         )
 

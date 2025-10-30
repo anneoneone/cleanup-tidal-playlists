@@ -114,18 +114,12 @@ class TrackTagSyncService:
         # Parse playlist name for metadata
         metadata = self.name_parser.parse_playlist_name(playlist_name)
 
-        # Skip Event playlists for now
+        # Handle Event playlists differently
         if self._is_event_playlist(metadata):
-            logger.info(f"Skipping event playlist: {playlist_name}")
-            return {
-                "playlist_name": playlist_name,
-                "tracks_added": 0,
-                "tracks_updated": 0,
-                "tags_removed": 0,
-                "skipped": True,
-            }
+            logger.info(f"Processing as event playlist: {playlist_name}")
+            return self._sync_event_playlist(playlist_name, metadata)
 
-        # Build the actual tag set with defaults
+        # Build the actual tag set with defaults for track playlists
         actual_tags = self._build_actual_tags(metadata)
 
         logger.info(f"Actual tags for playlist: {actual_tags}")
@@ -157,12 +151,213 @@ class TrackTagSyncService:
         Returns:
             True if this is an event playlist
         """
-        # Check if playlist name contains event indicators
-        # For now, we check for emojis in the Event-Metadata section
-        # TODO: Implement proper event detection based on emoji mapping
-        event_keywords = ["Party", "Set", "Radio Moafunk", "🎉", "🎶", "🎙️"]
+        # Check if playlist has any event tags
+        return bool(
+            metadata.party_tags or metadata.set_tags or metadata.radio_moafunk_tags
+        )
 
-        return any(keyword in metadata.raw_name for keyword in event_keywords)
+    def _sync_event_playlist(
+        self, playlist_name: str, metadata: PlaylistMetadata
+    ) -> Dict[str, Any]:
+        """Sync an event playlist with Rekordbox.
+
+        Creates:
+        1. Event-specific MyTag (e.g., "Event::Party::23-04-04 carlparty selection")
+        2. Intelligent playlist under Events/{event_type}/{event_name}
+        3. Tags all tracks with the event tag
+
+        Args:
+            playlist_name: Name of the playlist directory
+            metadata: Parsed playlist metadata
+
+        Returns:
+            Dictionary with sync results
+        """
+        logger.info(f"Syncing event playlist: {playlist_name}")
+
+        # Determine event type (Party, Set, or Radio Moafunk)
+        event_type = self._get_event_type(metadata)
+        if not event_type:
+            logger.error(f"Could not determine event type for: {playlist_name}")
+            return {
+                "playlist_name": playlist_name,
+                "tracks_added": 0,
+                "tracks_updated": 0,
+                "tags_removed": 0,
+                "skipped": True,
+            }
+
+        # Extract clean event name (without emojis)
+        event_name = metadata.playlist_name
+
+        # Create event tag in the appropriate category
+        # Category: "Party", "Set", or "Radio Moafunk"
+        # Tag value: event name (e.g., "23-04-04 carlparty selection")
+        logger.info(f"Creating event tag: {event_type}::{event_name}")
+
+        event_tag = self.mytag_manager.create_or_get_tag(event_name, event_type)
+
+        # Get MP3 tracks
+        mp3_playlist_dir = self.mp3_playlists_root / playlist_name
+        mp3_tracks = self._scan_mp3_folder(mp3_playlist_dir)
+
+        # Track all tracks in this event and tag them
+        added_count = 0
+        updated_count = 0
+
+        # Build the tag dict for the event
+        # Key is the MyTag category (event_type), value is the tag name (event_name)
+        event_tags = {event_type: {event_name}}
+
+        for mp3_path in mp3_tracks:
+            was_added = self._add_or_update_track(mp3_path, event_tags)
+            if was_added:
+                added_count += 1
+            else:
+                updated_count += 1
+
+        # Create intelligent playlist for this event
+        self._create_event_intelligent_playlist(event_type, event_name, event_tag)
+
+        self.db.commit()
+
+        return {
+            "playlist_name": playlist_name,
+            "tracks_added": added_count,
+            "tracks_updated": updated_count,
+            "tags_removed": 0,
+            "skipped": False,
+            "event_type": event_type,
+            "event_name": event_name,
+        }
+
+    def _get_event_type(self, metadata: PlaylistMetadata) -> Optional[str]:
+        """Determine the event type from metadata.
+
+        Args:
+            metadata: Parsed playlist metadata
+
+        Returns:
+            Event type (Party, Set, Radio Moafunk) or None
+        """
+        # Check which event tag field is populated
+        if metadata.party_tags:
+            return "Party"
+        elif metadata.set_tags:
+            return "Set"
+        elif metadata.radio_moafunk_tags:
+            return "Radio Moafunk"
+
+        return None
+
+    def _create_event_intelligent_playlist(
+        self, event_type: str, event_name: str, event_tag: Any
+    ) -> None:
+        """Create intelligent playlist for an event under Events/{type}/{name}.
+
+        Args:
+            event_type: Type of event (Party, Set, Radio Moafunk)
+            event_name: Name of the event
+            event_tag: MyTag object for this event
+        """
+        from pyrekordbox.rbxml import (
+            LogicalOperator,
+            Operator,
+            Property,
+            SmartList,
+        )
+
+        # Get folder structure
+        events_folder = self._get_or_create_folder("Events", parent_id=None)
+
+        # Map event type to folder name
+        event_folder_map = {
+            "Party": "Partys",
+            "Set": "Sets",
+            "Radio Moafunk": "Radio Moafunk",
+        }
+
+        event_folder_name = event_folder_map.get(event_type, event_type)
+        type_folder = self._get_or_create_folder(
+            event_folder_name, parent_id=events_folder.ID
+        )
+
+        # Check if intelligent playlist already exists
+        existing_playlist = (
+            self.db.query(db6.DjmdPlaylist)
+            .filter(
+                (db6.DjmdPlaylist.Name == event_name)
+                & (db6.DjmdPlaylist.ParentID == type_folder.ID)
+                & (db6.DjmdPlaylist.Attribute == 4)
+            )
+            .first()
+        )
+
+        if existing_playlist:
+            logger.info(
+                f"Intelligent playlist already exists: {event_name} "
+                f"under {event_folder_name}"
+            )
+            return
+
+        # Create smart playlist with Event tag condition
+        smart_list = SmartList(logical_operator=LogicalOperator.ALL)
+        mytag_id_str = str(event_tag.ID)
+
+        smart_list.add_condition(
+            prop=Property.MYTAG,
+            operator=Operator.CONTAINS,
+            value_left=mytag_id_str,
+        )
+
+        # Create the intelligent playlist
+        self.db.create_smart_playlist(
+            name=event_name,
+            smart_list=smart_list,
+            parent=type_folder.ID,
+        )
+
+        self.db.flush()
+        logger.info(
+            f"Created intelligent playlist: {event_name} "
+            f"under Events/{event_folder_name}"
+        )
+
+    def _get_or_create_folder(
+        self, folder_name: str, parent_id: Optional[str] = None
+    ) -> Any:
+        """Get existing folder or create new one.
+
+        Args:
+            folder_name: Name of the folder
+            parent_id: Parent folder ID (None for root)
+
+        Returns:
+            DjmdPlaylist instance with Attribute=1 (folder)
+        """
+        # Try to find existing folder
+        query = self.db.get_playlist(Name=folder_name, Attribute=1)
+
+        if parent_id:
+            folder = query.filter(db6.DjmdPlaylist.ParentID == parent_id).first()
+        else:
+            folder = query.filter(
+                (db6.DjmdPlaylist.ParentID == "")
+                | (db6.DjmdPlaylist.ParentID.is_(None))
+            ).first()
+
+        if folder:
+            return folder
+
+        # Create new folder
+        logger.info(f"Creating event folder: {folder_name} (parent: {parent_id})")
+        folder = self.db.create_playlist(
+            name=folder_name,
+            parent=parent_id,
+            is_folder=True,
+        )
+        self.db.flush()
+        return folder
 
     def _build_actual_tags(self, metadata: PlaylistMetadata) -> Dict[str, Set[str]]:
         """Build the actual tag set with defaults applied.
