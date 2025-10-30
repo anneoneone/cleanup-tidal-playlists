@@ -253,7 +253,7 @@ def cli(ctx: Any, log_level: str, log_file: str, no_interactive: bool) -> None:
     ctx.obj = app
 
 
-@cli.command()
+@cli.command(name="sync")
 @click.option(
     "--playlist",
     "-p",
@@ -265,50 +265,13 @@ def cli(ctx: Any, log_level: str, log_file: str, no_interactive: bool) -> None:
     help="Path to emoji-to-MyTag mapping config (uses default if not specified)",
 )
 @click.pass_obj
-def _sync_all_playlists(
-    rekordbox_service: RekordboxService,
-    playlists_dir: Path,
+def sync_command(
+    app: TidalCleanupApp,
+    playlist: Optional[str],
     emoji_config: Optional[Path],
 ) -> None:
-    """Sync all playlists in the playlists directory."""
-    console.print("\n[bold cyan]🎵 Syncing all playlists to Rekordbox[/bold cyan]")
-    console.print("=" * 60)
-
-    if not playlists_dir.exists():
-        console.print(f"[red]❌ Playlists directory not found: {playlists_dir}[/red]")
-        raise click.Abort()
-
-    # Get all playlist folders
-    playlist_folders = [d for d in playlists_dir.iterdir() if d.is_dir()]
-
-    if not playlist_folders:
-        console.print("[yellow]⚠️ No playlist folders found[/yellow]")
-        return
-
-    console.print(f"\n[bold]Found {len(playlist_folders)} playlists[/bold]\n")
-
-    # Pre-create all genre/party folders
-    console.print("[cyan]📁 Creating genre/party folders...[/cyan]")
-    rekordbox_service.ensure_genre_party_folders(emoji_config_path=emoji_config)
-    console.print("[green]✓ Folders ready[/green]\n")
-
-    results = []
-    for playlist_folder in sorted(playlist_folders):
-        playlist_name = playlist_folder.name
-        console.print(f"\n[cyan]Syncing: {playlist_name}[/cyan]")
-
-        try:
-            result = rekordbox_service.sync_playlist_with_mytags(
-                playlist_name, emoji_config_path=emoji_config
-            )
-            results.append(result)
-            _display_sync_result(result, compact=True)
-        except Exception as e:
-            console.print(f"[red]❌ Error: {e}[/red]")
-            logger.error(f"Failed to sync playlist {playlist_name}: {e}")
-
-    # Display summary
-    _display_batch_summary(results)
+    """Sync MP3 playlists to Rekordbox with MyTag management."""
+    sync(app, playlist, emoji_config)
 
 
 def _display_batch_summary(results: List[Dict[str, Any]]) -> None:
@@ -374,8 +337,50 @@ def sync(
             _display_sync_result(result)
         else:
             # Sync all playlists
+            console.print(
+                "\n[bold cyan]🎵 Syncing all playlists to Rekordbox[/bold cyan]"
+            )
+            console.print("=" * 60)
+
             playlists_dir = app.config.mp3_directory / "Playlists"
-            _sync_all_playlists(rekordbox_service, playlists_dir, emoji_config)
+
+            if not playlists_dir.exists():
+                console.print(
+                    f"[red]❌ Playlists directory not found: " f"{playlists_dir}[/red]"
+                )
+                raise click.Abort()
+
+            # Get all playlist folders
+            playlist_folders = [d for d in playlists_dir.iterdir() if d.is_dir()]
+
+            if not playlist_folders:
+                console.print("[yellow]⚠️ No playlist folders found[/yellow]")
+                return
+
+            console.print(f"\n[bold]Found {len(playlist_folders)} playlists[/bold]\n")
+
+            # Pre-create all genre/party folders
+            console.print("[cyan]📁 Creating genre/party folders...[/cyan]")
+            rekordbox_service.ensure_genre_party_folders(emoji_config_path=emoji_config)
+            console.print("[green]✓ Folders ready[/green]\n")
+
+            results = []
+            for playlist_folder in sorted(playlist_folders):
+                playlist_name = playlist_folder.name
+                console.print(f"\n[cyan]Syncing: {playlist_name}[/cyan]")
+
+                try:
+                    result = rekordbox_service.sync_playlist_with_mytags(
+                        playlist_name, emoji_config_path=emoji_config
+                    )
+                    results.append(result)
+                    _display_sync_result(result, compact=True)
+                except Exception as e:
+                    console.print(f"[red]❌ Error: {e}[/red]")
+                    logger.error(f"Failed to sync playlist {playlist_name}: {e}")
+
+            # Display summary
+            _display_batch_summary(results)
 
     except FileNotFoundError as e:
         logger.error(f"❌ {e}")

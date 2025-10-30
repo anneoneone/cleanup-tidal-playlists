@@ -17,7 +17,11 @@ except ImportError:
     PYREKORDBOX_AVAILABLE = False
     Rekordbox6Database = None
 
+from .intelligent_playlist_structure_service import (
+    IntelligentPlaylistStructureService,
+)
 from .rekordbox_playlist_sync import RekordboxPlaylistSynchronizer
+from .track_tag_sync_service import TrackTagSyncService
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +60,10 @@ class RekordboxService:
         return self._db
 
     def sync_playlist_with_mytags(
-        self, playlist_name: str, emoji_config_path: Optional[Path] = None
+        self,
+        playlist_name: str,
+        emoji_config_path: Optional[Path] = None,
+        genre_hierarchy_config_path: Optional[Path] = None,
     ) -> Dict[str, Any]:
         """Synchronize a playlist from MP3 folder to Rekordbox with MyTag management.
 
@@ -71,6 +78,7 @@ class RekordboxService:
         Args:
             playlist_name: Name of the playlist (folder name in MP3 playlists)
             emoji_config_path: Path to emoji mapping config (uses default if None)
+            genre_hierarchy_config_path: Path to genre hierarchy config (optional)
 
         Returns:
             Dictionary with sync results
@@ -106,6 +114,22 @@ class RekordboxService:
                         f"or {cwd_config}"
                     )
 
+        # Default genre hierarchy config path
+        if genre_hierarchy_config_path is None:
+            service_dir = Path(__file__).resolve().parent
+            tidal_cleanup_dir = service_dir.parent
+            src_dir = tidal_cleanup_dir.parent
+            project_root = src_dir.parent
+            genre_hierarchy_config_path = (
+                project_root / "config" / "rekordbox_genre_hierarchy.json"
+            )
+
+            # If not found in project root, try cwd
+            if not genre_hierarchy_config_path.exists():
+                cwd_config = Path.cwd() / "config" / "rekordbox_genre_hierarchy.json"
+                if cwd_config.exists():
+                    genre_hierarchy_config_path = cwd_config
+
         # MP3 playlists root
         mp3_playlists_root = self.config.mp3_directory / "Playlists"
 
@@ -114,6 +138,7 @@ class RekordboxService:
             db=self.db,
             mp3_playlists_root=mp3_playlists_root,
             emoji_config_path=emoji_config_path,
+            genre_hierarchy_config_path=genre_hierarchy_config_path,
         )
 
         # Perform sync
@@ -122,16 +147,23 @@ class RekordboxService:
         logger.info(f"Playlist sync completed: {result}")
         return result
 
-    def ensure_genre_party_folders(
-        self, emoji_config_path: Optional[Path] = None
-    ) -> None:
-        """Pre-create all genre/party folders by scanning playlist names.
+    def sync_all_with_two_step_algorithm(
+        self,
+        emoji_config_path: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """Execute the new two-step sync algorithm.
 
-        This should be called before syncing multiple playlists to avoid
-        redundant folder creation during each sync.
+        Step 1: Create/update intelligent playlist structure
+        Step 2: Sync track tags from MP3 directories
 
         Args:
             emoji_config_path: Path to emoji mapping config (uses default if None)
+
+        Returns:
+            Dictionary with complete sync results
+
+        Raises:
+            RuntimeError: If database or config is not available
         """
         if not self.db:
             raise RuntimeError("Database connection not available")
@@ -160,11 +192,111 @@ class RekordboxService:
         # MP3 playlists root
         mp3_playlists_root = self.config.mp3_directory / "Playlists"
 
+        results: Dict[str, Any] = {
+            "step1": {},
+            "step2": {},
+        }
+
+        # Step 1: Create/update intelligent playlist structure
+        logger.info("=" * 60)
+        logger.info("STEP 1: Creating intelligent playlist structure")
+        logger.info("=" * 60)
+
+        structure_service = IntelligentPlaylistStructureService(
+            db=self.db,
+            mytag_mapping_path=emoji_config_path,
+        )
+
+        results["step1"] = structure_service.sync_intelligent_playlist_structure()
+
+        logger.info(f"Step 1 completed: {results['step1']}")
+
+        # Step 2: Sync track tags
+        logger.info("\n" + "=" * 60)
+        logger.info("STEP 2: Syncing track tags")
+        logger.info("=" * 60)
+
+        track_sync_service = TrackTagSyncService(
+            db=self.db,
+            mp3_playlists_root=mp3_playlists_root,
+            mytag_mapping_path=emoji_config_path,
+        )
+
+        results["step2"] = track_sync_service.sync_all_playlists()
+
+        logger.info(f"Step 2 completed: {results['step2']}")
+
+        # Commit all changes
+        self.db.commit()
+
+        logger.info("\n" + "=" * 60)
+        logger.info("✓ TWO-STEP SYNC COMPLETED")
+        logger.info("=" * 60)
+
+        return results
+
+    def ensure_genre_party_folders(
+        self,
+        emoji_config_path: Optional[Path] = None,
+        genre_hierarchy_config_path: Optional[Path] = None,
+    ) -> None:
+        """Pre-create all genre/party folders by scanning playlist names.
+
+        This should be called before syncing multiple playlists to avoid
+        redundant folder creation during each sync.
+
+        Args:
+            emoji_config_path: Path to emoji mapping config (uses default if None)
+            genre_hierarchy_config_path: Path to genre hierarchy config (optional)
+        """
+        if not self.db:
+            raise RuntimeError("Database connection not available")
+
+        if not self.config:
+            raise RuntimeError("Config not available")
+
+        # Default emoji config path
+        if emoji_config_path is None:
+            service_dir = Path(__file__).resolve().parent
+            tidal_cleanup_dir = service_dir.parent
+            src_dir = tidal_cleanup_dir.parent
+            project_root = src_dir.parent
+            emoji_config_path = project_root / "config" / "rekordbox_mytag_mapping.json"
+
+            if not emoji_config_path.exists():
+                cwd_config = Path.cwd() / "config" / "rekordbox_mytag_mapping.json"
+                if cwd_config.exists():
+                    emoji_config_path = cwd_config
+                else:
+                    raise RuntimeError(
+                        f"Cannot find emoji config at {emoji_config_path} "
+                        f"or {cwd_config}"
+                    )
+
+        # Default genre hierarchy config path
+        if genre_hierarchy_config_path is None:
+            service_dir = Path(__file__).resolve().parent
+            tidal_cleanup_dir = service_dir.parent
+            src_dir = tidal_cleanup_dir.parent
+            project_root = src_dir.parent
+            genre_hierarchy_config_path = (
+                project_root / "config" / "rekordbox_genre_hierarchy.json"
+            )
+
+            if not genre_hierarchy_config_path.exists():
+                cwd_config = Path.cwd() / "config" / "rekordbox_genre_hierarchy.json"
+                if cwd_config.exists():
+                    genre_hierarchy_config_path = cwd_config
+
+        # MP3 playlists root
+        mp3_playlists_root = self.config.mp3_directory / "Playlists"
+
         # Create synchronizer
         synchronizer = RekordboxPlaylistSynchronizer(
             db=self.db,
             mp3_playlists_root=mp3_playlists_root,
             emoji_config_path=emoji_config_path,
+            genre_hierarchy_config_path=genre_hierarchy_config_path,
         )
 
         # Ensure folders exist

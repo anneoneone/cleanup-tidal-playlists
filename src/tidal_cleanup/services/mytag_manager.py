@@ -303,3 +303,147 @@ class MyTagManager:
                 return True
 
         return False
+
+    def link_content_to_mytag(
+        self, content: Any, group_name: str, tag_name: str
+    ) -> bool:
+        """Link content to a MyTag by group and tag name.
+
+        Convenience method that creates/gets the tag and links it.
+
+        Args:
+            content: DjmdContent instance
+            group_name: Name of the MyTag group
+            tag_name: Name of the MyTag value
+
+        Returns:
+            True if linked successfully
+        """
+        tag = self.create_or_get_tag(tag_name, group_name)
+        return self.link_content_to_tag(content, tag)
+
+    def unlink_content_from_mytag(
+        self, content: Any, group_name: str, tag_name: str
+    ) -> bool:
+        """Unlink content from a MyTag by group and tag name.
+
+        Args:
+            content: DjmdContent instance
+            group_name: Name of the MyTag group
+            tag_name: Name of the MyTag value
+
+        Returns:
+            True if unlinked successfully
+        """
+        # Find the tag
+        group = self.create_or_get_group(group_name)
+        tag = (
+            self.db.query(db6.DjmdMyTag)
+            .filter(
+                db6.DjmdMyTag.Name == tag_name,
+                db6.DjmdMyTag.ParentID == group.ID,
+                db6.DjmdMyTag.Attribute == 0,
+            )
+            .first()
+        )
+
+        if not tag:
+            logger.debug(f"Tag {group_name}/{tag_name} not found for unlinking")
+            return False
+
+        return self.unlink_content_from_tag(content, tag)
+
+    def content_has_mytag(self, content: Any, group_name: str, tag_name: str) -> bool:
+        """Check if content has a specific MyTag.
+
+        Args:
+            content: DjmdContent instance
+            group_name: Name of the MyTag group
+            tag_name: Name of the MyTag value
+
+        Returns:
+            True if content has the tag
+        """
+        tags = self.get_content_tags(content, group_name=group_name)
+        return any(tag.Name == tag_name for tag in tags)
+
+    def get_content_with_all_tags(self, tag_dict: dict[str, Set[str]]) -> List[Any]:
+        """Get all content that has ALL specified tags (logical AND).
+
+        Args:
+            tag_dict: Dictionary mapping group names to sets of tag values
+                     Example: {"Genre": {"House", "Techno"}, "Status": {"Archived"}}
+
+        Returns:
+            List of DjmdContent instances
+        """
+        if not tag_dict:
+            return []
+
+        # Build list of all tag IDs we need to match
+        required_tag_ids: Set[str] = set()
+
+        for group_name, tag_values in tag_dict.items():
+            group = self.create_or_get_group(group_name)
+
+            for tag_value in tag_values:
+                tag = (
+                    self.db.query(db6.DjmdMyTag)
+                    .filter(
+                        db6.DjmdMyTag.Name == tag_value,
+                        db6.DjmdMyTag.ParentID == group.ID,
+                        db6.DjmdMyTag.Attribute == 0,
+                    )
+                    .first()
+                )
+
+                if tag:
+                    required_tag_ids.add(tag.ID)
+                else:
+                    # Tag doesn't exist, so no content can have it
+                    logger.debug(
+                        f"Tag {group_name}/{tag_value} does not exist, "
+                        "returning empty result"
+                    )
+                    return []
+
+        if not required_tag_ids:
+            return []
+
+        # Query content that has links to ALL required tags
+        # This is a bit complex with SQLAlchemy, so we'll use a manual approach
+
+        # Get all content IDs that have at least one of the required tags
+        content_ids_with_tags = (
+            self.db.query(db6.DjmdSongMyTag.ContentID)
+            .filter(db6.DjmdSongMyTag.MyTagID.in_(required_tag_ids))
+            .distinct()
+            .all()
+        )
+
+        # Filter to only those that have ALL required tags
+        matching_content_ids = []
+        for (content_id,) in content_ids_with_tags:
+            # Count how many of the required tags this content has
+            tag_count = (
+                self.db.query(db6.DjmdSongMyTag)
+                .filter(
+                    db6.DjmdSongMyTag.ContentID == content_id,
+                    db6.DjmdSongMyTag.MyTagID.in_(required_tag_ids),
+                )
+                .count()
+            )
+
+            if tag_count == len(required_tag_ids):
+                matching_content_ids.append(content_id)
+
+        # Get the actual content objects
+        if matching_content_ids:
+            content_list: List[Any] = (
+                self.db.query(db6.DjmdContent)
+                .filter(db6.DjmdContent.ID.in_(matching_content_ids))
+                .all()
+            )
+            return content_list
+
+        return []
