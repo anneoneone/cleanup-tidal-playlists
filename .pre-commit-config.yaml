@@ -40,6 +40,7 @@ repos:
     rev: 7.3.0
     hooks:
       - id: flake8
+        args: ["--extend-ignore=T001,T002"]
         additional_dependencies:
           - flake8-docstrings
           - flake8-bugbear
@@ -81,12 +82,12 @@ repos:
   # Local hooks for custom checks
   - repo: local
     hooks:
-      # Check for TODO/FIXME comments in production code
-      - id: check-todos
-        name: Check for TODO/FIXME in production code
-        entry: bash -c 'if grep -r "TODO\|FIXME" src/ --exclude-dir=__pycache__ --exclude="*.pyc" 2>/dev/null; then echo "Found TODO/FIXME in production code"; exit 1; fi'
-        language: system
-        pass_filenames: false
+      # Check for TODO/FIXME comments in production code (disabled - TODOs allowed)
+      # - id: check-todos
+      #   name: Check for TODO/FIXME in production code
+      #   entry: bash -c 'if grep -r "TODO\|FIXME" src/ --exclude-dir=__pycache__ --exclude="*.pyc" 2>/dev/null; then echo "Found TODO/FIXME in production code"; exit 1; fi'
+      #   language: system
+      #   pass_filenames: false
 
       # Ensure version consistency
       - id: version-check

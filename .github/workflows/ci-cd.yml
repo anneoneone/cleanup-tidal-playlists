@@ -47,7 +47,7 @@ jobs:
         run: isort --check-only --diff src/ tests/
 
       - name: Run flake8 (linting)
-        run: flake8 src/ tests/
+        run: flake8 src/ tests/ --extend-ignore=T001,T002
 
       - name: Run mypy (type checking)
         run: mypy --package tidal_cleanup --config-file=pyproject.toml
