@@ -255,6 +255,87 @@ class IntelligentPlaylistStructureService:
                 )
                 results["playlists_created"] += 1
 
+    def _scan_playlists_in_folder(self, folder_id: str) -> Dict[str, Any]:
+        """Scan all intelligent playlists in a folder.
+
+        Args:
+            folder_id: ID of the folder to scan
+
+        Returns:
+            Dictionary mapping playlist name to playlist object
+        """
+        playlists = (
+            self.db.query(db6.DjmdPlaylist)
+            .filter(
+                (db6.DjmdPlaylist.ParentID == folder_id)
+                & (db6.DjmdPlaylist.Attribute == 4)  # Intelligent playlist
+            )
+            .all()
+        )
+        return {playlist.Name: playlist for playlist in playlists}
+
+    def _sync_genre_playlists_in_status_folder(
+        self,
+        status_folder: Any,
+        status_name: str,
+        genre_tags: Dict[str, str],
+        existing_playlists: Dict[str, Any],
+        results: Dict[str, int],
+    ) -> None:
+        """Sync intelligent playlists within a status subfolder.
+
+        Creates playlists that match BOTH the genre AND the status.
+        For "Current" status, creates playlists with NO status tag.
+
+        Args:
+            status_folder: The parent status folder object
+            status_name: Name of the status (Archived, Old, Recherche, Current)
+            genre_tags: Dictionary mapping emoji to genre tag value
+            existing_playlists: Existing playlists in this folder
+            results: Results dictionary to update with counts
+        """
+        # Build expected playlists: emoji + genre_tag_name
+        expected_playlists = {}
+        for emoji, genre_tag_value in genre_tags.items():
+            playlist_name = f"{emoji} {genre_tag_value}"
+            expected_playlists[playlist_name] = genre_tag_value
+
+        # Remove orphaned playlists
+        for playlist_name in existing_playlists:
+            if playlist_name not in expected_playlists:
+                logger.info(
+                    f"    Removing orphaned playlist: {status_name}/{playlist_name}"
+                )
+                self.db.delete(existing_playlists[playlist_name])
+                results["playlists_removed"] += 1
+
+        # Create/update playlists for each genre tag
+        for playlist_name, genre_tag_value in expected_playlists.items():
+            if playlist_name in existing_playlists:
+                # Update existing playlist
+                logger.info(
+                    f"    Updating intelligent playlist: {status_name}/{playlist_name}"
+                )
+                self._create_or_update_status_playlist(
+                    playlist_name=playlist_name,
+                    parent_id=status_folder.ID,
+                    genre_value=genre_tag_value,
+                    status_value=status_name if status_name != "Current" else None,
+                )
+                results["playlists_updated"] += 1
+            else:
+                # Create new playlist
+                logger.info(
+                    f"    Creating intelligent playlist: {status_name}/{playlist_name}"
+                )
+                self._create_or_update_status_playlist(
+                    playlist_name=playlist_name,
+                    parent_id=status_folder.ID,
+                    genre_value=genre_tag_value,
+                    status_value=status_name if status_name != "Current" else None,
+                )
+                results["playlists_created"] += 1
+
     def sync_intelligent_playlist_structure(self) -> Dict[str, Any]:
         """Create/update the intelligent playlist structure.
 
@@ -330,15 +411,20 @@ class IntelligentPlaylistStructureService:
 
         Creates:
         - Top-level genre folders (House, Disco, Techno, etc.) under "Genres"
-        - Intelligent playlists for each actual genre tag inside its top-level folder
+        - Status subfolders (Archived, Old, Recherche, Current) under each genre
+        - Intelligent playlists for each actual genre tag inside status folders
 
         Example:
         Genres/
           House/
-            🇮🇹 House Italo (smart playlist for Genre:House Italo)
-            ☀️ House House (smart playlist for Genre:House House)
+            Archived/
+              🇮🇹 House Italo (smart playlist for Genre:House Italo AND Status:Archived)
+              ☀️ House House (smart playlist for Genre:House House AND Status:Archived)
+            Current/
+              🪇 House Groove (smart playlist for Genre:House Groove, no status tag)
           Disco/
-            🎈 Disco Nu (smart playlist for Genre:Disco Nu)
+            Recherche/
+              🎈 Disco Nu (smart playlist for Genre:Disco Nu AND Status:Recherche)
 
         Compares existing structure with JSON configuration:
         - Creates missing folders and playlists
@@ -374,7 +460,13 @@ class IntelligentPlaylistStructureService:
             existing_top_level, expected_top_level, results
         )
 
-        # Create/update top-level genre folders and their playlists
+        # Get Status values from config
+        status_values = list(
+            self.mytag_mapping.get("Track-Metadata", {}).get("Status", {}).values()
+        )
+        status_folders = status_values + ["Current"]  # Add "Current" for no status
+
+        # Create/update top-level genre folders with status subfolders
         for top_level_genre, genre_tags in genre_structure.items():
             logger.info(f"Processing top-level genre: {top_level_genre}")
 
@@ -387,17 +479,28 @@ class IntelligentPlaylistStructureService:
             if is_new_folder:
                 results["created"] += 1
 
-            # Get existing playlists in this top-level folder
-            existing_playlists = (
-                {}
-                if is_new_folder
-                else existing_top_level[top_level_genre]["playlists"]
-            )
+            # Create Status subfolders under this genre
+            for status_name in status_folders:
+                status_folder = self._get_or_create_folder(
+                    status_name, parent_id=genre_folder.ID
+                )
+                logger.info(
+                    f"  Status folder: {top_level_genre}/{status_name} "
+                    f"(ID: {status_folder.ID})"
+                )
 
-            # Sync playlists within this folder
-            self._sync_genre_playlists_in_folder(
-                genre_folder, genre_tags, existing_playlists, results
-            )
+                # Get existing playlists in this status folder
+                existing_playlists = self._scan_playlists_in_folder(status_folder.ID)
+
+                # Sync playlists within this status folder
+                # For each genre tag, create playlist in appropriate status folder
+                self._sync_genre_playlists_in_status_folder(
+                    status_folder,
+                    status_name,
+                    genre_tags,
+                    existing_playlists,
+                    results,
+                )
 
         logger.info(
             f"✓ Genre structure synced: "
@@ -567,6 +670,75 @@ class IntelligentPlaylistStructureService:
         logger.debug(
             f"Created smart playlist '{playlist_name}' with "
             f"MyTag condition: {mytag_group}={mytag_value} (ID: {mytag.ID})"
+        )
+
+        return playlist
+
+    def _create_or_update_status_playlist(
+        self,
+        playlist_name: str,
+        parent_id: str,
+        genre_value: str,
+        status_value: Optional[str] = None,
+    ) -> Any:
+        """Create or update an intelligent playlist with Genre AND Status query.
+
+        Args:
+            playlist_name: Name of the intelligent playlist
+            parent_id: Parent folder ID
+            genre_value: Genre tag value (e.g., "House Italo")
+            status_value: Status tag value (e.g., "Archived", "Old", None for Current)
+
+        Returns:
+            DjmdPlaylist instance with Attribute=4 (smart playlist)
+        """
+        # Try to find existing smart playlist
+        query = self.db.get_playlist(Name=playlist_name, Attribute=4)
+        playlist = query.filter(db6.DjmdPlaylist.ParentID == parent_id).first()
+
+        if playlist:
+            logger.debug(f"Found existing smart playlist: {playlist_name}")
+            return playlist
+
+        # Create new smart playlist
+        logger.info(f"Creating smart playlist: {playlist_name}")
+
+        # Get the MyTag IDs
+        mytag_manager = MyTagManager(self.db)
+        genre_tag = mytag_manager.create_or_get_tag(genre_value, "Genre")
+
+        # Create SmartList with ALL conditions (Genre AND Status)
+        smart_list = SmartList(logical_operator=LogicalOperator.ALL)
+
+        # Add Genre condition
+        smart_list.add_condition(
+            prop=Property.MYTAG,
+            operator=Operator.CONTAINS,
+            value_left=str(genre_tag.ID),
+        )
+
+        # Add Status condition if specified (not "Current")
+        if status_value:
+            status_tag = mytag_manager.create_or_get_tag(status_value, "Status")
+            smart_list.add_condition(
+                prop=Property.MYTAG,
+                operator=Operator.CONTAINS,
+                value_left=str(status_tag.ID),
+            )
+
+        # Create the smart playlist with the conditions
+        playlist = self.db.create_smart_playlist(
+            name=playlist_name,
+            smart_list=smart_list,
+            parent=parent_id,
+        )
+
+        self.db.flush()
+
+        status_info = f" AND Status={status_value}" if status_value else ""
+        logger.debug(
+            f"Created smart playlist '{playlist_name}' with "
+            f"Genre={genre_value}{status_info}"
         )
 
         return playlist
