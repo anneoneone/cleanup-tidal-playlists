@@ -19,6 +19,7 @@ from ..services import (
     RekordboxService,
     TidalService,
     TrackComparisonService,
+    TrackTagSyncService,
 )
 from ..utils.logging_config import configure_third_party_loggers, setup_logging
 
@@ -315,72 +316,58 @@ def sync(
     Examples:
       - "House Italo R 🇮🇹❓" → Genre: House Italo, Status: Recherche
       - "Jazz D 🎷💾" → Genre: Jazz, Status: Archived
+      - "Party Name 🎉" → Event: Party
+      - "Set Name 🎶" → Event: Set
+      - "Radio Show 🎙️" → Event: Radio Moafunk
 
     Features:
       - Adds/removes tracks based on MP3 folder contents
       - Applies MyTags from emoji patterns in playlist names
+      - Creates intelligent playlists for event playlists under Events/
       - Handles tracks in multiple playlists (accumulates tags)
       - Removes playlist-specific tags when tracks are removed
       - Deletes empty playlists automatically
     """
     try:
-        rekordbox_service = RekordboxService(app.config)
+        # Get emoji config path
+        if emoji_config is None:
+            config_parent = Path(__file__).parent.parent.parent.parent
+            emoji_config = config_parent / "config" / "rekordbox_mytag_mapping.json"
+            if not emoji_config.exists():
+                emoji_config = Path.cwd() / "config" / "rekordbox_mytag_mapping.json"
+
+        if not emoji_config.exists():
+            console.print(f"[red]❌ Emoji config not found: {emoji_config}[/red]")
+            raise click.Abort()
+
+        # Initialize parser to detect playlist types
+        from ..services.playlist_name_parser import PlaylistNameParser
+
+        parser = PlaylistNameParser(emoji_config)
 
         if playlist:
-            # Sync single playlist
+            # Sync single playlist - detect type and route appropriately
             console.print(f"\n[bold cyan]🎵 Syncing playlist: {playlist}[/bold cyan]")
             console.print("=" * 60)
 
-            result = rekordbox_service.sync_playlist_with_mytags(
-                playlist, emoji_config_path=emoji_config
+            metadata = parser.parse_playlist_name(playlist)
+            is_event = bool(
+                metadata.party_tags or metadata.set_tags or metadata.radio_moafunk_tags
             )
-            _display_sync_result(result)
-        else:
-            # Sync all playlists
-            console.print(
-                "\n[bold cyan]🎵 Syncing all playlists to Rekordbox[/bold cyan]"
-            )
-            console.print("=" * 60)
 
-            playlists_dir = app.config.mp3_directory / "Playlists"
-
-            if not playlists_dir.exists():
-                console.print(
-                    f"[red]❌ Playlists directory not found: " f"{playlists_dir}[/red]"
+            if is_event:
+                # Use TrackTagSyncService for event playlists
+                _sync_event_playlist_single(app, playlist, emoji_config)
+            else:
+                # Use RekordboxService for genre playlists
+                rekordbox_service = RekordboxService(app.config)
+                result = rekordbox_service.sync_playlist_with_mytags(
+                    playlist, emoji_config_path=emoji_config
                 )
-                raise click.Abort()
-
-            # Get all playlist folders
-            playlist_folders = [d for d in playlists_dir.iterdir() if d.is_dir()]
-
-            if not playlist_folders:
-                console.print("[yellow]⚠️ No playlist folders found[/yellow]")
-                return
-
-            console.print(f"\n[bold]Found {len(playlist_folders)} playlists[/bold]\n")
-
-            # Pre-create all genre/party folders
-            console.print("[cyan]📁 Creating genre/party folders...[/cyan]")
-            rekordbox_service.ensure_genre_party_folders(emoji_config_path=emoji_config)
-            console.print("[green]✓ Folders ready[/green]\n")
-
-            results = []
-            for playlist_folder in sorted(playlist_folders):
-                playlist_name = playlist_folder.name
-                console.print(f"\n[cyan]Syncing: {playlist_name}[/cyan]")
-
-                try:
-                    result = rekordbox_service.sync_playlist_with_mytags(
-                        playlist_name, emoji_config_path=emoji_config
-                    )
-                    results.append(result)
-                    _display_sync_result(result, compact=True)
-                except Exception as e:
-                    console.print(f"[red]❌ Error: {e}[/red]")
-                    logger.error(f"Failed to sync playlist {playlist_name}: {e}")
-
-            # Display summary
-            _display_batch_summary(results)
+                _display_sync_result(result)
+        else:
+            # Sync all playlists - separate into genre and event playlists
+            _sync_all_playlists_intelligent(app, emoji_config, parser)
 
     except FileNotFoundError as e:
         logger.error(f"❌ {e}")
@@ -391,6 +378,253 @@ def sync(
 
         traceback.print_exc()
         raise click.Abort()
+
+
+def _sync_event_playlist_single(
+    app: TidalCleanupApp, playlist: str, emoji_config: Path
+) -> None:
+    """Sync a single event playlist using TrackTagSyncService."""
+    from pyrekordbox.db6 import Rekordbox6Database
+
+    try:
+        db = Rekordbox6Database()
+        logger.info("Connected to Rekordbox database")
+    except Exception as e:
+        console.print(f"[red]❌ Failed to connect to Rekordbox database: {e}[/red]")
+        raise click.Abort()
+
+    mp3_playlists_root = app.config.mp3_directory / "Playlists"
+
+    if not mp3_playlists_root.exists():
+        console.print(
+            f"[red]❌ MP3 playlists directory not found: " f"{mp3_playlists_root}[/red]"
+        )
+        raise click.Abort()
+
+    sync_service = TrackTagSyncService(
+        db=db,
+        mp3_playlists_root=mp3_playlists_root,
+        mytag_mapping_path=emoji_config,
+    )
+
+    result = sync_service.sync_playlist(playlist)
+    db.commit()
+    db.close()
+    _display_event_sync_result(result)
+
+
+def _sync_all_playlists_intelligent(
+    app: TidalCleanupApp, emoji_config: Path, parser: Any
+) -> None:
+    """Sync all playlists with proper structure creation and track tagging.
+
+    Workflow:
+    1. Create genre folder/intelligent playlist structure
+    2. Process all tracks and update MyTags for genres
+    3. Create event intelligent playlists
+    """
+    console.print("\n[bold cyan]🎵 Syncing all playlists to Rekordbox[/bold cyan]")
+    console.print("=" * 60)
+
+    # Collect and categorize playlists
+    genre_playlists, event_playlists = _collect_playlists(app, parser)
+
+    if not genre_playlists and not event_playlists:
+        console.print("[yellow]⚠️ No playlist folders found[/yellow]")
+        return
+
+    console.print(
+        f"\n[bold]Found {len(genre_playlists) + len(event_playlists)} playlists: "
+        f"{len(genre_playlists)} genre, {len(event_playlists)} event[/bold]\n"
+    )
+
+    # Initialize database
+    db = _initialize_database()
+
+    try:
+        # Step 1: Create structure
+        structure_results = _create_playlist_structure(db, emoji_config)
+
+        # Initialize sync service with Events folder cache
+        sync_service = _initialize_sync_service(
+            app, db, emoji_config, structure_results
+        )
+
+        # Step 2: Process genre playlists
+        _process_genre_playlists(genre_playlists, sync_service, db)
+
+        # Step 3: Process event playlists
+        _process_event_playlists(event_playlists, sync_service, db)
+
+        console.print("\n[bold green]✅ All playlists synchronized![/bold green]")
+    finally:
+        db.close()
+
+
+def _collect_playlists(
+    app: TidalCleanupApp, parser: Any
+) -> tuple[list[str], list[str]]:
+    """Collect and categorize playlists into genre and event lists."""
+    playlists_dir = app.config.mp3_directory / "Playlists"
+
+    if not playlists_dir.exists():
+        console.print(f"[red]❌ Playlists directory not found: {playlists_dir}[/red]")
+        raise click.Abort()
+
+    playlist_folders = [d for d in playlists_dir.iterdir() if d.is_dir()]
+    genre_playlists = []
+    event_playlists = []
+
+    for folder in playlist_folders:
+        metadata = parser.parse_playlist_name(folder.name)
+        is_event = bool(
+            metadata.party_tags or metadata.set_tags or metadata.radio_moafunk_tags
+        )
+        if is_event:
+            event_playlists.append(folder.name)
+        else:
+            genre_playlists.append(folder.name)
+
+    return genre_playlists, event_playlists
+
+
+def _initialize_database() -> Any:
+    """Initialize and return Rekordbox database connection."""
+    from pyrekordbox.db6 import Rekordbox6Database
+
+    try:
+        db = Rekordbox6Database()
+        logger.info("Connected to Rekordbox database")
+        return db
+    except Exception as e:
+        console.print(f"[red]❌ Failed to connect to Rekordbox database: {e}[/red]")
+        raise click.Abort()
+
+
+def _create_playlist_structure(db: Any, emoji_config: Path) -> Dict[str, Any]:
+    """Create genre and event folder structure."""
+    from ..services.intelligent_playlist_structure_service import (
+        IntelligentPlaylistStructureService,
+    )
+
+    console.print("[cyan]📁 Step 1: Creating genre structure...[/cyan]")
+    try:
+        structure_service = IntelligentPlaylistStructureService(
+            db=db,
+            mytag_mapping_path=emoji_config,
+        )
+        structure_results = structure_service.sync_intelligent_playlist_structure()
+        db.flush()
+
+        console.print(
+            f"[green]✓ Created {structure_results.get('genres_folders_created', 0)} "
+            f"genre folders, {structure_results.get('total_playlists', 0)} "
+            f"intelligent playlists[/green]\n"
+        )
+        return structure_results
+    except Exception as e:
+        console.print(f"[red]❌ Failed to create genre structure: {e}[/red]")
+        logger.error(f"Genre structure creation failed: {e}", exc_info=True)
+        raise click.Abort()
+
+
+def _initialize_sync_service(
+    app: TidalCleanupApp,
+    db: Any,
+    emoji_config: Path,
+    structure_results: Dict[str, Any],
+) -> TrackTagSyncService:
+    """Initialize TrackTagSyncService with Events folder cache."""
+    mp3_playlists_root = app.config.mp3_directory / "Playlists"
+    sync_service = TrackTagSyncService(
+        db=db,
+        mp3_playlists_root=mp3_playlists_root,
+        mytag_mapping_path=emoji_config,
+    )
+
+    # Pass Events folder IDs from Step 1 to avoid creating duplicates
+    if "events_folder_id" in structure_results:
+        sync_service.set_events_folder_cache(
+            events_folder_id=structure_results["events_folder_id"],
+            subfolders=structure_results.get("events_subfolders", {}) or {},
+        )
+
+    return sync_service
+
+
+def _process_genre_playlists(
+    genre_playlists: list[str], sync_service: TrackTagSyncService, db: Any
+) -> None:
+    """Process genre playlists and tag tracks."""
+    if not genre_playlists:
+        return
+
+    console.print(
+        "[cyan]📝 Step 2: Processing genre playlists and tagging tracks...[/cyan]"
+    )
+
+    for playlist_name in sorted(genre_playlists):
+        console.print(f"\n[cyan]Processing: {playlist_name}[/cyan]")
+        try:
+            result = sync_service.sync_playlist(playlist_name)
+            _display_event_sync_result(result, compact=True)
+        except Exception as e:
+            console.print(f"[red]❌ Error: {e}[/red]")
+            logger.error(f"Failed to process playlist {playlist_name}: {e}")
+            db.rollback()
+
+
+def _process_event_playlists(
+    event_playlists: list[str], sync_service: TrackTagSyncService, db: Any
+) -> None:
+    """Process event playlists and create intelligent playlists."""
+    if not event_playlists:
+        return
+
+    console.print("\n[cyan]🎉 Step 3: Processing event playlists...[/cyan]")
+
+    for playlist_name in sorted(event_playlists):
+        console.print(f"\n[cyan]Processing: {playlist_name}[/cyan]")
+        try:
+            result = sync_service.sync_playlist(playlist_name)
+            _display_event_sync_result(result, compact=True)
+        except Exception as e:
+            console.print(f"[red]❌ Error: {e}[/red]")
+            logger.error(f"Failed to process event playlist {playlist_name}: {e}")
+            db.rollback()
+
+
+def _display_event_sync_result(result: Dict[str, Any], compact: bool = False) -> None:
+    """Display event sync results."""
+    if compact:
+        # Compact display for batch sync
+        status = "✅"
+        if result.get("skipped"):
+            status = "⚠️ (skipped)"
+
+        console.print(
+            f"  {status} Added: {result['tracks_added']}, "
+            f"Updated: {result['tracks_updated']}"
+        )
+    else:
+        console.print("\n[bold green]✅ Sync completed![/bold green]\n")
+
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Metric", style="cyan", width=30)
+        table.add_column("Value", style="green", justify="right")
+
+        table.add_row("Playlist Name", result["playlist_name"])
+        table.add_row("Tracks Added", str(result["tracks_added"]))
+        table.add_row("Tracks Updated", str(result["tracks_updated"]))
+        table.add_row("Tags Removed", str(result["tags_removed"]))
+        table.add_row("Skipped", "Yes" if result.get("skipped") else "No")
+
+        if result.get("event_type"):
+            table.add_row("Event Type", result["event_type"])
+            table.add_row("Event Name", result["event_name"])
+
+        console.print(table)
+        console.print()
 
 
 def _display_sync_result(result: dict[str, Any], compact: bool = False) -> None:

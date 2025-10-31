@@ -62,8 +62,11 @@ class IntelligentPlaylistStructureService:
         self.mytag_mapping: Dict[str, Any] = {}
         self._load_mytag_mapping()
 
-        # Cache for folders
+        # Cache for folders - key: "parent_id:folder_name"
         self._folder_cache: Dict[str, Any] = {}
+
+        # Initialize folder mapping from existing database
+        self._initialize_folder_mapping()
 
     def _load_mytag_mapping(self) -> None:
         """Load the MyTag mapping configuration."""
@@ -74,6 +77,43 @@ class IntelligentPlaylistStructureService:
         except Exception as e:
             logger.error(f"Failed to load MyTag mapping: {e}")
             raise
+
+    def _initialize_folder_mapping(self) -> None:
+        """Build initial folder mapping from existing database folders.
+
+        This prevents duplicate folder creation by caching all existing folders with
+        their parent relationships.
+        """
+        try:
+            # Query all folders (Attribute=1) from database
+            all_folders = (
+                self.db.query(db6.DjmdPlaylist)
+                .filter(db6.DjmdPlaylist.Attribute == 1)
+                .all()
+            )
+
+            logger.info(f"Found {len(all_folders)} existing folders in database")
+
+            # Build cache with key: "parent_id:folder_name"
+            # Normalize empty ParentID to None for consistency
+            for folder in all_folders:
+                parent_id = folder.ParentID
+                # Normalize various "root" representations to None
+                if not parent_id or parent_id == "" or parent_id == "root":
+                    parent_id = None
+                cache_key = f"{parent_id}:{folder.Name}"
+                self._folder_cache[cache_key] = folder
+                logger.debug(
+                    f"Cached folder: {folder.Name} "
+                    f"(ID: {folder.ID}, Parent: {parent_id}, Key: {cache_key})"
+                )
+
+            logger.info(
+                f"Initialized folder cache with {len(self._folder_cache)} entries"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize folder mapping: {e}")
+            # Not fatal - will create folders as needed
 
     def _get_genre_hierarchy(self) -> Dict[str, Dict[str, str]]:
         """Extract genre hierarchy from mytag_mapping.
@@ -263,9 +303,13 @@ class IntelligentPlaylistStructureService:
                 f"✓ Events folder: {events_folder.Name} (ID: {events_folder.ID})"
             )
 
-            # Step 4: Sync event subdirectories
+            # Step 4: Sync event subdirectories and store folder IDs
             event_results = self._sync_event_folders(events_folder.ID)
-            results["events_folders_created"] = event_results["created"]
+            results["events_folders_created"] = event_results.get("created", 0)
+
+            # Store Events folder IDs for TrackTagSyncService to use
+            results["events_folder_id"] = events_folder.ID
+            results["events_subfolders"] = event_results.get("folder_ids", {})
 
             self.db.commit()
             logger.info("✓ Intelligent playlist structure sync completed")
@@ -365,7 +409,7 @@ class IntelligentPlaylistStructureService:
         )
         return results
 
-    def _sync_event_folders(self, events_parent_id: str) -> Dict[str, int]:
+    def _sync_event_folders(self, events_parent_id: str) -> Dict[str, Any]:
         """Sync event folder structure.
 
         Compares existing structure with expected folders:
@@ -376,10 +420,10 @@ class IntelligentPlaylistStructureService:
             events_parent_id: Parent ID of the "Events" folder
 
         Returns:
-            Dictionary with count of created/removed folders
+            Dictionary with count of created/removed folders and folder IDs
         """
         expected_folders = ["Partys", "Sets", "Radio Moafunk"]
-        results = {"created": 0, "removed": 0}
+        results: Dict[str, Any] = {"created": 0, "removed": 0, "folder_ids": {}}
 
         # Scan existing event folders
         existing_folders = (
@@ -399,7 +443,7 @@ class IntelligentPlaylistStructureService:
                 self.db.delete(folder)
                 results["removed"] += 1
 
-        # Create missing folders
+        # Create missing folders or get existing ones
         for folder_name in expected_folders:
             if folder_name not in existing_names:
                 folder = self._get_or_create_folder(
@@ -409,8 +453,11 @@ class IntelligentPlaylistStructureService:
                     f"  ✓ Created event folder: {folder_name} (ID: {folder.ID})"
                 )
                 results["created"] += 1
+                results["folder_ids"][folder_name] = folder.ID
             else:
+                folder = existing_names[folder_name]
                 logger.info(f"  ✓ Event folder exists: {folder_name}")
+                results["folder_ids"][folder_name] = folder.ID
 
         logger.info(
             f"✓ Event structure synced: "
@@ -434,9 +481,11 @@ class IntelligentPlaylistStructureService:
         # Check cache first
         cache_key = f"{parent_id}:{folder_name}"
         if cache_key in self._folder_cache:
-            return self._folder_cache[cache_key]
+            folder = self._folder_cache[cache_key]
+            logger.info(f"Found cached folder: {folder_name} (ID: {folder.ID})")
+            return folder
 
-        # Try to find existing folder
+        # Try to find existing folder in database
         query = self.db.get_playlist(Name=folder_name, Attribute=1)
 
         if parent_id:
@@ -448,7 +497,7 @@ class IntelligentPlaylistStructureService:
             ).first()
 
         if folder:
-            logger.debug(f"Found existing folder: {folder_name}")
+            logger.info(f"Using existing folder: {folder_name} (ID: {folder.ID})")
             self._folder_cache[cache_key] = folder
             return folder
 

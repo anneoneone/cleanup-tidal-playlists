@@ -6,6 +6,7 @@ from .playlist_synchronizer import DeletionMode, PlaylistSynchronizer
 from .rekordbox_service import RekordboxGenerationError, RekordboxService
 from .tidal_service import TidalConnectionError, TidalService
 from .track_comparison_service import TrackComparisonService
+from .track_tag_sync_service import TrackTagSyncService
 
 __all__ = [
     "TidalService",
@@ -20,4 +21,5 @@ __all__ = [
     "DirectoryDiffService",
     "DirectoryDiff",
     "FileIdentity",
+    "TrackTagSyncService",
 ]

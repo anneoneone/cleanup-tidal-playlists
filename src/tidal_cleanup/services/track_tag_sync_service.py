@@ -49,8 +49,85 @@ class TrackTagSyncService:
         self.mytag_manager = MyTagManager(db)
         self.name_parser = PlaylistNameParser(mytag_mapping_path)
 
-        # Supported audio extensions
-        self.audio_extensions = {".mp3", ".flac", ".wav", ".aac", ".m4a"}
+        # Audio file extensions to search for
+        self.audio_extensions = {".mp3", ".m4a", ".flac", ".wav", ".aiff", ".ogg"}
+
+        # Cache for Events folder structure
+        self._events_folder_cache: Dict[str, Any] = {}
+
+        # Initialize the Events folder cache with existing structure
+        self._initialize_events_cache()
+
+    def _initialize_events_cache(self) -> None:
+        """Initialize the Events folder cache by querying existing folder structure.
+
+        This prevents creating duplicate Events folders when the structure has already
+        been created by IntelligentPlaylistStructureService.
+        """
+        try:
+            # Look for existing Events folder at root level
+            events_folder = (
+                self.db.get_playlist(Name="Events", Attribute=1)
+                .filter(
+                    (db6.DjmdPlaylist.ParentID == "")
+                    | (db6.DjmdPlaylist.ParentID.is_(None))
+                )
+                .first()
+            )
+
+            if events_folder:
+                logger.info(
+                    f"Found existing Events folder (ID: {events_folder.ID}), "
+                    "caching structure"
+                )
+                self._events_folder_cache["Events"] = events_folder
+
+                # Cache the subfolders (Partys, Sets, Radio Moafunk)
+                for folder_name in ["Partys", "Sets", "Radio Moafunk"]:
+                    subfolder = (
+                        self.db.get_playlist(Name=folder_name, Attribute=1)
+                        .filter(db6.DjmdPlaylist.ParentID == events_folder.ID)
+                        .first()
+                    )
+                    if subfolder:
+                        cache_key = f"Events/{folder_name}"
+                        self._events_folder_cache[cache_key] = subfolder
+                        logger.info(
+                            f"Cached existing folder: {folder_name} "
+                            f"(ID: {subfolder.ID})"
+                        )
+            else:
+                logger.info("No existing Events folder found, will create on demand")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Events cache: {e}")
+            # Not a fatal error, we'll create folders as needed
+
+    def set_events_folder_cache(
+        self, events_folder_id: str, subfolders: Dict[str, str]
+    ) -> None:
+        """Set the Events folder cache from external source.
+
+        This allows the main sync workflow to pass folder IDs created by
+        IntelligentPlaylistStructureService, ensuring we reuse the same folders.
+
+        Args:
+            events_folder_id: ID of the Events root folder
+            subfolders: Dict mapping folder names to IDs (Partys, Sets, Radio Moafunk)
+        """
+        # Create mock folder objects with just the IDs we need
+        from types import SimpleNamespace
+
+        events_folder = SimpleNamespace(ID=events_folder_id, Name="Events")
+        self._events_folder_cache["Events"] = events_folder
+        logger.info(
+            f"Cached Events folder from structure service " f"(ID: {events_folder_id})"
+        )
+
+        for folder_name, folder_id in subfolders.items():
+            subfolder = SimpleNamespace(ID=folder_id, Name=folder_name)
+            cache_key = f"Events/{folder_name}"
+            self._events_folder_cache[cache_key] = subfolder
+            logger.info(f"Cached Events subfolder: {folder_name} (ID: {folder_id})")
 
     def sync_all_playlists(self) -> Dict[str, Any]:
         """Sync all MP3 playlists with Rekordbox tracks.
@@ -260,15 +337,16 @@ class TrackTagSyncService:
             event_name: Name of the event
             event_tag: MyTag object for this event
         """
-        from pyrekordbox.rbxml import (
+        logger.info("DEBUG: Starting _create_event_intelligent_playlist")
+        logger.info(f"DEBUG: event_type={event_type}, event_name={event_name}")
+        logger.info(f"DEBUG: event_tag={event_tag}, event_tag.ID={event_tag.ID}")
+
+        from pyrekordbox.db6.smartlist import (
             LogicalOperator,
             Operator,
             Property,
             SmartList,
         )
-
-        # Get folder structure
-        events_folder = self._get_or_create_folder("Events", parent_id=None)
 
         # Map event type to folder name
         event_folder_map = {
@@ -276,13 +354,42 @@ class TrackTagSyncService:
             "Set": "Sets",
             "Radio Moafunk": "Radio Moafunk",
         }
-
         event_folder_name = event_folder_map.get(event_type, event_type)
-        type_folder = self._get_or_create_folder(
-            event_folder_name, parent_id=events_folder.ID
-        )
+
+        # Get or create Events folder (cached)
+        if "Events" not in self._events_folder_cache:
+            logger.info("DEBUG: Getting/creating Events folder")
+            events_folder = self._get_or_create_folder("Events", parent_id=None)
+            self._events_folder_cache["Events"] = events_folder
+            logger.info(
+                f"DEBUG: Events folder created/cached: Name={events_folder.Name}, "
+                f"ID={events_folder.ID}"
+            )
+        else:
+            events_folder = self._events_folder_cache["Events"]
+            logger.info(f"DEBUG: Using cached Events folder: ID={events_folder.ID}")
+
+        # Get or create type subfolder (cached)
+        cache_key = f"Events/{event_folder_name}"
+        if cache_key not in self._events_folder_cache:
+            logger.info(f"DEBUG: Getting/creating type folder: {event_folder_name}")
+            type_folder = self._get_or_create_folder(
+                event_folder_name, parent_id=events_folder.ID
+            )
+            self._events_folder_cache[cache_key] = type_folder
+            logger.info(
+                f"DEBUG: Type folder created/cached: Name={type_folder.Name}, "
+                f"ID={type_folder.ID}"
+            )
+        else:
+            type_folder = self._events_folder_cache[cache_key]
+            logger.info(
+                f"DEBUG: Using cached type folder: {event_folder_name}, "
+                f"ID={type_folder.ID}"
+            )
 
         # Check if intelligent playlist already exists
+        logger.info(f"DEBUG: Checking for existing playlist: {event_name}")
         existing_playlist = (
             self.db.query(db6.DjmdPlaylist)
             .filter(
@@ -292,6 +399,7 @@ class TrackTagSyncService:
             )
             .first()
         )
+        logger.info(f"DEBUG: existing_playlist={existing_playlist}")
 
         if existing_playlist:
             logger.info(
@@ -301,21 +409,33 @@ class TrackTagSyncService:
             return
 
         # Create smart playlist with Event tag condition
+        logger.info("DEBUG: Creating SmartList")
         smart_list = SmartList(logical_operator=LogicalOperator.ALL)
         mytag_id_str = str(event_tag.ID)
+        logger.info(f"DEBUG: mytag_id_str={mytag_id_str}")
 
         smart_list.add_condition(
             prop=Property.MYTAG,
             operator=Operator.CONTAINS,
             value_left=mytag_id_str,
         )
+        logger.info(f"DEBUG: SmartList created with condition: {smart_list}")
 
         # Create the intelligent playlist
-        self.db.create_smart_playlist(
-            name=event_name,
-            smart_list=smart_list,
-            parent=type_folder.ID,
+        logger.info(
+            f"DEBUG: Calling create_smart_playlist with name={event_name}, "
+            f"parent={type_folder.ID}"
         )
+        try:
+            result = self.db.create_smart_playlist(
+                name=event_name,
+                smart_list=smart_list,
+                parent=type_folder.ID,
+            )
+            logger.info(f"DEBUG: create_smart_playlist returned: {result}")
+        except Exception as e:
+            logger.error(f"DEBUG: create_smart_playlist failed: {e}", exc_info=True)
+            raise
 
         self.db.flush()
         logger.info(
@@ -335,28 +455,40 @@ class TrackTagSyncService:
         Returns:
             DjmdPlaylist instance with Attribute=1 (folder)
         """
+        logger.info(f"DEBUG: _get_or_create_folder: {folder_name}, parent={parent_id}")
+
         # Try to find existing folder
         query = self.db.get_playlist(Name=folder_name, Attribute=1)
+        logger.info(f"DEBUG: Query created for folder: {folder_name}")
 
         if parent_id:
             folder = query.filter(db6.DjmdPlaylist.ParentID == parent_id).first()
+            logger.info(f"DEBUG: Searched with parent_id={parent_id}, found={folder}")
         else:
             folder = query.filter(
                 (db6.DjmdPlaylist.ParentID == "")
                 | (db6.DjmdPlaylist.ParentID.is_(None))
             ).first()
+            logger.info(f"DEBUG: Searched at root level, found={folder}")
 
         if folder:
+            logger.info(
+                f"DEBUG: Returning existing folder: {folder.Name}, ID={folder.ID}"
+            )
             return folder
 
         # Create new folder
         logger.info(f"Creating event folder: {folder_name} (parent: {parent_id})")
-        folder = self.db.create_playlist(
-            name=folder_name,
-            parent=parent_id,
-            is_folder=True,
-        )
-        self.db.flush()
+        try:
+            folder = self.db.create_playlist_folder(
+                name=folder_name,
+                parent=parent_id,
+            )
+            self.db.flush()
+            logger.info(f"DEBUG: Created folder: {folder.Name}, ID={folder.ID}")
+        except Exception as e:
+            logger.error(f"DEBUG: Failed to create folder: {e}", exc_info=True)
+            raise
         return folder
 
     def _build_actual_tags(self, metadata: PlaylistMetadata) -> Dict[str, Set[str]]:

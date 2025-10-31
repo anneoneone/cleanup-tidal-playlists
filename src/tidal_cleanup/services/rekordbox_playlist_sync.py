@@ -33,7 +33,6 @@ class RekordboxPlaylistSynchronizer:
         db: Any,
         mp3_playlists_root: Path,
         emoji_config_path: Path,
-        genre_hierarchy_config_path: Optional[Path] = None,
     ) -> None:
         """Initialize playlist synchronizer.
 
@@ -41,7 +40,6 @@ class RekordboxPlaylistSynchronizer:
             db: Rekordbox6Database instance
             mp3_playlists_root: Root directory containing MP3 playlist folders
             emoji_config_path: Path to emoji-to-MyTag mapping configuration
-            genre_hierarchy_config_path: Path to genre hierarchy config (optional)
         """
         if not PYREKORDBOX_AVAILABLE:
             raise RuntimeError("pyrekordbox is not available")
@@ -51,13 +49,9 @@ class RekordboxPlaylistSynchronizer:
         self.mytag_manager = MyTagManager(db)
         self.name_parser = PlaylistNameParser(emoji_config_path)
 
-        # Initialize genre hierarchy manager if config provided
+        # Genre hierarchy is now defined through the nested structure in emoji_config
         self.genre_hierarchy: Optional[GenreHierarchyManager] = None
-        if genre_hierarchy_config_path and genre_hierarchy_config_path.exists():
-            self.genre_hierarchy = GenreHierarchyManager(genre_hierarchy_config_path)
-            logger.info("Genre hierarchy enabled")
-        else:
-            logger.info("Genre hierarchy disabled (no config provided)")
+        logger.info("Genre hierarchy defined through emoji config structure")
 
         # Supported audio extensions
         self.audio_extensions = {".mp3", ".flac", ".wav", ".aac", ".m4a"}
