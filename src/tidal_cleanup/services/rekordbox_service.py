@@ -178,9 +178,10 @@ class RekordboxService:
             "step2": {},
         }
 
-        # Step 1: Create/update intelligent playlist structure
+        # Initialize intelligent playlist structure service
+        # (playlists will be created on-demand during track sync)
         logger.info("=" * 60)
-        logger.info("STEP 1: Creating intelligent playlist structure")
+        logger.info("Initializing intelligent playlist structure service")
         logger.info("=" * 60)
 
         structure_service = IntelligentPlaylistStructureService(
@@ -188,19 +189,18 @@ class RekordboxService:
             mytag_mapping_path=emoji_config_path,
         )
 
-        results["step1"] = structure_service.sync_intelligent_playlist_structure()
+        logger.info("✓ Service initialized (playlists will be created on-demand)")
 
-        logger.info(f"Step 1 completed: {results['step1']}")
-
-        # Step 2: Sync track tags
+        # Sync track tags (this will create intelligent playlists as needed)
         logger.info("\n" + "=" * 60)
-        logger.info("STEP 2: Syncing track tags")
+        logger.info("Syncing track tags and creating playlists on-demand")
         logger.info("=" * 60)
 
         track_sync_service = TrackTagSyncService(
             db=self.db,
             mp3_playlists_root=mp3_playlists_root,
             mytag_mapping_path=emoji_config_path,
+            structure_service=structure_service,
         )
 
         results["step2"] = track_sync_service.sync_all_playlists()

@@ -33,6 +33,7 @@ class TrackTagSyncService:
         db: Any,
         mp3_playlists_root: Path,
         mytag_mapping_path: Path,
+        structure_service: Any = None,
     ) -> None:
         """Initialize the service.
 
@@ -40,6 +41,8 @@ class TrackTagSyncService:
             db: Rekordbox6Database instance
             mp3_playlists_root: Root directory containing MP3 playlist folders
             mytag_mapping_path: Path to rekordbox_mytag_mapping.json
+            structure_service: IntelligentPlaylistStructureService instance
+                              (optional, for on-demand playlist creation)
         """
         if not PYREKORDBOX_AVAILABLE:
             raise RuntimeError("pyrekordbox is not available")
@@ -48,6 +51,7 @@ class TrackTagSyncService:
         self.mp3_playlists_root = mp3_playlists_root
         self.mytag_manager = MyTagManager(db)
         self.name_parser = PlaylistNameParser(mytag_mapping_path)
+        self.structure_service = structure_service
 
         # Audio file extensions to search for
         self.audio_extensions = {".mp3", ".m4a", ".flac", ".wav", ".aiff", ".ogg"}
@@ -129,6 +133,58 @@ class TrackTagSyncService:
             self._events_folder_cache[cache_key] = subfolder
             logger.info(f"Cached Events subfolder: {folder_name} (ID: {folder_id})")
 
+    def _ensure_events_folder_structure(self) -> None:
+        """Create the Events folder structure upfront.
+
+        Creates:
+        - Events (root)
+          - Partys
+            - 2024
+            - 2025
+            - ...
+          - Sets
+            - 2024
+            - 2025
+            - ...
+          - Radio Moafunk
+            - 2024
+            - 2025
+            - ...
+
+        Year subfolders are created on-demand when processing event playlists.
+        """
+        try:
+            # Create Events root folder
+            events_folder = self._get_or_create_folder("Events", parent_id=None)
+            self._events_folder_cache["Events"] = events_folder
+            logger.info(
+                f"✓ Events folder: {events_folder.Name} (ID: {events_folder.ID})"
+            )
+
+            # Create event type subfolders
+            event_types = {
+                "Party": "Partys",
+                "Set": "Sets",
+                "Radio Moafunk": "Radio Moafunk",
+            }
+
+            for _event_type, folder_name in event_types.items():
+                type_folder = self._get_or_create_folder(
+                    folder_name, parent_id=events_folder.ID
+                )
+                cache_key = f"Events/{folder_name}"
+                self._events_folder_cache[cache_key] = type_folder
+                logger.info(f"✓ {folder_name} folder (ID: {type_folder.ID})")
+
+            # Commit the Events structure
+            self.db.commit()
+            logger.info("✓ Events folder structure created")
+
+        except Exception as e:
+            logger.error(f"Failed to create Events folder structure: {e}")
+            self.db.rollback()
+            raise
+
     def sync_all_playlists(self) -> Dict[str, Any]:
         """Sync all MP3 playlists with Rekordbox tracks.
 
@@ -141,6 +197,10 @@ class TrackTagSyncService:
             raise FileNotFoundError(
                 f"MP3 playlists root does not exist: {self.mp3_playlists_root}"
             )
+
+        # Create Events folder structure upfront
+        logger.info("Creating Events folder structure...")
+        self._ensure_events_folder_structure()
 
         results = {
             "playlists_processed": 0,
@@ -167,15 +227,70 @@ class TrackTagSyncService:
                 results["tracks_updated"] += sync_result["tracks_updated"]
                 results["tracks_removed"] += sync_result["tags_removed"]
 
+                # Commit after each successful playlist to avoid losing work
+                self.db.commit()
+
             except Exception as e:
                 logger.error(f"Failed to sync playlist '{playlist_name}': {e}")
                 results["skipped_playlists"] += 1
+                # Rollback to clean up the failed transaction and continue
+                self.db.rollback()
+                # Clear folder caches since rollback invalidated them
+                self._events_folder_cache.clear()
+                if self.structure_service:
+                    self.structure_service._folder_cache.clear()
                 continue
 
-        self.db.commit()
         logger.info("\n✓ Track tag sync completed")
 
         return results
+
+    def _ensure_intelligent_playlists_exist(self, metadata: PlaylistMetadata) -> None:
+        """Ensure intelligent playlists exist for all tag combinations in metadata.
+
+        Creates intelligent playlists on-demand for:
+        - Base: Genre + Status
+        - Energy variants: Genre + Energy + Status
+
+        Args:
+            metadata: Parsed playlist metadata with genre/energy/status tags
+        """
+        if not self.structure_service:
+            return
+
+        # Get the first genre tag (playlists should only have one genre)
+        if not metadata.genre_tags:
+            return
+
+        genre_value = list(metadata.genre_tags)[0]
+        status_value = list(metadata.status_tags)[0] if metadata.status_tags else None
+
+        # Create base playlist (Genre + Status)
+        try:
+            self.structure_service.get_or_create_intelligent_playlist(
+                genre_value=genre_value,
+                energy_value=None,
+                status_value=status_value,
+            )
+        except Exception as e:
+            logger.debug(f"Skipping base intelligent playlist for {genre_value}: {e}")
+            # Don't rollback - this would lose all previous work
+            # The playlist might already exist, which is fine
+
+        # Create energy variant playlists if energy tags exist
+        for energy_value in metadata.energy_tags:
+            try:
+                self.structure_service.get_or_create_intelligent_playlist(
+                    genre_value=genre_value,
+                    energy_value=energy_value,
+                    status_value=status_value,
+                )
+            except Exception as e:
+                logger.debug(
+                    f"Skipping intelligent playlist for "
+                    f"{genre_value} + {energy_value}: {e}"
+                )
+                # Don't rollback - this would lose all previous work
 
     def sync_playlist(self, playlist_name: str) -> Dict[str, Any]:
         """Sync a single playlist's tracks with Rekordbox.
@@ -195,6 +310,10 @@ class TrackTagSyncService:
         if self._is_event_playlist(metadata):
             logger.info(f"Processing as event playlist: {playlist_name}")
             return self._sync_event_playlist(playlist_name, metadata)
+
+        # Create intelligent playlists on-demand for genre playlists
+        if self.structure_service and metadata.genre_tags:
+            self._ensure_intelligent_playlists_exist(metadata)
 
         # Build the actual tag set with defaults for track playlists
         actual_tags = self._build_actual_tags(metadata)
@@ -286,17 +405,28 @@ class TrackTagSyncService:
         # Key is the MyTag category (event_type), value is the tag name (event_name)
         event_tags = {event_type: {event_name}}
 
-        for mp3_path in mp3_tracks:
+        # Process tracks in batches to avoid overwhelming the database
+        batch_size = 100
+        for idx, mp3_path in enumerate(mp3_tracks, start=1):
             was_added = self._add_or_update_track(mp3_path, event_tags)
             if was_added:
                 added_count += 1
             else:
                 updated_count += 1
 
+            # Flush every batch_size tracks to commit changes incrementally
+            if idx % batch_size == 0:
+                logger.debug(f"Flushing batch at track {idx}/{len(mp3_tracks)}")
+                self.db.flush()
+
+        # Final flush for any remaining tracks
+        self.db.flush()
+
         # Create intelligent playlist for this event
         self._create_event_intelligent_playlist(event_type, event_name, event_tag)
 
-        self.db.commit()
+        # Don't commit here - let the caller handle batched commits
+        # self.db.commit()
 
         return {
             "playlist_name": playlist_name,
@@ -324,6 +454,35 @@ class TrackTagSyncService:
             return "Set"
         elif metadata.radio_moafunk_tags:
             return "Radio Moafunk"
+
+        return None
+
+    def _extract_year_from_event_name(self, event_name: str) -> Optional[str]:
+        """Extract year from event playlist name.
+
+        Pattern: YY-MM-DD... where YY is the year (e.g., "24-01-12" → "2024")
+
+        Args:
+            event_name: The event playlist name
+
+        Returns:
+            Full year as string (e.g., "2024") or None if no year found
+        """
+        import re
+
+        # Match pattern: starts with 2 digits followed by "-"
+        match = re.match(r"^(\d{2})-", event_name)
+        if match:
+            year_short = match.group(1)
+            year_int = int(year_short)
+
+            # Assume years 00-49 are 2000s, 50-99 are 1900s
+            if year_int < 50:
+                full_year = f"20{year_short}"
+            else:
+                full_year = f"19{year_short}"
+
+            return full_year
 
         return None
 
@@ -388,13 +547,38 @@ class TrackTagSyncService:
                 f"ID={type_folder.ID}"
             )
 
+        # Extract year and create year subfolder (use "no year" if not found)
+        year = self._extract_year_from_event_name(event_name)
+        year_folder_name = year if year else "no year"
+
+        year_cache_key = f"Events/{event_folder_name}/{year_folder_name}"
+        if year_cache_key not in self._events_folder_cache:
+            logger.info(f"DEBUG: Getting/creating year folder: {year_folder_name}")
+            year_folder = self._get_or_create_folder(
+                year_folder_name, parent_id=type_folder.ID
+            )
+            self._events_folder_cache[year_cache_key] = year_folder
+            logger.info(
+                f"DEBUG: Year folder created/cached: Name={year_folder.Name}, "
+                f"ID={year_folder.ID}"
+            )
+        else:
+            year_folder = self._events_folder_cache[year_cache_key]
+            logger.info(
+                f"DEBUG: Using cached year folder: {year_folder_name}, "
+                f"ID={year_folder.ID}"
+            )
+
+        # Always use year folder (or "no year" folder) as parent
+        parent_folder = year_folder
+
         # Check if intelligent playlist already exists
         logger.info(f"DEBUG: Checking for existing playlist: {event_name}")
         existing_playlist = (
             self.db.query(db6.DjmdPlaylist)
             .filter(
                 (db6.DjmdPlaylist.Name == event_name)
-                & (db6.DjmdPlaylist.ParentID == type_folder.ID)
+                & (db6.DjmdPlaylist.ParentID == parent_folder.ID)
                 & (db6.DjmdPlaylist.Attribute == 4)
             )
             .first()
@@ -424,13 +608,13 @@ class TrackTagSyncService:
         # Create the intelligent playlist
         logger.info(
             f"DEBUG: Calling create_smart_playlist with name={event_name}, "
-            f"parent={type_folder.ID}"
+            f"parent={parent_folder.ID}"
         )
         try:
             result = self.db.create_smart_playlist(
                 name=event_name,
                 smart_list=smart_list,
-                parent=type_folder.ID,
+                parent=parent_folder.ID,
             )
             logger.info(f"DEBUG: create_smart_playlist returned: {result}")
         except Exception as e:

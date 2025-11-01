@@ -116,12 +116,13 @@ class MyTagManager:
 
         return tag
 
-    def link_content_to_tag(self, content: Any, tag: Any) -> bool:
+    def link_content_to_tag(self, content: Any, tag: Any, flush: bool = False) -> bool:
         """Link a content (track) to a MyTag value.
 
         Args:
             content: DjmdContent instance
             tag: DjmdMyTag instance (must be a value, not a group)
+            flush: Whether to flush changes immediately (default: False)
 
         Returns:
             True if linked (new or existing), False on error
@@ -146,7 +147,8 @@ class MyTagManager:
                     TrackNo=1,
                 )
                 self.db.add(song_tag)
-                self.db.flush()
+                if flush:
+                    self.db.flush()
             else:
                 logger.debug(
                     f"Content {content.ID} already linked to MyTag: {tag.Name}"
@@ -158,12 +160,15 @@ class MyTagManager:
             logger.error(f"Failed to link content to tag: {e}")
             return False
 
-    def unlink_content_from_tag(self, content: Any, tag: Any) -> bool:
+    def unlink_content_from_tag(
+        self, content: Any, tag: Any, flush: bool = False
+    ) -> bool:
         """Unlink a content (track) from a MyTag value.
 
         Args:
             content: DjmdContent instance
             tag: DjmdMyTag instance
+            flush: Whether to flush changes immediately (default: False)
 
         Returns:
             True if unlinked, False if not found or error
@@ -182,7 +187,8 @@ class MyTagManager:
             if link:
                 logger.debug(f"Unlinking content {content.ID} from MyTag: {tag.Name}")
                 self.db.delete(link)
-                self.db.flush()
+                if flush:
+                    self.db.flush()
                 return True
             else:
                 logger.debug(

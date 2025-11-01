@@ -419,9 +419,9 @@ def _sync_all_playlists_intelligent(
     """Sync all playlists with proper structure creation and track tagging.
 
     Workflow:
-    1. Create genre folder/intelligent playlist structure
-    2. Process all tracks and update MyTags for genres
-    3. Create event intelligent playlists
+    1. Parse all playlist names and create playlist structure
+    2. Create all intelligent playlists upfront
+    3. Process tracks and tag them with MyTags
     """
     console.print("\n[bold cyan]🎵 Syncing all playlists to Rekordbox[/bold cyan]")
     console.print("=" * 60)
@@ -442,19 +442,37 @@ def _sync_all_playlists_intelligent(
     db = _initialize_database()
 
     try:
-        # Step 1: Create structure
-        structure_results = _create_playlist_structure(db, emoji_config)
+        # Initialize structure service
+        structure_service = _create_playlist_structure(db, emoji_config)
 
-        # Initialize sync service with Events folder cache
+        # Initialize sync service with structure service
         sync_service = _initialize_sync_service(
-            app, db, emoji_config, structure_results
+            app, db, emoji_config, structure_service
         )
 
-        # Step 2: Process genre playlists
-        _process_genre_playlists(genre_playlists, sync_service, db)
+        # Phase 1: Create all playlist structures upfront
+        console.print("\n[bold cyan]Phase 1: Creating playlist structures[/bold cyan]")
+        playlist_mapping = _create_all_playlists(
+            genre_playlists, event_playlists, sync_service, parser, db
+        )
+        console.print(
+            f"[green]✓ Created {len(playlist_mapping)} playlist structures[/green]\n"
+        )
 
-        # Step 3: Process event playlists
-        _process_event_playlists(event_playlists, sync_service, db)
+        # Phase 2: Tag all tracks
+        console.print("\n[bold cyan]Phase 2: Tagging tracks[/bold cyan]")
+        _tag_all_tracks(playlist_mapping, sync_service, db)
+        console.print("[green]✓ All tracks tagged[/green]\n")
+
+        # Phase 3: Sort playlists alphabetically
+        console.print(
+            "\n[bold cyan]Phase 3: Sorting playlists alphabetically[/bold cyan]"
+        )
+        sort_counts = structure_service.sort_playlists_alphabetically()
+        console.print(
+            f"[green]✓ Sorted {sort_counts['folders']} folders and "
+            f"{sort_counts['playlists']} playlists alphabetically[/green]\n"
+        )
 
         console.print("\n[bold green]✅ All playlists synchronized![/bold green]")
     finally:
@@ -501,30 +519,29 @@ def _initialize_database() -> Any:
         raise click.Abort()
 
 
-def _create_playlist_structure(db: Any, emoji_config: Path) -> Dict[str, Any]:
-    """Create genre and event folder structure."""
+def _create_playlist_structure(db: Any, emoji_config: Path) -> Any:
+    """Initialize intelligent playlist structure service (on-demand creation)."""
     from ..services.intelligent_playlist_structure_service import (
         IntelligentPlaylistStructureService,
     )
 
-    console.print("[cyan]📁 Step 1: Creating genre structure...[/cyan]")
+    console.print(
+        "[cyan]📁 Initializing playlist structure service "
+        "(playlists will be created on-demand)...[/cyan]"
+    )
     try:
         structure_service = IntelligentPlaylistStructureService(
             db=db,
             mytag_mapping_path=emoji_config,
         )
-        structure_results = structure_service.sync_intelligent_playlist_structure()
-        db.flush()
 
         console.print(
-            f"[green]✓ Created {structure_results.get('genres_folders_created', 0)} "
-            f"genre folders, {structure_results.get('total_playlists', 0)} "
-            f"intelligent playlists[/green]\n"
+            "[green]✓ Service initialized (no playlists created yet)[/green]\n"
         )
-        return structure_results
+        return structure_service
     except Exception as e:
-        console.print(f"[red]❌ Failed to create genre structure: {e}[/red]")
-        logger.error(f"Genre structure creation failed: {e}", exc_info=True)
+        console.print(f"[red]❌ Failed to initialize structure service: {e}[/red]")
+        logger.error(f"Structure service initialization failed: {e}", exc_info=True)
         raise click.Abort()
 
 
@@ -532,66 +549,272 @@ def _initialize_sync_service(
     app: TidalCleanupApp,
     db: Any,
     emoji_config: Path,
-    structure_results: Dict[str, Any],
+    structure_service: Any,
 ) -> TrackTagSyncService:
-    """Initialize TrackTagSyncService with Events folder cache."""
+    """Initialize TrackTagSyncService with structure service for on-demand creation."""
     mp3_playlists_root = app.config.mp3_directory / "Playlists"
     sync_service = TrackTagSyncService(
         db=db,
         mp3_playlists_root=mp3_playlists_root,
         mytag_mapping_path=emoji_config,
+        structure_service=structure_service,
     )
 
-    # Pass Events folder IDs from Step 1 to avoid creating duplicates
-    if "events_folder_id" in structure_results:
-        sync_service.set_events_folder_cache(
-            events_folder_id=structure_results["events_folder_id"],
-            subfolders=structure_results.get("events_subfolders", {}) or {},
+    return sync_service
+
+
+def _create_all_playlists(
+    genre_playlists: list[str],
+    event_playlists: list[str],
+    sync_service: TrackTagSyncService,
+    parser: Any,
+    db: Any,
+) -> Dict[str, Dict[str, Any]]:
+    """Phase 1: Parse all playlists and create their structures.
+
+    Returns:
+        Dictionary mapping playlist_name to metadata:
+        {
+            "playlist_name": {
+                "metadata": PlaylistMetadata,
+                "type": "genre" or "event",
+                "event_type": Optional[str],  # For events: Party, Set, Radio Moafunk
+                "event_tag_id": Optional[str],  # For events: MyTag ID
+                "folder_path": str  # Full path to MP3 directory
+            }
+        }
+    """
+    playlist_mapping: Dict[str, Dict[str, Any]] = {}
+
+    # Ensure Events folder structure exists
+    if event_playlists:
+        console.print("[cyan]Creating Events folder structure...[/cyan]")
+        sync_service._ensure_events_folder_structure()
+        db.commit()
+        console.print("[green]✓ Events folder structure created[/green]")
+
+    # Process genre playlists
+    for playlist_name in genre_playlists:
+        console.print(f"[dim]Parsing: {playlist_name}[/dim]")
+        metadata = parser.parse_playlist_name(playlist_name)
+
+        # Create intelligent playlists for genre combinations
+        if sync_service.structure_service and metadata.genre_tags:
+            sync_service._ensure_intelligent_playlists_exist(metadata)
+
+        playlist_mapping[playlist_name] = {
+            "metadata": metadata,
+            "type": "genre",
+            "folder_path": str(sync_service.mp3_playlists_root / playlist_name),
+        }
+
+    # Commit genre playlist structures
+    if genre_playlists:
+        db.commit()
+        console.print(
+            f"[green]✓ Created {len(genre_playlists)} "
+            "genre playlist structures[/green]"
         )
 
-    return sync_service
+    # Process event playlists
+    for playlist_name in event_playlists:
+        console.print(f"[dim]Parsing: {playlist_name}[/dim]")
+        metadata = parser.parse_playlist_name(playlist_name)
+
+        # Determine event type
+        event_type = sync_service._get_event_type(metadata)
+        if not event_type:
+            logger.warning(f"Could not determine event type for: {playlist_name}")
+            continue
+
+        event_name = metadata.playlist_name
+
+        # Create event tag
+        event_tag = sync_service.mytag_manager.create_or_get_tag(event_name, event_type)
+
+        # Create intelligent playlist for this event
+        sync_service._create_event_intelligent_playlist(
+            event_type, event_name, event_tag
+        )
+
+        playlist_mapping[playlist_name] = {
+            "metadata": metadata,
+            "type": "event",
+            "event_type": event_type,
+            "event_tag_id": event_tag.ID,
+            "folder_path": str(sync_service.mp3_playlists_root / playlist_name),
+        }
+
+    # Commit event playlist structures
+    if event_playlists:
+        db.commit()
+        console.print(
+            f"[green]✓ Created {len(event_playlists)} "
+            "event playlist structures[/green]"
+        )
+
+    return playlist_mapping
+
+
+def _tag_all_tracks(
+    playlist_mapping: Dict[str, Dict[str, Any]],
+    sync_service: TrackTagSyncService,
+    db: Any,
+) -> None:
+    """Phase 2: Tag all tracks based on playlist mapping."""
+    from pathlib import Path
+
+    total_playlists = len(playlist_mapping)
+
+    for idx, (playlist_name, info) in enumerate(sorted(playlist_mapping.items()), 1):
+        metadata = info["metadata"]
+
+        # Build display name with energy info if available
+        display_name = playlist_name
+        if metadata.energy_tags:
+            energy_str = ", ".join(sorted(metadata.energy_tags))
+            display_name = f"{playlist_name} [Energy: {energy_str}]"
+
+        console.print(
+            f"\n[cyan]Tagging tracks: {display_name} "
+            f"({idx}/{total_playlists})[/cyan]"
+        )
+
+        try:
+            folder_path = Path(info["folder_path"])
+            playlist_type = info["type"]
+
+            # Get MP3 tracks
+            mp3_tracks = sync_service._scan_mp3_folder(folder_path)
+
+            if not mp3_tracks:
+                console.print("[yellow]  ⚠️  No tracks found[/yellow]")
+                continue
+
+            added_count, updated_count = _tag_playlist_tracks(
+                sync_service, info, metadata, playlist_type, mp3_tracks
+            )
+
+            console.print(
+                f"[green]  ✅ Added: {added_count}, Updated: {updated_count}[/green]"
+            )
+
+            # Commit after each playlist
+            db.commit()
+
+        except Exception as e:
+            console.print(f"[red]  ❌ Error: {e}[/red]")
+            logger.error(
+                f"Failed to tag tracks for {playlist_name}: {e}", exc_info=True
+            )
+            db.rollback()
+            # Clear caches after rollback
+            sync_service._events_folder_cache.clear()
+            if sync_service.structure_service:
+                sync_service.structure_service._folder_cache.clear()
+
+
+def _tag_playlist_tracks(
+    sync_service: TrackTagSyncService,
+    info: Dict[str, Any],
+    metadata: Any,
+    playlist_type: str,
+    mp3_tracks: List[Path],
+) -> tuple[int, int]:
+    """Tag tracks for a single playlist.
+
+    Returns:
+        Tuple of (added_count, updated_count)
+    """
+    added_count = 0
+    updated_count = 0
+
+    if playlist_type == "genre":
+        # Build actual tags for genre playlists
+        actual_tags = sync_service._build_actual_tags(metadata)
+
+        # Tag each track
+        for mp3_path in mp3_tracks:
+            was_added = sync_service._add_or_update_track(mp3_path, actual_tags)
+            if was_added:
+                added_count += 1
+            else:
+                updated_count += 1
+
+    elif playlist_type == "event":
+        # Build event tags
+        event_type = info["event_type"]
+        event_name = metadata.playlist_name
+        event_tags = {event_type: {event_name}}
+
+        # Tag each track
+        for mp3_path in mp3_tracks:
+            was_added = sync_service._add_or_update_track(mp3_path, event_tags)
+            if was_added:
+                added_count += 1
+            else:
+                updated_count += 1
+
+    return added_count, updated_count
 
 
 def _process_genre_playlists(
     genre_playlists: list[str], sync_service: TrackTagSyncService, db: Any
 ) -> None:
-    """Process genre playlists and tag tracks."""
+    """Process genre playlists (creates intelligent playlists on-demand)."""
     if not genre_playlists:
         return
 
     console.print(
-        "[cyan]📝 Step 2: Processing genre playlists and tagging tracks...[/cyan]"
+        "[cyan]📝 Processing genre playlists and creating "
+        "intelligent playlists on-demand...[/cyan]"
     )
 
-    for playlist_name in sorted(genre_playlists):
+    for idx, playlist_name in enumerate(sorted(genre_playlists), 1):
         console.print(f"\n[cyan]Processing: {playlist_name}[/cyan]")
         try:
             result = sync_service.sync_playlist(playlist_name)
             _display_event_sync_result(result, compact=True)
+
+            # Commit after each playlist to prevent stale data issues
+            db.commit()
+            logger.debug(f"Committed playlist {idx}/{len(genre_playlists)}")
         except Exception as e:
             console.print(f"[red]❌ Error: {e}[/red]")
             logger.error(f"Failed to process playlist {playlist_name}: {e}")
             db.rollback()
+            # Clear caches after rollback
+            sync_service._events_folder_cache.clear()
+            if sync_service.structure_service:
+                sync_service.structure_service._folder_cache.clear()
 
 
 def _process_event_playlists(
     event_playlists: list[str], sync_service: TrackTagSyncService, db: Any
 ) -> None:
-    """Process event playlists and create intelligent playlists."""
+    """Process event playlists and create event intelligent playlists."""
     if not event_playlists:
         return
 
-    console.print("\n[cyan]🎉 Step 3: Processing event playlists...[/cyan]")
+    console.print("\n[cyan]🎉 Processing event playlists...[/cyan]")
 
-    for playlist_name in sorted(event_playlists):
+    for idx, playlist_name in enumerate(sorted(event_playlists), 1):
         console.print(f"\n[cyan]Processing: {playlist_name}[/cyan]")
         try:
             result = sync_service.sync_playlist(playlist_name)
             _display_event_sync_result(result, compact=True)
+
+            # Commit after each event playlist to prevent stale data issues
+            db.commit()
+            logger.debug(f"Committed event playlist {idx}/{len(event_playlists)}")
         except Exception as e:
             console.print(f"[red]❌ Error: {e}[/red]")
             logger.error(f"Failed to process event playlist {playlist_name}: {e}")
             db.rollback()
+            # Clear caches after rollback
+            sync_service._events_folder_cache.clear()
+            if sync_service.structure_service:
+                sync_service.structure_service._folder_cache.clear()
 
 
 def _display_event_sync_result(result: Dict[str, Any], compact: bool = False) -> None:
