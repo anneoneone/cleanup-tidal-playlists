@@ -101,27 +101,37 @@ class PlaylistNameParser:
             logger.error(f"Failed to load emoji mapping config: {e}")
             raise
 
-    def _normalize_emoji(self, emoji: str) -> str:
+    def _normalize_emoji(
+        self, emoji: str, preserve_variation_selector: bool = False
+    ) -> str:
         """Normalize emoji by removing modifiers.
 
-        Removes skin tone, gender, and variation selectors.
+        Removes skin tone and gender modifiers. Optionally preserves variation selectors
+        for emojis like arrows where the variation selector is semantically important.
+
         This ensures emojis with different representations (e.g., 🏃🏼‍♂️ vs 🏃)
-        are treated as the same emoji.
+        are treated as the same emoji, while allowing Energy arrows to retain their
+        variation selectors (↗️ vs ↗).
 
         Args:
             emoji: Raw emoji string
+            preserve_variation_selector: If True, keep variation selectors (FE0E/FE0F).
+                                         Use True for Energy emojis (arrows).
 
         Returns:
-            Normalized emoji without modifiers
+            Normalized emoji without modifiers (except variation selector if preserved)
         """
         # Remove skin tone modifiers (🏻-🏿)
         emoji = re.sub(r"[\U0001f3fb-\U0001f3ff]", "", emoji)
         # Remove gender modifiers (ZWJ + gender symbol + variation selector)
         emoji = re.sub(r"\u200d[\u2640\u2642]\ufe0f?", "", emoji)
-        # Remove variation selectors (️)
-        emoji = re.sub(r"[\ufe0e\ufe0f]", "", emoji)
         # Remove zero-width joiners
         emoji = re.sub(r"\u200d", "", emoji)
+
+        # Only remove variation selectors if not preserving them
+        if not preserve_variation_selector:
+            # Remove variation selectors (️)
+            emoji = re.sub(r"[\ufe0e\ufe0f]", "", emoji)
 
         return emoji.strip()
 
@@ -139,6 +149,7 @@ class PlaylistNameParser:
                         continue
                     for emoji, tag_name in emoji_dict.items():
                         # Normalize emoji when building the mapping
+                        # Genre emojis should have skin tones removed
                         normalized = self._normalize_emoji(emoji)
                         self.emoji_to_group_tag[normalized] = (
                             group,
@@ -151,11 +162,16 @@ class PlaylistNameParser:
             # Handle flat structure for Energy, Status, etc.
             elif isinstance(content, dict):
                 for emoji, tag_name in content.items():
-                    # Normalize emoji when building the mapping
-                    normalized = self._normalize_emoji(emoji)
+                    # For Energy group, preserve variation selectors
+                    # (important for arrows). For other groups (Status, etc.),
+                    # remove all modifiers
+                    preserve_vs = group == "Energy"
+                    normalized = self._normalize_emoji(emoji, preserve_vs)
                     self.emoji_to_group_tag[normalized] = (group, tag_name)
                     logger.debug(
-                        f"Mapped emoji '{emoji}' -> '{normalized}' -> {tag_name}"
+                        f"Mapped {group} emoji '{emoji}' -> "
+                        f"'{normalized}' -> {tag_name} "
+                        f"(preserve_variation_selector={preserve_vs})"
                     )
 
         # Process Event-Metadata (🎉: Party, 🎶: Set, 🎙️: Radio Moafunk)
@@ -172,6 +188,69 @@ class PlaylistNameParser:
         logger.debug(
             f"Built reverse mapping with {len(self.emoji_to_group_tag)} emojis"
         )
+
+    def _lookup_emoji_in_mapping(self, emoji: str) -> Optional[Tuple[str, str]]:
+        """Look up emoji in mapping, trying both with and without variation selector.
+
+        Args:
+            emoji: The emoji to look up
+
+        Returns:
+            Tuple of (group, tag_name) if found, None otherwise
+        """
+        # First, try with variation selector preserved (for Energy arrows)
+        normalized_with_vs = self._normalize_emoji(
+            emoji, preserve_variation_selector=True
+        )
+        # Then, try without variation selector (for Genre, Status, etc.)
+        normalized_without_vs = self._normalize_emoji(
+            emoji, preserve_variation_selector=False
+        )
+
+        if normalized_with_vs in self.emoji_to_group_tag:
+            return self.emoji_to_group_tag[normalized_with_vs]
+        elif normalized_without_vs in self.emoji_to_group_tag:
+            return self.emoji_to_group_tag[normalized_without_vs]
+
+        return None
+
+    def _add_tag_to_sets(
+        self,
+        group: str,
+        tag_name: str,
+        clean_name: str,
+        genre_tags: Set[str],
+        party_tags: Set[str],
+        set_tags: Set[str],
+        radio_moafunk_tags: Set[str],
+        energy_tags: Set[str],
+        status_tags: Set[str],
+    ) -> None:
+        """Add a tag to the appropriate tag set based on its group.
+
+        Args:
+            group: The group name (Genre, Party, Energy, etc.)
+            tag_name: The tag name/value
+            clean_name: Clean playlist name for event tags
+            genre_tags: Set to add genre tags to
+            party_tags: Set to add party tags to
+            set_tags: Set to add set tags to
+            radio_moafunk_tags: Set to add radio moafunk tags to
+            energy_tags: Set to add energy tags to
+            status_tags: Set to add status tags to
+        """
+        if group == "Genre":
+            genre_tags.add(tag_name)
+        elif group == "Party":
+            party_tags.add(clean_name)
+        elif group == "Set":
+            set_tags.add(clean_name)
+        elif group == "Radio Moafunk":
+            radio_moafunk_tags.add(clean_name)
+        elif group == "Energy":
+            energy_tags.add(tag_name)
+        elif group == "Status":
+            status_tags.add(tag_name)
 
     def parse_playlist_name(self, playlist_name: str) -> PlaylistMetadata:
         """Parse playlist name and extract metadata from emojis.
@@ -201,31 +280,26 @@ class PlaylistNameParser:
 
         # Map emojis to tags
         for emoji in emojis:
-            # Normalize the emoji before lookup
-            normalized_emoji = self._normalize_emoji(emoji)
+            result = self._lookup_emoji_in_mapping(emoji)
 
-            if normalized_emoji in self.emoji_to_group_tag:
-                group, tag_name = self.emoji_to_group_tag[normalized_emoji]
-
-                if group == "Genre":
-                    genre_tags.add(tag_name)
-                elif group == "Party":
-                    # For event playlists, use the clean playlist name as tag
-                    party_tags.add(clean_name)
-                elif group == "Set":
-                    # For event playlists, use the clean playlist name as tag
-                    set_tags.add(clean_name)
-                elif group == "Radio Moafunk":
-                    # For event playlists, use the clean playlist name as tag
-                    radio_moafunk_tags.add(clean_name)
-                elif group == "Energy":
-                    energy_tags.add(tag_name)
-                elif group == "Status":
-                    status_tags.add(tag_name)
+            if result:
+                group, tag_name = result
+                self._add_tag_to_sets(
+                    group,
+                    tag_name,
+                    clean_name,
+                    genre_tags,
+                    party_tags,
+                    set_tags,
+                    radio_moafunk_tags,
+                    energy_tags,
+                    status_tags,
+                )
             else:
+                # Log when emoji is not found
                 logger.debug(
-                    f"Emoji '{emoji}' (normalized: '{normalized_emoji}') "
-                    f"in playlist '{playlist_name}' not found in mapping"
+                    f"Emoji '{emoji}' in playlist '{playlist_name}' "
+                    f"not found in mapping"
                 )
 
         metadata = PlaylistMetadata(
@@ -275,6 +349,7 @@ class PlaylistNameParser:
             "[\U0001f3fb-\U0001f3ff]?"  # skin tone
             "(?:\u200d[\u2640\u2642]\ufe0f?)?|"  # gender
             "[\U0001f680-\U0001f6ff]|"  # transport & map symbols
+            "[\U00002190-\U000021ff][\ufe0e\ufe0f]?|"  # arrows (incl. variation)
             "[\U00002702-\U000027b0]|"  # dingbats
             "[\U000024c2-\U0001f251]|"  # enclosed characters
             "[\U0001f900-\U0001f9ff]"  # supplemental symbols
@@ -305,6 +380,7 @@ class PlaylistNameParser:
             "[\U0001f600-\U0001f64f]|"
             "[\U0001f300-\U0001f5ff]|"
             "[\U0001f680-\U0001f6ff]|"
+            "[\U00002190-\U000021ff][\ufe0e\ufe0f]?|"  # arrows with variations
             "[\U00002702-\U000027b0]|"
             "[\U000024c2-\U0001f251]|"
             "[\U0001f900-\U0001f9ff]|"
