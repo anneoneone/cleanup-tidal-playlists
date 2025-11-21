@@ -17,6 +17,8 @@ from ..services import (
     PlaylistSynchronizer,
     RekordboxGenerationError,
     RekordboxService,
+    TidalDownloadError,
+    TidalDownloadService,
     TidalService,
     TrackComparisonService,
 )
@@ -56,6 +58,9 @@ class TidalCleanupApp:
             self.config,
         )
 
+        # Initialize download service
+        self.download_service = TidalDownloadService(self.config)
+
     def sync_playlists(
         self,
         playlist_filter: Optional[str] = None,
@@ -79,6 +84,42 @@ class TidalCleanupApp:
             deletion_mode,
         )
         return synchronizer.sync_playlists(playlist_filter)
+
+    def _download_tracks(self, playlist_name: Optional[str] = None) -> None:
+        """Download tracks from Tidal to M4A directory.
+
+        Args:
+            playlist_name: Optional playlist name to download. If provided,
+                          only that playlist will be downloaded.
+        """
+        try:
+            # Connect to Tidal
+            with console.status("[bold green]Connecting to Tidal..."):
+                self.download_service.connect()
+            console.print("[green]✓[/green] Connected to Tidal")
+
+            if playlist_name:
+                console.print(
+                    f"[bold blue]Downloading playlist: {playlist_name}...[/bold blue]"
+                )
+                playlist_dir = self.download_service.download_playlist(playlist_name)
+                console.print(
+                    f"[green]✓[/green] Downloaded playlist to: {playlist_dir}"
+                )
+            else:
+                console.print("[bold blue]Downloading all playlists...[/bold blue]")
+                playlist_dirs = self.download_service.download_all_playlists()
+                console.print(
+                    f"[green]✓[/green] Downloaded {len(playlist_dirs)} playlists"
+                )
+
+        except TidalDownloadError as e:
+            console.print(f"[red]✗[/red] Download failed: {e}")
+            raise click.ClickException(str(e))
+        except Exception as e:
+            logger.exception("Download failed")
+            console.print(f"[red]✗[/red] Download failed: {e}")
+            raise click.ClickException(str(e))
 
     # @convert convert
     def _convert_files(self, playlist_name: Optional[str] = None) -> None:
@@ -444,6 +485,20 @@ def _display_sync_result(result: dict[str, Any], compact: bool = False) -> None:
 
         console.print(table)
         console.print()
+
+
+@cli.command()
+@click.option(
+    "-p",
+    "--playlist",
+    type=str,
+    default=None,
+    help="Download only the specified playlist",
+)
+@click.pass_obj
+def download(app: TidalCleanupApp, playlist: Optional[str]) -> None:
+    """Download tracks from Tidal to M4A directory."""
+    app._download_tracks(playlist_name=playlist)
 
 
 @cli.command()
