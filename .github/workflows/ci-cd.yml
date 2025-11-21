@@ -9,7 +9,7 @@ on:
     types: [published]
 
 env:
-  PYTHON_VERSION_DEFAULT: "3.11"
+  PYTHON_VERSION_DEFAULT: "3.12"
 
 jobs:
   # Code quality and security checks
@@ -74,14 +74,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.12"]
         os: [ubuntu-latest, windows-latest, macos-latest]
-        exclude:
-          # Exclude some combinations to reduce CI time
-          - os: windows-latest
-            python-version: "3.9"
-          - os: macos-latest
-            python-version: "3.9"
 
     steps:
       - name: Checkout code
