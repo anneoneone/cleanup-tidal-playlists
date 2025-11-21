@@ -33,6 +33,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pyrekordbox>=0.1.0",
     "tidal-dl-ng>=0.31.4",
+    "sqlalchemy>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -161,6 +162,11 @@ module = ["src.tidal_cleanup.services.*", "tidal_cleanup.services.*"]
 disallow_untyped_calls = false
 # Suppress attr-defined errors for third-party library imports
 disable_error_code = ["attr-defined"]
+
+[[tool.mypy.overrides]]
+module = ["src.tidal_cleanup.database.*", "tidal_cleanup.database.*"]
+disallow_subclassing_any = false
+disable_error_code = ["no-any-return", "misc"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
