@@ -49,15 +49,8 @@ class TidalSnapshotService:
             database_playlists_count=len(db_playlists),
         )
 
-        # Compare playlists
-        snapshot_playlists = [
-            {
-                "tidal_id": p.tidal_id,
-                "name": p.name,
-                "description": p.description,
-            }
-            for p in tidal_playlists
-        ]
+        # Compare playlists with all metadata
+        snapshot_playlists = [self._playlist_to_dict(p) for p in tidal_playlists]
         playlist_changes = self.comparator.compare_playlists(
             db_playlists, snapshot_playlists
         )
@@ -101,20 +94,9 @@ class TidalSnapshotService:
                     f"playlist '{db_playlist.name}'"
                 )
 
-                # Convert Tidal tracks to snapshot format
+                # Convert Tidal tracks to snapshot format with all metadata
                 snapshot_tracks = [
-                    {
-                        "tidal_id": t.tidal_id,
-                        "title": t.title,
-                        "artist": t.artist,
-                        "album": t.album,
-                        "album_artist": None,
-                        "genre": None,
-                        "year": t.year,
-                        "duration": t.duration,
-                        "isrc": None,
-                        "position": idx,
-                    }
+                    self._track_to_snapshot_dict(t, idx)
                     for idx, t in enumerate(tidal_tracks)
                 ]
 
@@ -276,12 +258,8 @@ class TidalSnapshotService:
             logger.warning(f"Playlist {tidal_id} not found in Tidal")
             return
 
-        # Create playlist in database
-        playlist_data = {
-            "tidal_id": tidal_playlist.tidal_id,
-            "name": tidal_playlist.name,
-            "description": tidal_playlist.description,
-        }
+        # Create playlist in database with all metadata
+        playlist_data = self._playlist_to_dict(tidal_playlist)
         self.db_service.create_or_update_playlist(playlist_data)
         logger.info(f"Added playlist: {tidal_playlist.name}")
 
@@ -291,14 +269,7 @@ class TidalSnapshotService:
 
         if db_playlist:
             for idx, tidal_track in enumerate(tidal_tracks):
-                track_data = {
-                    "tidal_id": tidal_track.tidal_id,
-                    "title": tidal_track.title,
-                    "artist": tidal_track.artist,
-                    "album": tidal_track.album,
-                    "year": tidal_track.year,
-                    "duration": tidal_track.duration,
-                }
+                track_data = self._track_to_dict(tidal_track)
                 db_track = self.db_service.create_or_update_track(track_data)
                 self.db_service.add_track_to_playlist(
                     db_playlist.id, db_track.id, position=idx, in_tidal=True
@@ -377,14 +348,7 @@ class TidalSnapshotService:
                 )
 
                 if tidal_track:
-                    track_data = {
-                        "tidal_id": tidal_track.tidal_id,
-                        "title": tidal_track.title,
-                        "artist": tidal_track.artist,
-                        "album": tidal_track.album,
-                        "year": tidal_track.year,
-                        "duration": tidal_track.duration,
-                    }
+                    track_data = self._track_to_dict(tidal_track)
                     db_track = self.db_service.create_or_update_track(track_data)
 
         if db_track:
@@ -443,3 +407,78 @@ class TidalSnapshotService:
                 f"Updated metadata for track {change.track_id}: "
                 f"{list(update_data.keys())}"
             )
+
+    def _playlist_to_dict(self, playlist: Any) -> Dict[str, Any]:
+        """Convert Tidal playlist to dictionary with all metadata.
+
+        Args:
+            playlist: Tidal playlist object
+
+        Returns:
+            Dictionary with all playlist metadata fields
+        """
+        return {
+            "tidal_id": playlist.tidal_id,
+            "name": playlist.name,
+            "description": playlist.description,
+            "creator_name": getattr(playlist, "creator_name", None),
+            "creator_id": getattr(playlist, "creator_id", None),
+            "duration": getattr(playlist, "duration", None),
+            "num_tracks": getattr(playlist, "num_tracks", None),
+            "num_videos": getattr(playlist, "num_videos", None),
+            "popularity": getattr(playlist, "popularity", None),
+            "public": getattr(playlist, "public", None),
+            "picture_url": getattr(playlist, "picture_url", None),
+            "square_picture_url": getattr(playlist, "square_picture_url", None),
+            "created": getattr(playlist, "created", None),
+            "last_updated": getattr(playlist, "last_updated", None),
+            "last_item_added_at": getattr(playlist, "last_item_added_at", None),
+            "share_url": getattr(playlist, "share_url", None),
+            "listen_url": getattr(playlist, "listen_url", None),
+        }
+
+    def _track_to_dict(self, track: Any) -> Dict[str, Any]:
+        """Convert Tidal track to dictionary with all metadata.
+
+        Args:
+            track: Tidal track object
+
+        Returns:
+            Dictionary with all track metadata fields
+        """
+        return {
+            "tidal_id": track.tidal_id,
+            "title": track.title,
+            "artist": track.artist,
+            "album": getattr(track, "album", None),
+            "album_artist": getattr(track, "album_artist", None),
+            "year": getattr(track, "year", None),
+            "duration": getattr(track, "duration", None),
+            "track_number": getattr(track, "track_number", None),
+            "volume_number": getattr(track, "volume_number", None),
+            "explicit": getattr(track, "explicit", None),
+            "popularity": getattr(track, "popularity", None),
+            "copyright": getattr(track, "copyright", None),
+            "tidal_release_date": getattr(track, "tidal_release_date", None),
+            "audio_quality": getattr(track, "audio_quality", None),
+            "audio_modes": getattr(track, "audio_modes", None),
+            "version": getattr(track, "version", None),
+            "isrc": getattr(track, "isrc", None),
+            "album_upc": getattr(track, "album_upc", None),
+            "album_release_date": getattr(track, "album_release_date", None),
+            "album_cover_url": getattr(track, "album_cover_url", None),
+        }
+
+    def _track_to_snapshot_dict(self, track: Any, position: int) -> Dict[str, Any]:
+        """Convert Tidal track to snapshot dictionary format.
+
+        Args:
+            track: Tidal track object
+            position: Track position in playlist
+
+        Returns:
+            Dictionary with track metadata for snapshot comparison
+        """
+        track_dict = self._track_to_dict(track)
+        track_dict["position"] = position
+        return track_dict
