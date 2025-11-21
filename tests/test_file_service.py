@@ -1759,6 +1759,356 @@ class TestConvertDirectory:
         assert str(target_dir) in caplog.text
         assert "diff-based optimization" in caplog.text
 
+    def test_convert_directory_with_playlist_filter_exact_match(
+        self, file_service, temp_dirs
+    ):
+        """Test converting with playlist filter using exact match."""
+        source_dir, target_dir = temp_dirs
+
+        # Create multiple playlists
+        playlists = ["House Music", "Techno", "Deep House"]
+        for playlist_name in playlists:
+            playlist_dir = source_dir / "Playlists" / playlist_name
+            playlist_dir.mkdir(parents=True)
+            (playlist_dir / "track.m4a").write_text("audio")
+
+        # Mock convert_audio
+        with patch.object(file_service, "convert_audio") as mock_convert:
+            mock_convert.return_value = ConversionJob(
+                source_path=Path("dummy.m4a"),
+                target_path=Path("dummy.mp3"),
+                source_format=".m4a",
+                target_format=".mp3",
+                quality="2",
+                status="completed",
+            )
+
+            result = file_service.convert_directory(
+                source_dir, target_dir, playlist_filter="House Music"
+            )
+
+        # Should only convert the exact match
+        assert len(result) == 1
+        assert "House Music" in result
+        assert "Techno" not in result
+        assert "Deep House" not in result
+
+    def test_convert_directory_with_playlist_filter_fuzzy_match(
+        self, file_service, temp_dirs
+    ):
+        """Test converting with playlist filter using fuzzy matching."""
+        source_dir, target_dir = temp_dirs
+
+        # Create playlists
+        playlists = ["House Music 2024", "Techno Classics", "Deep House Vibes"]
+        for playlist_name in playlists:
+            playlist_dir = source_dir / "Playlists" / playlist_name
+            playlist_dir.mkdir(parents=True)
+            (playlist_dir / "track.m4a").write_text("audio")
+
+        # Mock convert_audio
+        with patch.object(file_service, "convert_audio") as mock_convert:
+            mock_convert.return_value = ConversionJob(
+                source_path=Path("dummy.m4a"),
+                target_path=Path("dummy.mp3"),
+                source_format=".m4a",
+                target_format=".mp3",
+                quality="2",
+                status="completed",
+            )
+
+            # Search for "House Music" - should match "House Music 2024"
+            result = file_service.convert_directory(
+                source_dir, target_dir, playlist_filter="House Music"
+            )
+
+        assert len(result) == 1
+        assert "House Music 2024" in result
+
+    def test_convert_directory_with_playlist_filter_no_match(
+        self, file_service, temp_dirs
+    ):
+        """Test converting with playlist filter when no match is found."""
+        source_dir, target_dir = temp_dirs
+
+        # Create playlists
+        playlists = ["House Music", "Techno"]
+        for playlist_name in playlists:
+            playlist_dir = source_dir / "Playlists" / playlist_name
+            playlist_dir.mkdir(parents=True)
+            (playlist_dir / "track.m4a").write_text("audio")
+
+        result = file_service.convert_directory(
+            source_dir, target_dir, playlist_filter="Jazz Favorites"
+        )
+
+        # Should return empty dict when no match
+        assert len(result) == 0
+
+    def test_convert_directory_with_playlist_filter_case_insensitive(
+        self, file_service, temp_dirs
+    ):
+        """Test playlist filter is case-insensitive."""
+        source_dir, target_dir = temp_dirs
+
+        playlist_dir = source_dir / "Playlists" / "House Music"
+        playlist_dir.mkdir(parents=True)
+        (playlist_dir / "track.m4a").write_text("audio")
+
+        # Mock convert_audio
+        with patch.object(file_service, "convert_audio") as mock_convert:
+            mock_convert.return_value = ConversionJob(
+                source_path=Path("dummy.m4a"),
+                target_path=Path("dummy.mp3"),
+                source_format=".m4a",
+                target_format=".mp3",
+                quality="2",
+                status="completed",
+            )
+
+            result = file_service.convert_directory(
+                source_dir, target_dir, playlist_filter="house music"
+            )
+
+        assert len(result) == 1
+        assert "House Music" in result
+
+    def test_convert_directory_with_playlist_filter_partial_match(
+        self, file_service, temp_dirs
+    ):
+        """Test playlist filter with partial name matching."""
+        source_dir, target_dir = temp_dirs
+
+        # Create playlists
+        playlists = ["My House Music Collection", "Techno", "House Party"]
+        for playlist_name in playlists:
+            playlist_dir = source_dir / "Playlists" / playlist_name
+            playlist_dir.mkdir(parents=True)
+            (playlist_dir / "track.m4a").write_text("audio")
+
+        # Mock convert_audio
+        with patch.object(file_service, "convert_audio") as mock_convert:
+            mock_convert.return_value = ConversionJob(
+                source_path=Path("dummy.m4a"),
+                target_path=Path("dummy.mp3"),
+                source_format=".m4a",
+                target_format=".mp3",
+                quality="2",
+                status="completed",
+            )
+
+            # "House" should match one of the house playlists
+            result = file_service.convert_directory(
+                source_dir, target_dir, playlist_filter="House"
+            )
+
+        # Should match one playlist (best match)
+        assert len(result) == 1
+        assert any("House" in name for name in result.keys())
+
+    def test_convert_directory_without_playlist_filter_converts_all(
+        self, file_service, temp_dirs
+    ):
+        """Test that without filter, all playlists are converted."""
+        source_dir, target_dir = temp_dirs
+
+        # Create multiple playlists
+        playlists = ["House", "Techno", "Trance"]
+        for playlist_name in playlists:
+            playlist_dir = source_dir / "Playlists" / playlist_name
+            playlist_dir.mkdir(parents=True)
+            (playlist_dir / "track.m4a").write_text("audio")
+
+        # Mock convert_audio
+        with patch.object(file_service, "convert_audio") as mock_convert:
+            mock_convert.return_value = ConversionJob(
+                source_path=Path("dummy.m4a"),
+                target_path=Path("dummy.mp3"),
+                source_format=".m4a",
+                target_format=".mp3",
+                quality="2",
+                status="completed",
+            )
+
+            result = file_service.convert_directory(source_dir, target_dir)
+
+        # All playlists should be converted
+        assert len(result) == 3
+        assert "House" in result
+        assert "Techno" in result
+        assert "Trance" in result
+
+
+class TestFilterPlaylistByName:
+    """Tests for _filter_playlist_by_name method."""
+
+    def test_filter_exact_match(self, file_service, temp_dirs):
+        """Test filtering with exact playlist name match."""
+        source_dir, _ = temp_dirs
+
+        # Create playlists
+        playlists = ["House Music", "Techno", "Deep House"]
+        playlist_dirs = []
+        for name in playlists:
+            playlist_dir = source_dir / name
+            playlist_dir.mkdir()
+            playlist_dirs.append(playlist_dir)
+
+        result = file_service._filter_playlist_by_name(playlist_dirs, "House Music")
+
+        assert len(result) == 1
+        assert result[0].name == "House Music"
+
+    def test_filter_exact_match_case_insensitive(self, file_service, temp_dirs):
+        """Test exact match is case-insensitive."""
+        source_dir, _ = temp_dirs
+
+        playlist_dir = source_dir / "House Music"
+        playlist_dir.mkdir()
+
+        result = file_service._filter_playlist_by_name([playlist_dir], "house music")
+
+        assert len(result) == 1
+        assert result[0].name == "House Music"
+
+    def test_filter_fuzzy_match_with_typo(self, file_service, temp_dirs):
+        """Test fuzzy matching handles typos."""
+        source_dir, _ = temp_dirs
+
+        playlist_dir = source_dir / "House Music"
+        playlist_dir.mkdir()
+
+        # Typo: "Musik" instead of "Music"
+        result = file_service._filter_playlist_by_name([playlist_dir], "House Musik")
+
+        assert len(result) == 1
+        assert result[0].name == "House Music"
+
+    def test_filter_fuzzy_match_partial_name(self, file_service, temp_dirs):
+        """Test fuzzy matching with partial name."""
+        source_dir, _ = temp_dirs
+
+        playlists = ["House Music 2024", "Techno", "House Party"]
+        playlist_dirs = []
+        for name in playlists:
+            playlist_dir = source_dir / name
+            playlist_dir.mkdir()
+            playlist_dirs.append(playlist_dir)
+
+        result = file_service._filter_playlist_by_name(playlist_dirs, "House Music")
+
+        # Should match "House Music 2024" as best match
+        assert len(result) == 1
+        assert "House Music" in result[0].name
+
+    def test_filter_fuzzy_match_word_order(self, file_service, temp_dirs):
+        """Test fuzzy matching handles different word order."""
+        source_dir, _ = temp_dirs
+
+        playlist_dir = source_dir / "Music House Collection"
+        playlist_dir.mkdir()
+
+        result = file_service._filter_playlist_by_name([playlist_dir], "House Music")
+
+        assert len(result) == 1
+        assert result[0].name == "Music House Collection"
+
+    def test_filter_no_match_below_threshold(self, file_service, temp_dirs):
+        """Test no match returned when similarity is too low."""
+        source_dir, _ = temp_dirs
+
+        playlists = ["Jazz Classics", "Blues Standards"]
+        playlist_dirs = []
+        for name in playlists:
+            playlist_dir = source_dir / name
+            playlist_dir.mkdir()
+            playlist_dirs.append(playlist_dir)
+
+        result = file_service._filter_playlist_by_name(playlist_dirs, "Techno")
+
+        # No match should be found
+        assert len(result) == 0
+
+    def test_filter_empty_playlist_list(self, file_service, temp_dirs):
+        """Test filtering with empty playlist list."""
+        result = file_service._filter_playlist_by_name([], "House Music")
+
+        assert len(result) == 0
+
+    def test_filter_returns_best_match_from_multiple(self, file_service, temp_dirs):
+        """Test that only the best match is returned from multiple candidates."""
+        source_dir, _ = temp_dirs
+
+        playlists = ["House", "House Music", "House Music 2024"]
+        playlist_dirs = []
+        for name in playlists:
+            playlist_dir = source_dir / name
+            playlist_dir.mkdir()
+            playlist_dirs.append(playlist_dir)
+
+        result = file_service._filter_playlist_by_name(
+            playlist_dirs, "House Music 2024"
+        )
+
+        # Should return exact match
+        assert len(result) == 1
+        assert result[0].name == "House Music 2024"
+
+    def test_filter_with_special_characters(self, file_service, temp_dirs):
+        """Test filtering with special characters in names."""
+        source_dir, _ = temp_dirs
+
+        playlist_dir = source_dir / "House & Techno"
+        playlist_dir.mkdir()
+
+        result = file_service._filter_playlist_by_name([playlist_dir], "House Techno")
+
+        assert len(result) == 1
+        assert result[0].name == "House & Techno"
+
+    def test_filter_logs_exact_match(self, file_service, temp_dirs, caplog):
+        """Test that exact match is logged."""
+        import logging
+
+        caplog.set_level(logging.INFO)
+
+        source_dir, _ = temp_dirs
+        playlist_dir = source_dir / "House Music"
+        playlist_dir.mkdir()
+
+        file_service._filter_playlist_by_name([playlist_dir], "House Music")
+
+        assert "Found exact match for playlist: House Music" in caplog.text
+
+    def test_filter_logs_fuzzy_match_with_score(self, file_service, temp_dirs, caplog):
+        """Test that fuzzy match logs include similarity score."""
+        import logging
+
+        caplog.set_level(logging.INFO)
+
+        source_dir, _ = temp_dirs
+        playlist_dir = source_dir / "House Music 2024"
+        playlist_dir.mkdir()
+
+        file_service._filter_playlist_by_name([playlist_dir], "House Music")
+
+        assert "Found fuzzy match" in caplog.text
+        assert "score:" in caplog.text
+
+    def test_filter_logs_warning_when_no_match(self, file_service, temp_dirs, caplog):
+        """Test that warning is logged when no match found."""
+        import logging
+
+        caplog.set_level(logging.WARNING)
+
+        source_dir, _ = temp_dirs
+        playlist_dir = source_dir / "Jazz"
+        playlist_dir.mkdir()
+
+        file_service._filter_playlist_by_name([playlist_dir], "Techno")
+
+        assert "No playlist found matching 'Techno'" in caplog.text
+
 
 class TestReplaceWithEmptyFile:
     """Tests for _replace_with_empty_file method."""
