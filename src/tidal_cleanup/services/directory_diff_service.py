@@ -123,7 +123,7 @@ class DirectoryDiffService:
         only_in_target = target_keys - source_keys
         in_both = source_keys & target_keys
 
-        logger.info(
+        logger.debug(
             f"Directory diff: {len(only_in_source)} to add, "
             f"{len(only_in_target)} to remove, {len(in_both)} in both"
         )
@@ -251,7 +251,7 @@ class DirectoryDiffService:
         logger.debug(f"Scanned {directory}: found {len(identities)} files")
         return identities
 
-    # @convert convert_directory_with_playlist_reporting()
+    # @convert convert_directory()
     def compare_by_stem_with_extension_mapping(
         self,
         source_dir: Path,

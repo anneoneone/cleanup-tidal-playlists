@@ -85,7 +85,7 @@ class TidalCleanupApp:
         """Convert M4A files to MP3."""
         console.print("[bold blue]Converting audio files...[/bold blue]")
 
-        playlist_jobs = self.file_service.convert_directory_with_playlist_reporting(
+        playlist_jobs = self.file_service.convert_directory(
             self.config.m4a_directory,
             self.config.mp3_directory,
             target_format=".mp3",
