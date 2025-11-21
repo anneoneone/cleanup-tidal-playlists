@@ -80,16 +80,37 @@ class TidalCleanupApp:
         )
         return synchronizer.sync_playlists(playlist_filter)
 
-    def _convert_files(self) -> None:
-        """Convert M4A files to MP3."""
-        console.print("[bold blue]Converting audio files...[/bold blue]")
+    # @convert convert
+    def _convert_files(self, playlist_name: Optional[str] = None) -> None:
+        """Convert M4A files to MP3.
 
-        playlist_jobs = self.file_service.convert_directory_with_playlist_reporting(
+        Args:
+            playlist_name: Optional playlist name to convert. If provided,
+                          only the closest matching playlist will be converted.
+        """
+        if playlist_name:
+            console.print(
+                f"[bold blue]Converting playlist: {playlist_name}...[/bold blue]"
+            )
+        else:
+            console.print("[bold blue]Converting audio files...[/bold blue]")
+
+        playlist_jobs = self.file_service.convert_directory(
             self.config.m4a_directory,
             self.config.mp3_directory,
             target_format=".mp3",
             quality=self.config.ffmpeg_quality,
+            playlist_filter=playlist_name,
         )
+
+        if not playlist_jobs:
+            if playlist_name:
+                console.print(
+                    f"[yellow]No playlist found matching '{playlist_name}'[/yellow]"
+                )
+            else:
+                console.print("[yellow]No playlists found to convert[/yellow]")
+            return
 
         self.show_result_table(playlist_jobs)
 
@@ -426,10 +447,17 @@ def _display_sync_result(result: dict[str, Any], compact: bool = False) -> None:
 
 
 @cli.command()
+@click.option(
+    "-p",
+    "--playlist",
+    type=str,
+    default=None,
+    help="Convert only the playlist with closest match to the given name",
+)
 @click.pass_obj
-def convert(app: TidalCleanupApp) -> None:
+def convert(app: TidalCleanupApp, playlist: Optional[str]) -> None:
     """Convert audio files from M4A to MP3."""
-    app._convert_files()
+    app._convert_files(playlist_name=playlist)
 
 
 @cli.command()
