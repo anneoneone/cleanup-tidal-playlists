@@ -1,6 +1,7 @@
 """Database package for playlist and track synchronization."""
 
 from .file_scanner_service import FileScannerService
+from .filesystem_scanner import FilesystemScanner
 from .models import (
     DownloadStatus,
     Playlist,
@@ -30,6 +31,7 @@ __all__ = [
     "TidalSnapshotService",
     "TidalStateFetcher",
     "FileScannerService",
+    "FilesystemScanner",
     "DownloadStatus",
     "PlaylistSyncStatus",
     "TrackSyncStatus",
