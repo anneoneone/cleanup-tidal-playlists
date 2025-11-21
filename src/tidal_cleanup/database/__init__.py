@@ -14,6 +14,7 @@ from .models import (
 from .service import DatabaseService
 from .sync_state import Change, ChangeType, SyncState, SyncStateComparator
 from .tidal_snapshot_service import TidalSnapshotService
+from .tidal_state_fetcher import TidalStateFetcher
 
 __all__ = [
     "Track",
@@ -27,6 +28,7 @@ __all__ = [
     "SyncState",
     "SyncStateComparator",
     "TidalSnapshotService",
+    "TidalStateFetcher",
     "FileScannerService",
     "DownloadStatus",
     "PlaylistSyncStatus",
