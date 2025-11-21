@@ -1,11 +1,11 @@
 """Service for downloading tracks from Tidal using tidal-dl-ng."""
 
 import logging
-import random
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Callable, List, Optional
 
+import requests
 from tidalapi import Playlist as TidalPlaylist
 
 try:
@@ -26,8 +26,6 @@ logger = logging.getLogger(__name__)
 class TidalDownloadError(Exception):
     """Custom exception for Tidal download issues."""
 
-    pass
-
 
 class TidalDownloadService:
     """Service for downloading tracks from Tidal to local directory."""
@@ -44,26 +42,92 @@ class TidalDownloadService:
         self._authenticated = False
 
     def _create_tidal_dl_settings(self) -> TidalDLSettings:
-        """Create tidal-dl-ng settings from app config.
+        """Create tidal-dl-ng settings from available config.
+
+        Priority order:
+        1. Project config: <repo_root>/config/tidal_dl_ng.json
+        2. User config: ~/.config/tidal_dl_ng/settings.json
+        3. Defaults: Create new settings with sensible defaults
 
         Returns:
             TidalDLSettings configured for this application
         """
+        if TidalDLSettings is None:
+            return None
+
+        # Check project config first
+        repo_root = Path(__file__).resolve().parents[3]
+        project_config = repo_root / "config" / "tidal_dl_ng.json"
+
+        # Check user config second
+        user_config = Path.home() / ".config" / "tidal_dl_ng" / "settings.json"
+
         settings = TidalDLSettings()
-        # Configure download path to m4a directory
-        settings.data.download_base_path = str(self.config.m4a_directory)
-        # Skip existing files by default
-        settings.data.skip_existing = True
-        # Set audio quality
-        settings.data.quality_audio = "HI_RES_LOSSLESS"  # Highest quality
-        # Disable video downloads
-        settings.data.video_download = False
-        # Use playlist structure - note: tidal-dl-ng uses specific variable names
-        # Available: {playlist_name}, {artist_name}, {track_title}
-        settings.data.format_playlist = (
-            "Playlists/{playlist_name}/{artist_name} - {track_title}"
-        )
+
+        if project_config.exists():
+            # Use project config (highest priority)
+            logger.debug(f"Loading project config: {project_config}")
+            settings.read(str(project_config))
+        elif user_config.exists():
+            # Use user config as fallback
+            logger.info(f"Loading user config: {user_config}")
+            settings.read(str(user_config))
+        else:
+            # Use defaults (no config files found)
+            logger.info("No config found, using defaults")
+            settings.data.download_base_path = str(self.config.m4a_directory)
+            settings.data.quality_audio = "HI_RES_LOSSLESS"
+            settings.data.skip_existing = True
+            settings.data.video_download = False
+            settings.data.format_playlist = (
+                "Playlists/{playlist_name}/{artist_name} - {track_title}"
+            )
+
         return settings
+
+    def _retry_api_call(
+        self, func: Callable[[], Any], max_retries: int = 3, base_delay: float = 1.0
+    ) -> Any:
+        """Retry API calls with exponential backoff for transient errors.
+
+        Args:
+            func: Function to call (should return API result)
+            max_retries: Maximum number of retry attempts
+            base_delay: Base delay in seconds (doubles each retry)
+
+        Returns:
+            Result from the API call
+
+        Raises:
+            TidalDownloadError: If all retries fail
+        """
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                return func()
+            except requests.exceptions.HTTPError as e:
+                # Only retry on server errors (5xx)
+                if e.response and 500 <= e.response.status_code < 600:
+                    last_error = e
+                    if attempt < max_retries:
+                        delay = base_delay * (2**attempt)
+                        logger.warning(
+                            f"Tidal API error {e.response.status_code}, "
+                            f"retrying in {delay:.1f}s... "
+                            f"(attempt {attempt + 1}/{max_retries})"
+                        )
+                        time.sleep(delay)
+                        continue
+                # Non-retryable error, raise immediately
+                raise TidalDownloadError(str(e)) from e
+            except Exception as e:
+                # Other exceptions are not retried
+                raise TidalDownloadError(str(e)) from e
+
+        # All retries exhausted
+        raise TidalDownloadError(
+            f"API call failed after {max_retries} retries: {last_error}"
+        )
 
     def connect(self) -> None:
         """Establish connection to Tidal API using tidal-dl-ng.
@@ -114,9 +178,9 @@ class TidalDownloadService:
         try:
             logger.info(f"Searching for playlist: {playlist_name}")
 
-            # Get user's playlists
+            # Get user's playlists with retry logic for transient errors
             user = self.tidal_dl.session.user
-            playlists = user.playlists()
+            playlists = self._retry_api_call(lambda: user.playlists())
 
             # Find matching playlist
             target_playlist = None
@@ -135,14 +199,21 @@ class TidalDownloadService:
                 f"(ID: {target_playlist.id}, {target_playlist.num_tracks} tracks)"
             )
 
+            # Sanitize playlist name for filesystem (replace problematic characters)
+            safe_playlist_name = target_playlist.name.replace("/", "-")
+
             # Calculate target directory
             playlist_dir: Path = (
-                self.config.m4a_directory / "Playlists" / target_playlist.name
+                self.config.m4a_directory / "Playlists" / safe_playlist_name
             )
 
             if create_directory:
-                playlist_dir.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Created/verified playlist directory: {playlist_dir}")
+                # Only create the directory when it does not already exist.
+                if not playlist_dir.exists():
+                    playlist_dir.mkdir(parents=True, exist_ok=True)
+                    logger.info(f"Created playlist directory: {playlist_dir}")
+                else:
+                    logger.debug(f"Playlist directory already exists: {playlist_dir}")
 
             # Download the playlist using tidal-dl-ng
             self._download_playlist_tracks(target_playlist, playlist_dir)
@@ -177,14 +248,8 @@ class TidalDownloadService:
 
             downloaded_dirs = []
 
-            for idx, playlist in enumerate(playlists):
+            for playlist in playlists:
                 try:
-                    # Add small random delay between playlists (except first one)
-                    if idx > 0:
-                        delay = random.uniform(0.5, 2.0)  # noqa: S311
-                        logger.debug(f"Waiting {delay:.1f}s before next playlist...")
-                        time.sleep(delay)
-
                     playlist_dir = self.download_playlist(
                         playlist.name, create_directory=True
                     )
