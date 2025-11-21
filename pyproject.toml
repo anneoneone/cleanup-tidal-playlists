@@ -34,6 +34,7 @@ dependencies = [
     "pyrekordbox>=0.1.0",
     "tidal-dl-ng>=0.31.4",
     "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]
@@ -111,7 +112,7 @@ sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 
 # MyPy configuration
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

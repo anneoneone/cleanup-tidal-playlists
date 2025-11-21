@@ -53,7 +53,10 @@ repos:
     rev: v1.16.0
     hooks:
       - id: mypy
-        additional_dependencies: [types-requests]
+        args: [--python-version=3.12]
+        additional_dependencies:
+          - types-requests
+          - sqlalchemy>=2.0.0
         exclude: ^(tests/|scripts/|spikes/.*)
 
   # Docstring formatting
