@@ -13,6 +13,12 @@ from .models import (
     TrackSyncStatus,
 )
 from .service import DatabaseService
+from .sync_decision_engine import (
+    DecisionResult,
+    SyncAction,
+    SyncDecisionEngine,
+    SyncDecisions,
+)
 from .sync_state import Change, ChangeType, SyncState, SyncStateComparator
 from .tidal_snapshot_service import TidalSnapshotService
 from .tidal_state_fetcher import TidalStateFetcher
@@ -32,6 +38,10 @@ __all__ = [
     "TidalStateFetcher",
     "FileScannerService",
     "FilesystemScanner",
+    "DecisionResult",
+    "SyncAction",
+    "SyncDecisionEngine",
+    "SyncDecisions",
     "DownloadStatus",
     "PlaylistSyncStatus",
     "TrackSyncStatus",
