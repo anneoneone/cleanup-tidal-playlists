@@ -4,12 +4,15 @@ from .directory_diff_service import DirectoryDiff, DirectoryDiffService, FileIde
 from .file_service import FileOperationError, FileService
 from .playlist_synchronizer import DeletionMode, PlaylistSynchronizer
 from .rekordbox_service import RekordboxGenerationError, RekordboxService
+from .tidal_download_service import TidalDownloadError, TidalDownloadService
 from .tidal_service import TidalConnectionError, TidalService
 from .track_comparison_service import TrackComparisonService
 
 __all__ = [
     "TidalService",
     "TidalConnectionError",
+    "TidalDownloadService",
+    "TidalDownloadError",
     "FileService",
     "FileOperationError",
     "TrackComparisonService",
