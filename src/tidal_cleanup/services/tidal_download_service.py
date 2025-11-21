@@ -1,6 +1,8 @@
 """Service for downloading tracks from Tidal using tidal-dl-ng."""
 
 import logging
+import random
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -49,16 +51,17 @@ class TidalDownloadService:
         """
         settings = TidalDLSettings()
         # Configure download path to m4a directory
-        settings.download_base_path = str(self.config.m4a_directory)
+        settings.data.download_base_path = str(self.config.m4a_directory)
         # Skip existing files by default
-        settings.skip_existing = True
+        settings.data.skip_existing = True
         # Set audio quality
-        settings.quality_audio = "HI_RES_LOSSLESS"  # Highest quality
+        settings.data.quality_audio = "HI_RES_LOSSLESS"  # Highest quality
         # Disable video downloads
-        settings.video_download = False
-        # Use album structure with playlists subdirectory
-        settings.format_playlist = (
-            "Playlists/{playlist_name}/{track_num} - {track_artist} - {track_title}"
+        settings.data.video_download = False
+        # Use playlist structure - note: tidal-dl-ng uses specific variable names
+        # Available: {playlist_name}, {artist_name}, {track_title}
+        settings.data.format_playlist = (
+            "Playlists/{playlist_name}/{artist_name} - {track_title}"
         )
         return settings
 
@@ -174,8 +177,14 @@ class TidalDownloadService:
 
             downloaded_dirs = []
 
-            for playlist in playlists:
+            for idx, playlist in enumerate(playlists):
                 try:
+                    # Add small random delay between playlists (except first one)
+                    if idx > 0:
+                        delay = random.uniform(0.5, 2.0)  # noqa: S311
+                        logger.debug(f"Waiting {delay:.1f}s before next playlist...")
+                        time.sleep(delay)
+
                     playlist_dir = self.download_playlist(
                         playlist.name, create_directory=True
                     )
@@ -209,54 +218,51 @@ class TidalDownloadService:
         Raises:
             TidalDownloadError: If download fails
         """
+        if not self.tidal_dl:
+            raise TidalDownloadError("Not authenticated with Tidal")
+
         try:
-            # Create Download instance
+            # Create Download instance with required components
+            from threading import Event
+
+            from rich.progress import Progress
+
             fn_logger = _LoggerAdapter(logger)
+            progress = Progress()  # Required by tidal-dl-ng
+            event_abort = Event()  # For abort signaling
+            event_run = Event()  # For run control
+            event_run.set()  # Set to running state
+
+            # Note: Download expects session (tidalapi.Session), not tidal_obj
+            # self.tidal_dl is checked above to not be None
             dl = Download(
-                tidal_obj=self.tidal_dl,
+                session=self.tidal_dl.session,
                 path_base=str(target_dir.parent.parent),  # Base path (m4a directory)
                 fn_logger=fn_logger,
                 skip_existing=True,
+                progress=progress,
+                event_abort=event_abort,
+                event_run=event_run,
             )
 
-            # Get tracks from playlist
+            # Get tracks count for logging
             tracks = playlist.tracks()
             logger.info(f"Downloading {len(tracks)} tracks...")
 
             # Use tidal-dl-ng file template for playlists
-            file_template = self.tidal_dl_settings.format_playlist
+            file_template = self.tidal_dl_settings.data.format_playlist
 
-            # Download tracks
-            success_count = 0
-            for idx, track in enumerate(tracks, 1):
-                try:
-                    logger.info(
-                        f"Downloading track {idx}/{len(tracks)}: "
-                        f"{track.artist.name} - {track.name}"
-                    )
-
-                    # Download individual track
-                    downloaded, path = dl.item(
-                        media=track,
-                        file_template=file_template,
-                        quality_audio=self.tidal_dl_settings.quality_audio,
-                        download_delay=False,
-                    )
-
-                    if downloaded:
-                        logger.info(f"✓ Downloaded: {path}")
-                        success_count += 1
-                    else:
-                        logger.warning(f"✗ Skipped or failed: {track.name}")
-
-                except Exception as e:
-                    logger.error(f"Error downloading track '{track.name}': {e}")
-                    # Continue with next track
-                    continue
-
-            logger.info(
-                f"Download complete: {success_count}/{len(tracks)} tracks downloaded"
+            # Download entire playlist using items() method
+            # This properly handles playlist context and template substitution
+            dl.items(
+                media=playlist,
+                file_template=file_template,
+                video_download=False,
+                download_delay=False,
+                quality_audio=self.tidal_dl_settings.data.quality_audio,
             )
+
+            logger.info("Download complete")
 
         except Exception as e:
             logger.error(f"Failed to download playlist tracks: {e}")
