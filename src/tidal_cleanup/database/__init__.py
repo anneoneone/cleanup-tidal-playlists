@@ -1,6 +1,16 @@
 """Database package for playlist and track synchronization."""
 
-from .models import Playlist, PlaylistTrack, SyncOperation, SyncSnapshot, Track
+from .file_scanner_service import FileScannerService
+from .models import (
+    DownloadStatus,
+    Playlist,
+    PlaylistSyncStatus,
+    PlaylistTrack,
+    SyncOperation,
+    SyncSnapshot,
+    Track,
+    TrackSyncStatus,
+)
 from .service import DatabaseService
 from .sync_state import Change, ChangeType, SyncState, SyncStateComparator
 from .tidal_snapshot_service import TidalSnapshotService
@@ -17,4 +27,8 @@ __all__ = [
     "SyncState",
     "SyncStateComparator",
     "TidalSnapshotService",
+    "FileScannerService",
+    "DownloadStatus",
+    "PlaylistSyncStatus",
+    "TrackSyncStatus",
 ]
