@@ -6,6 +6,8 @@ sync workflow: Tidal fetch → Filesystem scan → Compare → Sync.
 """
 
 import logging
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -20,6 +22,32 @@ from tidal_cleanup.database.service import DatabaseService
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class FetchStatistics:
+    """Statistics from a Tidal fetch operation."""
+
+    playlists_fetched: int = 0
+    playlists_created: int = 0
+    playlists_updated: int = 0
+    playlists_skipped: int = 0
+    tracks_created: int = 0
+    tracks_updated: int = 0
+    errors: List[str] = dataclass_field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "playlists_fetched": self.playlists_fetched,
+            "playlists_created": self.playlists_created,
+            "playlists_updated": self.playlists_updated,
+            "playlists_skipped": self.playlists_skipped,
+            "tracks_created": self.tracks_created,
+            "tracks_updated": self.tracks_updated,
+            "error_count": len(self.errors),
+            "errors": self.errors[:10],  # Limit error list
+        }
+
+
 class TidalStateFetcher:
     """Fetches Tidal playlists and tracks and updates database."""
 
@@ -32,7 +60,8 @@ class TidalStateFetcher:
         """
         self.db_service = db_service
         self.tidal_session = tidal_session
-        self._stats: Dict[str, Any] = {}
+        self._stats = FetchStatistics()
+        self._fetched_playlist_ids: List[str] = []
 
     def fetch_all_playlists(self, mark_needs_sync: bool = True) -> List[Playlist]:
         """Fetch all user playlists from Tidal and update database.
@@ -49,71 +78,105 @@ class TidalStateFetcher:
         if not self.tidal_session:
             raise RuntimeError("Tidal session required to fetch playlists")
 
+        # Reset statistics for new fetch
+        self._stats = FetchStatistics()
+        self._fetched_playlist_ids = []
+
         logger.info("Fetching playlists from Tidal...")
 
-        # Get playlists from Tidal
-        try:
-            tidal_playlists = self.tidal_session.user.playlists()
-        except Exception as e:
-            logger.error(f"Failed to fetch playlists from Tidal: {e}")
-            raise
+        # Get playlists from Tidal API
+        tidal_playlists = self._fetch_tidal_playlists()
+        self._stats.playlists_fetched = len(tidal_playlists)
 
         logger.info(f"Found {len(tidal_playlists)} playlists in Tidal")
 
+        # Process each playlist
         updated_playlists: List[Playlist] = []
-        playlists_created = 0
-        playlists_updated = 0
-        tracks_created = 0
-        tracks_updated = 0
-
         for tidal_playlist in tidal_playlists:
-            try:
-                # Convert Tidal playlist to database format
-                playlist_data = self._convert_tidal_playlist(tidal_playlist)
+            result = self._process_single_playlist(tidal_playlist, mark_needs_sync)
+            if result:
+                updated_playlists.append(result)
 
-                # Check if playlist exists
-                existing = self.db_service.get_playlist_by_tidal_id(
-                    playlist_data["tidal_id"]
-                )
-
-                if existing:
-                    # Update existing playlist
-                    updated = self._update_playlist(
-                        existing, playlist_data, mark_needs_sync
-                    )
-                    playlists_updated += 1
-                else:
-                    # Create new playlist
-                    updated = self._create_playlist(playlist_data, mark_needs_sync)
-                    playlists_created += 1
-
-                updated_playlists.append(updated)
-
-                # Fetch and update tracks for this playlist
-                track_count = self._fetch_playlist_tracks(tidal_playlist, updated)
-                tracks_created += track_count["created"]
-                tracks_updated += track_count["updated"]
-
-            except Exception as e:
-                logger.error(f"Error processing playlist '{tidal_playlist.name}': {e}")
-                continue
-
-        # Store statistics
-        self._stats = {
-            "playlists_fetched": len(tidal_playlists),
-            "playlists_created": playlists_created,
-            "playlists_updated": playlists_updated,
-            "tracks_created": tracks_created,
-            "tracks_updated": tracks_updated,
-        }
-
-        logger.info(
-            f"Tidal fetch complete: {playlists_created} playlists created, "
-            f"{playlists_updated} updated, {tracks_created} tracks created, "
-            f"{tracks_updated} updated"
-        )
+        # Log summary
+        self._log_fetch_summary()
 
         return updated_playlists
+
+    def _fetch_tidal_playlists(self) -> List[Any]:
+        """Fetch playlists from Tidal API.
+
+        Returns:
+            List of Tidal playlist objects
+
+        Raises:
+            Exception: If fetch fails
+        """
+        try:
+            return self.tidal_session.user.playlists()
+        except Exception as e:
+            error_msg = f"Failed to fetch playlists from Tidal: {e}"
+            logger.error(error_msg)
+            self._stats.errors.append(error_msg)
+            raise
+
+    def _process_single_playlist(
+        self, tidal_playlist: Any, mark_needs_sync: bool
+    ) -> Playlist | None:
+        """Process a single Tidal playlist.
+
+        Args:
+            tidal_playlist: Tidal API playlist object
+            mark_needs_sync: Whether to mark as needing sync
+
+        Returns:
+            Updated Playlist object or None if processing failed
+        """
+        try:
+            # Convert Tidal playlist to database format
+            playlist_data = self._convert_tidal_playlist(tidal_playlist)
+            tidal_id = playlist_data["tidal_id"]
+            self._fetched_playlist_ids.append(tidal_id)
+
+            # Check if playlist exists
+            existing = self.db_service.get_playlist_by_tidal_id(tidal_id)
+
+            if existing:
+                # Update existing playlist
+                updated = self._update_playlist(
+                    existing, playlist_data, mark_needs_sync
+                )
+                self._stats.playlists_updated += 1
+            else:
+                # Create new playlist
+                updated = self._create_playlist(playlist_data, mark_needs_sync)
+                self._stats.playlists_created += 1
+
+            # Fetch and update tracks for this playlist
+            track_stats = self._fetch_playlist_tracks(tidal_playlist, updated)
+            self._stats.tracks_created += track_stats["created"]
+            self._stats.tracks_updated += track_stats["updated"]
+
+            return updated
+
+        except Exception as e:
+            error_msg = f"Error processing playlist '{tidal_playlist.name}': {e}"
+            logger.error(error_msg)
+            self._stats.errors.append(error_msg)
+            self._stats.playlists_skipped += 1
+            return None
+
+    def _log_fetch_summary(self) -> None:
+        """Log summary of fetch operation."""
+        logger.info(
+            f"Tidal fetch complete: "
+            f"{self._stats.playlists_created} playlists created, "
+            f"{self._stats.playlists_updated} updated, "
+            f"{self._stats.playlists_skipped} skipped, "
+            f"{self._stats.tracks_created} tracks created, "
+            f"{self._stats.tracks_updated} updated"
+        )
+        if self._stats.errors:
+            logger.warning(f"Encountered {len(self._stats.errors)} errors during fetch")
 
     def _convert_tidal_playlist(self, tidal_playlist: Any) -> Dict[str, Any]:
         """Convert Tidal playlist object to database format.
@@ -183,7 +246,7 @@ class TidalStateFetcher:
             playlist_data["sync_status"] = PlaylistSyncStatus.UNKNOWN.value
 
         # Set timestamps
-        playlist_data["last_seen_in_tidal"] = datetime.utcnow()
+        playlist_data["last_seen_in_tidal"] = datetime.now()
 
         playlist = self.db_service.create_playlist(playlist_data)
         logger.debug(f"Created playlist: {playlist.name} ({playlist.tidal_id})")
@@ -228,7 +291,7 @@ class TidalStateFetcher:
             )
 
         # Update last seen timestamp
-        playlist_data["last_seen_in_tidal"] = datetime.utcnow()
+        playlist_data["last_seen_in_tidal"] = datetime.now()
 
         # Update playlist
         updated = self.db_service.update_playlist(existing.id, playlist_data)
@@ -356,7 +419,9 @@ class TidalStateFetcher:
 
         # Timestamps
         if hasattr(tidal_track, "tidal_release_date"):
-            track_data["tidal_release_date"] = tidal_track.tidal_release_date
+            release_date = tidal_track.tidal_release_date
+            if release_date is not None:
+                track_data["tidal_release_date"] = release_date
 
     def _extract_album_metadata(
         self, tidal_track: Any, track_data: Dict[str, Any]
@@ -371,10 +436,14 @@ class TidalStateFetcher:
             return
 
         if hasattr(tidal_track.album, "upc"):
-            track_data["album_upc"] = tidal_track.album.upc
+            upc = tidal_track.album.upc
+            if upc is not None:
+                track_data["album_upc"] = upc
 
         if hasattr(tidal_track.album, "release_date"):
-            track_data["album_release_date"] = tidal_track.album.release_date
+            album_release_date = tidal_track.album.release_date
+            if album_release_date is not None:
+                track_data["album_release_date"] = album_release_date
 
         # Album cover URL (construct from album ID)
         if hasattr(tidal_track.album, "id"):
@@ -411,7 +480,7 @@ class TidalStateFetcher:
         track_data["download_status"] = DownloadStatus.NOT_DOWNLOADED.value
 
         # Set timestamps
-        track_data["last_seen_in_tidal"] = datetime.utcnow()
+        track_data["last_seen_in_tidal"] = datetime.now()
 
         track = self.db_service.create_track(track_data)
         logger.debug(
@@ -431,7 +500,7 @@ class TidalStateFetcher:
             Updated Track object
         """
         # Update last seen timestamp
-        track_data["last_seen_in_tidal"] = datetime.utcnow()
+        track_data["last_seen_in_tidal"] = datetime.now()
 
         # Don't overwrite download status or file information
         track_data.pop("download_status", None)
@@ -447,46 +516,60 @@ class TidalStateFetcher:
         return updated
 
     def mark_removed_playlists(self) -> int:
-        """Mark playlists not seen in Tidal as needing removal.
+        """Mark playlists not seen in last fetch as needing removal.
 
-        Playlists that haven't been updated in current fetch are considered
-        deleted from Tidal.
+        Uses the list of playlist IDs from the most recent fetch operation.
+        Playlists in database but not in Tidal are marked for removal.
 
         Returns:
             Number of playlists marked for removal
         """
-        cutoff_time = datetime.utcnow()
-        marked = 0
-
-        with self.db_service.get_session() as session:
-            # Get playlists not seen in recent fetch
-            playlists = (
-                session.query(Playlist)
-                .filter(
-                    (Playlist.last_seen_in_tidal.is_(None))
-                    | (Playlist.last_seen_in_tidal < cutoff_time)
-                )
-                .all()
+        if not self._fetched_playlist_ids:
+            logger.warning(
+                "No fetched playlist IDs available. " "Run fetch_all_playlists() first."
             )
+            return 0
 
-            for playlist in playlists:
-                if playlist.sync_status != PlaylistSyncStatus.NEEDS_REMOVAL.value:
-                    playlist.sync_status = PlaylistSyncStatus.NEEDS_REMOVAL.value
-                    marked += 1
-                    logger.debug(
-                        f"Playlist '{playlist.name}' not in Tidal, "
-                        "marked for removal"
-                    )
+        marked = 0
+        fetched_ids_set = set(self._fetched_playlist_ids)
 
-            session.commit()
+        # Get all playlists from database
+        all_playlists = self.db_service.get_all_playlists()
 
-        logger.info(f"Marked {marked} playlists for removal")
+        for playlist in all_playlists:
+            # Skip if playlist was seen in fetch
+            if playlist.tidal_id in fetched_ids_set:
+                continue
+
+            # Mark for removal if not already marked
+            if playlist.sync_status != PlaylistSyncStatus.NEEDS_REMOVAL.value:
+                self.db_service.update_playlist(
+                    playlist.id,
+                    {"sync_status": PlaylistSyncStatus.NEEDS_REMOVAL.value},
+                )
+                marked += 1
+                logger.debug(
+                    f"Playlist '{playlist.name}' ({playlist.tidal_id}) "
+                    "not in Tidal, marked for removal"
+                )
+
+        if marked > 0:
+            logger.info(f"Marked {marked} playlists for removal")
+
         return marked
 
     def get_fetch_statistics(self) -> Dict[str, Any]:
         """Get statistics from last fetch operation.
 
         Returns:
-            Dictionary with fetch statistics
+            Dictionary with fetch statistics including:
+            - playlists_fetched: Total playlists found in Tidal
+            - playlists_created: New playlists added to database
+            - playlists_updated: Existing playlists updated
+            - playlists_skipped: Playlists skipped due to errors
+            - tracks_created: New tracks added
+            - tracks_updated: Existing tracks updated
+            - error_count: Number of errors encountered
+            - errors: List of error messages (limited to 10)
         """
-        return self._stats.copy()
+        return self._stats.to_dict()

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from mutagen import File as MutagenFile
 
-from ..models.models import Track
+from .models import Track
 from .service import DatabaseService
 
 logger = logging.getLogger(__name__)

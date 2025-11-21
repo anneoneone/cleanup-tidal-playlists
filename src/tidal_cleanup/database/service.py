@@ -996,7 +996,7 @@ class DatabaseService:
 
     def mark_playlist_track_as_primary(
         self, playlist_id: int, track_id: int
-    ) -> PlaylistTrack:
+    ) -> PlaylistTrack | None:
         """Mark a playlist-track relationship as having the primary file.
 
         This will also mark all other occurrences of this track as non-primary.
@@ -1006,7 +1006,7 @@ class DatabaseService:
             track_id: Track database ID
 
         Returns:
-            Updated PlaylistTrack object
+            Updated PlaylistTrack object, or None if not found
         """
         with self.get_session() as session:
             # Mark all occurrences as non-primary
@@ -1035,7 +1035,7 @@ class DatabaseService:
 
     def update_symlink_status(
         self, playlist_id: int, track_id: int, symlink_path: str, valid: bool
-    ) -> PlaylistTrack:
+    ) -> PlaylistTrack | None:
         """Update symlink information for a playlist-track relationship.
 
         Args:
@@ -1045,7 +1045,7 @@ class DatabaseService:
             valid: Whether symlink is valid
 
         Returns:
-            Updated PlaylistTrack object
+            Updated PlaylistTrack object, or None if not found
         """
         with self.get_session() as session:
             pt = (
