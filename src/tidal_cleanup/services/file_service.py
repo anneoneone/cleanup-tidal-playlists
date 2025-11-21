@@ -39,6 +39,7 @@ class FileService:
         )
         self.diff_service = DirectoryDiffService()
 
+    # @convert convert_audio_with_playlist_logic
     def _validate_audio_paths(self, source_path: Path, target_path: Path) -> None:
         """Validate audio file paths for security.
 
@@ -81,6 +82,7 @@ class FileService:
             if any(char in path_str for char in ["`", "|"]):
                 raise FileOperationError(f"Path contains suspicious characters: {path}")
 
+    # @convert convert_audio_with_playlist_logic
     def _validate_quality_parameter(self, quality: str) -> None:
         """Validate ffmpeg quality parameter.
 
@@ -319,6 +321,7 @@ class FileService:
 
         return job
 
+    # @convert convert_directory_with_playlist_reporting
     def convert_audio_with_playlist_logic(
         self, source_path: Path, target_path: Path, quality: str = "2"
     ) -> ConversionJob:
@@ -472,6 +475,7 @@ class FileService:
 
         return jobs
 
+    # @convert _convert_files()
     def convert_directory_with_playlist_reporting(
         self,
         source_dir: Path,

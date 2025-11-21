@@ -80,6 +80,7 @@ class TidalCleanupApp:
         )
         return synchronizer.sync_playlists(playlist_filter)
 
+    # @convert convert
     def _convert_files(self) -> None:
         """Convert M4A files to MP3."""
         console.print("[bold blue]Converting audio files...[/bold blue]")

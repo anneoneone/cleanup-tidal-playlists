@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 logger = logging.getLogger(__name__)
 
 
+# @convert _scan_directory()
 @dataclass
 class FileIdentity:
     """Represents a file's identity for comparison purposes.
@@ -204,6 +205,7 @@ class DirectoryDiffService:
 
         return only_in_dir, only_in_items, in_both, dir_identities, item_identities
 
+    # @convert compare_directories()
     def _scan_directory(
         self,
         directory: Path,
@@ -249,6 +251,7 @@ class DirectoryDiffService:
         logger.debug(f"Scanned {directory}: found {len(identities)} files")
         return identities
 
+    # @convert convert_directory_with_playlist_reporting()
     def compare_by_stem_with_extension_mapping(
         self,
         source_dir: Path,
