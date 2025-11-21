@@ -436,6 +436,68 @@ class FileService:
 
         return playlist_dirs
 
+    def _filter_playlist_by_name(
+        self, playlist_dirs: List[Path], target_name: str
+    ) -> List[Path]:
+        """Filter playlists to find closest match to target name.
+
+        Uses fuzzy string matching to find the best match.
+
+        Args:
+            playlist_dirs: List of playlist directory paths
+            target_name: Target playlist name to match
+
+        Returns:
+            List containing the best matching playlist, or empty list if no match
+        """
+        from thefuzz import fuzz
+
+        if not playlist_dirs:
+            return []
+
+        # Try exact match first (case-insensitive)
+        target_lower = target_name.lower()
+        for playlist_dir in playlist_dirs:
+            if playlist_dir.name.lower() == target_lower:
+                logger.info(f"Found exact match for playlist: {playlist_dir.name}")
+                return [playlist_dir]
+
+        # Use fuzzy matching to find best match
+        # Calculate similarity scores for all playlists
+        scored_playlists = [
+            (
+                playlist_dir,
+                max(
+                    fuzz.ratio(target_name.lower(), playlist_dir.name.lower()),
+                    fuzz.partial_ratio(target_name.lower(), playlist_dir.name.lower()),
+                    fuzz.token_sort_ratio(
+                        target_name.lower(), playlist_dir.name.lower()
+                    ),
+                ),
+            )
+            for playlist_dir in playlist_dirs
+        ]
+
+        # Sort by score (highest first)
+        scored_playlists.sort(key=lambda x: x[1], reverse=True)
+
+        # Get the best match
+        best_match, best_score = scored_playlists[0]
+
+        # Only return if score is above threshold (60% similarity)
+        if best_score >= 60:
+            logger.info(
+                f"Found fuzzy match for '{target_name}': "
+                f"{best_match.name} (score: {best_score})"
+            )
+            return [best_match]
+
+        logger.warning(
+            f"No playlist found matching '{target_name}' "
+            f"(best match: {best_match.name} with score {best_score})"
+        )
+        return []
+
     def _convert_missing_files(
         self,
         source_dir: Path,
@@ -638,6 +700,7 @@ class FileService:
         target_dir: Path,
         target_format: str = ".mp3",
         quality: str = "2",
+        playlist_filter: Optional[str] = None,
     ) -> dict[str, List[ConversionJob]]:
         """Convert all audio files with playlist-based reporting.
 
@@ -651,6 +714,8 @@ class FileService:
             target_dir: Target directory
             target_format: Target file format (e.g., ".mp3")
             quality: Audio quality setting
+            playlist_filter: Optional playlist name to filter. If provided,
+                           only the closest matching playlist will be converted.
 
         Returns:
             Dictionary mapping playlist names to lists of ConversionJob objects
@@ -666,6 +731,15 @@ class FileService:
         playlist_dirs = self._find_playlist_directories(source_dir)
         if not playlist_dirs:
             return playlist_jobs
+
+        # Filter to single playlist if requested
+        if playlist_filter:
+            playlist_dirs = self._filter_playlist_by_name(
+                playlist_dirs, playlist_filter
+            )
+            if not playlist_dirs:
+                logger.warning(f"No playlist found matching '{playlist_filter}'")
+                return playlist_jobs
 
         # Process each playlist directory
         for playlist_dir in playlist_dirs:
