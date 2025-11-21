@@ -35,16 +35,47 @@ class Track(Base):
         String(255), unique=True, nullable=True, index=True
     )
 
-    # Track metadata
+    # Track metadata (basic)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     artist: Mapped[str] = mapped_column(String(500), nullable=False)
     album: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    album_artist: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     genre: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    duration_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    duration: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # seconds
     isrc: Mapped[Optional[str]] = mapped_column(
         String(20), nullable=True
     )  # International Standard Recording Code
+
+    # Tidal-specific metadata
+    track_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    volume_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    explicit: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    popularity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    copyright: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tidal_release_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    audio_quality: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )  # e.g., 'HI_RES', 'LOSSLESS'
+    audio_modes: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # e.g., 'STEREO', 'DOLBY_ATMOS'
+    version: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True
+    )  # e.g., 'Radio Edit', 'Remix'
+
+    # Album metadata (for quick access without joining)
+    album_upc: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )  # Universal Product Code
+    album_release_date: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    album_cover_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Tidal cover image URL
 
     # Computed fields for matching
     normalized_name: Mapped[str] = mapped_column(
@@ -112,6 +143,34 @@ class Playlist(Base):
     # Playlist metadata
     name: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Tidal-specific playlist metadata
+    creator_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    creator_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    duration: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # Total duration in seconds
+    num_tracks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    num_videos: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    popularity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    public: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    picture_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Tidal playlist image URL
+    square_picture_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    created: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )  # When created in Tidal
+    last_updated: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )  # When last updated in Tidal
+    last_item_added_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    share_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    listen_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Local mapping
     local_folder_path: Mapped[Optional[str]] = mapped_column(

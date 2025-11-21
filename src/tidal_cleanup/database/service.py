@@ -524,6 +524,89 @@ class DatabaseService:
             )
             return list(session.scalars(stmt).all())
 
+    def update_track_position(
+        self, playlist_id: int, track_id: int, position: int
+    ) -> bool:
+        """Update track position in a playlist.
+
+        Args:
+            playlist_id: Playlist database ID
+            track_id: Track database ID
+            position: New position (0-indexed)
+
+        Returns:
+            True if updated, False if not found
+        """
+        with self.get_session() as session:
+            stmt = select(PlaylistTrack).where(
+                PlaylistTrack.playlist_id == playlist_id,
+                PlaylistTrack.track_id == track_id,
+            )
+            playlist_track = session.scalar(stmt)
+
+            if not playlist_track:
+                logger.warning(
+                    f"PlaylistTrack not found: "
+                    f"playlist={playlist_id}, track={track_id}"
+                )
+                return False
+
+            playlist_track.position = position
+            session.commit()
+            logger.debug(
+                f"Updated track position: playlist={playlist_id}, "
+                f"track={track_id}, position={position}"
+            )
+            return True
+
+    def update_track_sync_state(
+        self,
+        playlist_id: int,
+        track_id: int,
+        in_tidal: Optional[bool] = None,
+        in_local: Optional[bool] = None,
+        in_rekordbox: Optional[bool] = None,
+    ) -> bool:
+        """Update sync state flags for a track in a playlist.
+
+        Args:
+            playlist_id: Playlist database ID
+            track_id: Track database ID
+            in_tidal: Whether track is in Tidal (None = no change)
+            in_local: Whether track is in local files (None = no change)
+            in_rekordbox: Whether track is in Rekordbox (None = no change)
+
+        Returns:
+            True if updated, False if not found
+        """
+        with self.get_session() as session:
+            stmt = select(PlaylistTrack).where(
+                PlaylistTrack.playlist_id == playlist_id,
+                PlaylistTrack.track_id == track_id,
+            )
+            playlist_track = session.scalar(stmt)
+
+            if not playlist_track:
+                logger.warning(
+                    f"PlaylistTrack not found: "
+                    f"playlist={playlist_id}, track={track_id}"
+                )
+                return False
+
+            if in_tidal is not None:
+                playlist_track.in_tidal = in_tidal
+            if in_local is not None:
+                playlist_track.in_local = in_local
+            if in_rekordbox is not None:
+                playlist_track.in_rekordbox = in_rekordbox
+
+            session.commit()
+            logger.debug(
+                f"Updated track sync state: playlist={playlist_id}, "
+                f"track={track_id}"
+            )
+            return True
+
     # =========================================================================
     # Sync Operation Management
     # =========================================================================
