@@ -1,5 +1,12 @@
 """Database package for playlist and track synchronization."""
 
+from .conflict_resolver import (
+    Conflict,
+    ConflictResolution,
+    ConflictResolutionResult,
+    ConflictResolver,
+    ConflictType,
+)
 from .deduplication_logic import (
     DeduplicationLogic,
     DeduplicationResult,
@@ -18,6 +25,14 @@ from .models import (
     Track,
     TrackSyncStatus,
 )
+from .progress_tracker import (
+    ConsoleProgressReporter,
+    ProgressCallback,
+    ProgressPhase,
+    ProgressTracker,
+    ProgressUpdate,
+    TqdmProgressReporter,
+)
 from .service import DatabaseService
 from .sync_decision_engine import (
     DecisionResult,
@@ -31,31 +46,51 @@ from .tidal_snapshot_service import TidalSnapshotService
 from .tidal_state_fetcher import TidalStateFetcher
 
 __all__ = [
+    # Models
     "Track",
     "Playlist",
     "PlaylistTrack",
     "SyncOperation",
     "SyncSnapshot",
+    # Core services
     "DatabaseService",
+    "FileScannerService",
+    "FilesystemScanner",
+    # Sync state
     "Change",
     "ChangeType",
     "SyncState",
     "SyncStateComparator",
     "TidalSnapshotService",
     "TidalStateFetcher",
-    "FileScannerService",
-    "FilesystemScanner",
+    # Decision engine
     "DecisionResult",
     "SyncAction",
     "SyncDecisionEngine",
     "SyncDecisions",
+    # Deduplication
     "DeduplicationLogic",
     "DeduplicationResult",
     "PrimaryFileDecision",
+    # Orchestration
     "DownloadOrchestrator",
     "ExecutionResult",
     "SyncOrchestrator",
     "SyncResult",
+    # Conflict resolution
+    "Conflict",
+    "ConflictType",
+    "ConflictResolution",
+    "ConflictResolver",
+    "ConflictResolutionResult",
+    # Progress tracking
+    "ProgressTracker",
+    "ProgressPhase",
+    "ProgressUpdate",
+    "ProgressCallback",
+    "ConsoleProgressReporter",
+    "TqdmProgressReporter",
+    # Status
     "DownloadStatus",
     "PlaylistSyncStatus",
     "TrackSyncStatus",

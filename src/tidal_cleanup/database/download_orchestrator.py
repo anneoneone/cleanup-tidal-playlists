@@ -15,8 +15,10 @@ from ..services.tidal_download_service import (
     TidalDownloadError,
     TidalDownloadService,
 )
+from .conflict_resolver import ConflictResolver
 from .deduplication_logic import DeduplicationLogic
 from .models import DownloadStatus, Track
+from .progress_tracker import ProgressCallback, ProgressPhase, ProgressTracker
 from .service import DatabaseService
 from .sync_decision_engine import DecisionResult, SyncAction, SyncDecisions
 
@@ -71,6 +73,8 @@ class DownloadOrchestrator:
         deduplication_logic: DeduplicationLogic | None = None,
         download_service: TidalDownloadService | None = None,
         dry_run: bool = False,
+        progress_callback: ProgressCallback | None = None,
+        conflict_resolver: ConflictResolver | None = None,
     ):
         """Initialize download orchestrator.
 
@@ -80,6 +84,8 @@ class DownloadOrchestrator:
             deduplication_logic: Logic for determining primary file locations
             download_service: Tidal download service for downloading tracks
             dry_run: If True, don't actually make changes, just log what would happen
+            progress_callback: Optional callback for progress updates
+            conflict_resolver: Optional conflict resolver (default: auto-resolve)
         """
         self.db_service = db_service
         self.music_root = Path(music_root)
@@ -89,6 +95,10 @@ class DownloadOrchestrator:
         )
         self.download_service = download_service
         self.dry_run = dry_run
+        self.progress_tracker = ProgressTracker(callback=progress_callback)
+        self.conflict_resolver = conflict_resolver or ConflictResolver(
+            db_service, auto_resolve=True
+        )
 
     def execute_decisions(self, decisions: SyncDecisions) -> ExecutionResult:
         """Execute sync decisions.
@@ -101,20 +111,40 @@ class DownloadOrchestrator:
         """
         result = ExecutionResult()
 
+        # Detect conflicts between decisions
+        conflicts = self.conflict_resolver.detect_decision_conflicts(
+            decisions.decisions
+        )
+        if conflicts:
+            logger.warning(f"Detected {len(conflicts)} decision conflicts")
+            # Resolve conflicts
+            resolved = self.conflict_resolver.resolve_decision_conflicts(conflicts)
+            logger.info(f"Resolved to {len(resolved)} decisions")
+
         # Get prioritized decisions
         prioritized = sorted(
             decisions.decisions, key=lambda d: d.priority, reverse=True
         )
 
-        for decision in prioritized:
+        # Start progress tracking
+        self.progress_tracker.start(
+            ProgressPhase.EXECUTING_DECISIONS,
+            len(prioritized),
+            "Executing sync decisions",
+        )
+
+        for i, decision in enumerate(prioritized):
             try:
                 self._execute_decision(decision, result)
                 result.decisions_executed += 1
+                self.progress_tracker.update(i + 1, f"Executed {decision.action}")
             except Exception as e:
                 result.add_error(
                     f"Error executing decision {decision.action}: {str(e)}"
                 )
+                logger.exception(f"Decision execution failed: {decision.action}")
 
+        self.progress_tracker.complete("Decisions executed")
         return result
 
     def _execute_decision(
