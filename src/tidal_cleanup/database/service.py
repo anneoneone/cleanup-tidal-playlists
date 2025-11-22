@@ -3,7 +3,7 @@
 import hashlib
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -172,7 +172,7 @@ class DatabaseService:
                 if hasattr(track, key):
                     setattr(track, key, value)
 
-            track.updated_at = datetime.utcnow()
+            track.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(track)
             logger.debug(f"Updated track: {track.id}")
@@ -313,7 +313,7 @@ class DatabaseService:
                 if hasattr(playlist, key):
                     setattr(playlist, key, value)
 
-            playlist.updated_at = datetime.utcnow()
+            playlist.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(playlist)
             logger.debug(f"Updated playlist: {playlist.id}")
@@ -379,18 +379,19 @@ class DatabaseService:
                 if in_tidal:
                     playlist_track.in_tidal = True
                     if not playlist_track.added_to_tidal:
-                        playlist_track.added_to_tidal = datetime.utcnow()
+                        playlist_track.added_to_tidal = datetime.now(timezone.utc)
                 if in_local:
                     playlist_track.in_local = True
                     if not playlist_track.added_to_local:
-                        playlist_track.added_to_local = datetime.utcnow()
+                        playlist_track.added_to_local = datetime.now(timezone.utc)
                 if in_rekordbox:
                     playlist_track.in_rekordbox = True
                     if not playlist_track.added_to_rekordbox:
-                        playlist_track.added_to_rekordbox = datetime.utcnow()
-                playlist_track.updated_at = datetime.utcnow()
+                        playlist_track.added_to_rekordbox = datetime.now(timezone.utc)
+                playlist_track.updated_at = datetime.now(timezone.utc)
             else:
                 # Create new relationship
+                now = datetime.now(timezone.utc)
                 playlist_track = PlaylistTrack(
                     playlist_id=playlist_id,
                     track_id=track_id,
@@ -398,9 +399,9 @@ class DatabaseService:
                     in_tidal=in_tidal,
                     in_local=in_local,
                     in_rekordbox=in_rekordbox,
-                    added_to_tidal=datetime.utcnow() if in_tidal else None,
-                    added_to_local=datetime.utcnow() if in_local else None,
-                    added_to_rekordbox=datetime.utcnow() if in_rekordbox else None,
+                    added_to_tidal=now if in_tidal else None,
+                    added_to_local=now if in_local else None,
+                    added_to_rekordbox=now if in_rekordbox else None,
                 )
                 session.add(playlist_track)
 
@@ -434,13 +435,13 @@ class DatabaseService:
             # Mark as removed from specified source
             if source == "tidal":
                 playlist_track.in_tidal = False
-                playlist_track.removed_from_tidal = datetime.utcnow()
+                playlist_track.removed_from_tidal = datetime.now(timezone.utc)
             elif source == "local":
                 playlist_track.in_local = False
             elif source == "rekordbox":
                 playlist_track.in_rekordbox = False
 
-            playlist_track.updated_at = datetime.utcnow()
+            playlist_track.updated_at = datetime.now(timezone.utc)
 
             # If track is not in any source, delete the relationship
             if (
@@ -667,9 +668,9 @@ class DatabaseService:
                 operation.error_message = error_message
 
             if status == "running" and not operation.started_at:
-                operation.started_at = datetime.utcnow()
+                operation.started_at = datetime.now(timezone.utc)
             elif status in ("completed", "failed"):
-                operation.completed_at = datetime.utcnow()
+                operation.completed_at = datetime.now(timezone.utc)
 
             session.commit()
             session.refresh(operation)
@@ -861,7 +862,7 @@ class DatabaseService:
         if downloaded_at is not None:
             update_data["downloaded_at"] = downloaded_at
         elif status == "downloaded" and downloaded_at is None:
-            update_data["downloaded_at"] = datetime.utcnow()
+            update_data["downloaded_at"] = datetime.now(timezone.utc)
 
         return self.update_track(track_id, update_data)
 
@@ -883,7 +884,7 @@ class DatabaseService:
         if synced_at is not None:
             update_data["last_synced_filesystem"] = synced_at
         elif status == "in_sync":
-            update_data["last_synced_filesystem"] = datetime.utcnow()
+            update_data["last_synced_filesystem"] = datetime.now(timezone.utc)
 
         return self.update_playlist(playlist_id, update_data)
 
@@ -1027,7 +1028,7 @@ class DatabaseService:
             if pt:
                 pt.is_primary = True
                 pt.sync_status = "synced"
-                pt.synced_at = datetime.utcnow()
+                pt.synced_at = datetime.now(timezone.utc)
                 session.commit()
                 session.refresh(pt)
 
@@ -1062,7 +1063,7 @@ class DatabaseService:
                 pt.symlink_valid = valid
                 pt.is_primary = False
                 pt.sync_status = "synced" if valid else "needs_symlink"
-                pt.synced_at = datetime.utcnow() if valid else None
+                pt.synced_at = datetime.now(timezone.utc) if valid else None
                 session.commit()
                 session.refresh(pt)
 

@@ -1,6 +1,6 @@
 """SQLAlchemy database models for playlist and track synchronization."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
 
@@ -15,6 +15,14 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+def utc_now() -> datetime:
+    """Return current UTC time with timezone info.
+
+    This is used as default for timestamp columns to avoid deprecation warnings.
+    """
+    return datetime.now(timezone.utc)
 
 
 class DownloadStatus(str, Enum):
@@ -149,10 +157,10 @@ class Track(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utc_now, onupdate=utc_now
     )
     last_seen_in_tidal: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
@@ -245,10 +253,10 @@ class Playlist(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utc_now, onupdate=utc_now
     )
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_seen_in_tidal: Mapped[Optional[datetime]] = mapped_column(
@@ -333,10 +341,10 @@ class PlaylistTrack(Base):
 
     # Metadata
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utc_now
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=utc_now, onupdate=utc_now
     )
 
     # Relationships
@@ -404,7 +412,7 @@ class SyncOperation(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, index=True
+        DateTime, nullable=False, default=utc_now, index=True
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -443,7 +451,7 @@ class SyncSnapshot(Base):
 
     # Timestamp
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=utc_now
     )
 
     # Indexes

@@ -8,7 +8,7 @@ sync workflow: Tidal fetch → Filesystem scan → Compare → Sync.
 import logging
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from tidal_cleanup.database.models import (
@@ -246,7 +246,7 @@ class TidalStateFetcher:
             playlist_data["sync_status"] = PlaylistSyncStatus.UNKNOWN.value
 
         # Set timestamps
-        playlist_data["last_seen_in_tidal"] = datetime.now()
+        playlist_data["last_seen_in_tidal"] = datetime.now(timezone.utc)
 
         playlist = self.db_service.create_playlist(playlist_data)
         logger.debug(f"Created playlist: {playlist.name} ({playlist.tidal_id})")
@@ -275,6 +275,19 @@ class TidalStateFetcher:
 
         has_changed = False
         if tidal_updated and db_updated:
+            # Ensure both datetimes are timezone-aware for comparison
+            if (
+                isinstance(tidal_updated, datetime)
+                and hasattr(tidal_updated, "tzinfo")
+                and tidal_updated.tzinfo is None
+            ):
+                tidal_updated = tidal_updated.replace(tzinfo=timezone.utc)
+            if (
+                isinstance(db_updated, datetime)
+                and hasattr(db_updated, "tzinfo")
+                and db_updated.tzinfo is None
+            ):
+                db_updated = db_updated.replace(tzinfo=timezone.utc)
             has_changed = tidal_updated > db_updated
         elif tidal_updated and not db_updated:
             has_changed = True
@@ -291,7 +304,7 @@ class TidalStateFetcher:
             )
 
         # Update last seen timestamp
-        playlist_data["last_seen_in_tidal"] = datetime.now()
+        playlist_data["last_seen_in_tidal"] = datetime.now(timezone.utc)
 
         # Update playlist
         updated = self.db_service.update_playlist(existing.id, playlist_data)
@@ -447,9 +460,10 @@ class TidalStateFetcher:
 
         # Album cover URL (construct from album ID)
         if hasattr(tidal_track.album, "id"):
+            album_id = str(tidal_track.album.id)
             track_data["album_cover_url"] = (
                 f"https://resources.tidal.com/images/"
-                f"{tidal_track.album.id.replace('-', '/')}/640x640.jpg"
+                f"{album_id.replace('-', '/')}/640x640.jpg"
             )
 
     def _extract_audio_quality(
@@ -480,7 +494,7 @@ class TidalStateFetcher:
         track_data["download_status"] = DownloadStatus.NOT_DOWNLOADED.value
 
         # Set timestamps
-        track_data["last_seen_in_tidal"] = datetime.now()
+        track_data["last_seen_in_tidal"] = datetime.now(timezone.utc)
 
         track = self.db_service.create_track(track_data)
         logger.debug(
@@ -500,7 +514,7 @@ class TidalStateFetcher:
             Updated Track object
         """
         # Update last seen timestamp
-        track_data["last_seen_in_tidal"] = datetime.now()
+        track_data["last_seen_in_tidal"] = datetime.now(timezone.utc)
 
         # Don't overwrite download status or file information
         track_data.pop("download_status", None)
