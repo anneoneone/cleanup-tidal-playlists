@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from tidal_cleanup.database.models import (
     DownloadStatus,
@@ -82,6 +82,13 @@ class TidalStateFetcher:
         self._stats = FetchStatistics()
         self._fetched_playlist_ids = []
 
+        # Get last sync timestamp for optimization
+        last_sync_time = self.db_service.get_last_sync_timestamp("tidal_sync")
+        if last_sync_time:
+            logger.info(f"Last sync was at: {last_sync_time}")
+        else:
+            logger.info("No previous sync found - fetching all playlist tracks")
+
         logger.info("Fetching playlists from Tidal...")
 
         # Get playlists from Tidal API
@@ -90,12 +97,33 @@ class TidalStateFetcher:
 
         logger.info(f"Found {len(tidal_playlists)} playlists in Tidal")
 
+        # Create snapshot at start of sync
+        snapshot_data = {
+            "status": "started",
+            "playlists_to_process": len(tidal_playlists),
+            "last_sync_time": last_sync_time.isoformat() if last_sync_time else None,
+        }
+        snapshot = self.db_service.create_snapshot("tidal_sync", snapshot_data)
+        logger.info(f"Created sync snapshot: {snapshot.id}")
+
         # Process each playlist
         updated_playlists: List[Playlist] = []
         for tidal_playlist in tidal_playlists:
-            result = self._process_single_playlist(tidal_playlist, mark_needs_sync)
+            result = self._process_single_playlist(
+                tidal_playlist, mark_needs_sync, last_sync_time
+            )
             if result:
                 updated_playlists.append(result)
+
+        # Update snapshot with final statistics
+        final_snapshot_data = {
+            "status": "completed",
+            "playlists_to_process": len(tidal_playlists),
+            "last_sync_time": last_sync_time.isoformat() if last_sync_time else None,
+            **self._stats.to_dict(),
+        }
+        self.db_service.create_snapshot("tidal_sync", final_snapshot_data)
+        logger.info("Updated sync snapshot with final statistics")
 
         # Log summary
         self._log_fetch_summary()
@@ -120,13 +148,17 @@ class TidalStateFetcher:
             raise
 
     def _process_single_playlist(
-        self, tidal_playlist: Any, mark_needs_sync: bool
+        self,
+        tidal_playlist: Any,
+        mark_needs_sync: bool,
+        last_sync_time: Optional[datetime] = None,
     ) -> Playlist | None:
         """Process a single Tidal playlist.
 
         Args:
             tidal_playlist: Tidal API playlist object
             mark_needs_sync: Whether to mark as needing sync
+            last_sync_time: Timestamp of last sync for optimization
 
         Returns:
             Updated Playlist object or None if processing failed
@@ -151,10 +183,34 @@ class TidalStateFetcher:
                 updated = self._create_playlist(playlist_data, mark_needs_sync)
                 self._stats.playlists_created += 1
 
-            # Fetch and update tracks for this playlist
-            track_stats = self._fetch_playlist_tracks(tidal_playlist, updated)
-            self._stats.tracks_created += track_stats["created"]
-            self._stats.tracks_updated += track_stats["updated"]
+            # Optimization: Only fetch tracks if playlist changed since last sync
+            should_fetch_tracks = True
+            if last_sync_time and updated.last_updated_tidal:
+                # Ensure both datetimes are timezone-aware for comparison
+                playlist_updated = updated.last_updated_tidal
+                if (
+                    hasattr(playlist_updated, "tzinfo")
+                    and playlist_updated.tzinfo is None
+                ):
+                    playlist_updated = playlist_updated.replace(tzinfo=timezone.utc)
+
+                sync_time = last_sync_time
+                if hasattr(sync_time, "tzinfo") and sync_time.tzinfo is None:
+                    sync_time = sync_time.replace(tzinfo=timezone.utc)
+
+                if playlist_updated <= sync_time:
+                    should_fetch_tracks = False
+                    self._stats.playlists_skipped += 1
+                    logger.debug(
+                        f"Skipping tracks for '{updated.name}' "
+                        f"(not updated since last sync)"
+                    )
+
+            if should_fetch_tracks:
+                # Fetch and update tracks for this playlist
+                track_stats = self._fetch_playlist_tracks(tidal_playlist, updated)
+                self._stats.tracks_created += track_stats["created"]
+                self._stats.tracks_updated += track_stats["updated"]
 
             return updated
 

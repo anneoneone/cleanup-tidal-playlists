@@ -721,6 +721,20 @@ class DatabaseService:
             )
             return session.scalar(stmt)
 
+    def get_last_sync_timestamp(
+        self, snapshot_type: str = "tidal_sync"
+    ) -> Optional[datetime]:
+        """Get the timestamp of the last sync snapshot.
+
+        Args:
+            snapshot_type: Type of snapshot (default: 'tidal_sync')
+
+        Returns:
+            Datetime of last sync or None if no snapshot exists
+        """
+        snapshot = self.get_latest_snapshot(snapshot_type)
+        return snapshot.created_at if snapshot else None
+
     # =========================================================================
     # Utility Methods
     # =========================================================================
