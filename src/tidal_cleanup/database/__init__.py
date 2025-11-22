@@ -1,5 +1,11 @@
 """Database package for playlist and track synchronization."""
 
+from .deduplication_logic import (
+    DeduplicationLogic,
+    DeduplicationResult,
+    PrimaryFileDecision,
+)
+from .download_orchestrator import DownloadOrchestrator, ExecutionResult
 from .file_scanner_service import FileScannerService
 from .filesystem_scanner import FilesystemScanner
 from .models import (
@@ -42,6 +48,11 @@ __all__ = [
     "SyncAction",
     "SyncDecisionEngine",
     "SyncDecisions",
+    "DeduplicationLogic",
+    "DeduplicationResult",
+    "PrimaryFileDecision",
+    "DownloadOrchestrator",
+    "ExecutionResult",
     "DownloadStatus",
     "PlaylistSyncStatus",
     "TrackSyncStatus",
