@@ -78,6 +78,12 @@ class Config:
             "TIDAL_CLEANUP_INTERACTIVE_MODE", "true"
         ).lower() in ("true", "1", "yes")
 
+        # Database settings
+        default_db_path = str(Path.home() / ".tidal-cleanup" / "sync.db")
+        self.database_path = Path(
+            os.getenv("TIDAL_CLEANUP_DATABASE_PATH", default_db_path)
+        )
+
         # Ensure directories exist
         self._ensure_directories()
 
@@ -88,6 +94,9 @@ class Config:
 
         # Ensure output file directory exists
         self.rekordbox_output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Ensure database directory exists
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def get_config() -> Config:

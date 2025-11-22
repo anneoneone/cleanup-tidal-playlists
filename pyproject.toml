@@ -33,6 +33,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pyrekordbox>=0.1.0",
     "tidal-dl-ng>=0.31.4",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]
@@ -110,7 +112,7 @@ sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 
 # MyPy configuration
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -161,6 +163,11 @@ module = ["src.tidal_cleanup.services.*", "tidal_cleanup.services.*"]
 disallow_untyped_calls = false
 # Suppress attr-defined errors for third-party library imports
 disable_error_code = ["attr-defined"]
+
+[[tool.mypy.overrides]]
+module = ["src.tidal_cleanup.database.*", "tidal_cleanup.database.*"]
+disallow_subclassing_any = false
+disable_error_code = ["no-any-return", "misc"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]

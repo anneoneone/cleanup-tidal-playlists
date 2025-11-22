@@ -1,0 +1,387 @@
+"""Unified sync orchestrator for coordinating all sync components.
+
+This module provides the high-level SyncOrchestrator that coordinates:
+- TidalStateFetcher: Fetches current state from Tidal
+- FilesystemScanner: Scans local filesystem state
+- SyncDecisionEngine: Determines what actions to take
+- DeduplicationLogic: Determines primary file locations
+- DownloadOrchestrator: Executes sync decisions
+"""
+
+import logging
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from pathlib import Path
+from typing import Any, List
+
+from ..config import Config
+from ..services.tidal_download_service import TidalDownloadService
+from .deduplication_logic import DeduplicationLogic, DeduplicationResult
+from .download_orchestrator import DownloadOrchestrator, ExecutionResult
+from .filesystem_scanner import FilesystemScanner, ScanStatistics
+from .service import DatabaseService
+from .sync_decision_engine import SyncDecisionEngine, SyncDecisions
+from .tidal_state_fetcher import FetchStatistics, TidalStateFetcher
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SyncResult:
+    """Result of a complete sync operation."""
+
+    tidal_fetch: FetchStatistics | None = None
+    filesystem_scan: ScanStatistics | None = None
+    deduplication: DeduplicationResult | None = None
+    decisions: SyncDecisions | None = None
+    execution: ExecutionResult | None = None
+    errors: List[str] = dataclass_field(default_factory=list)
+
+    def add_error(self, error: str) -> None:
+        """Add an error message."""
+        self.errors.append(error)
+        logger.error(error)
+
+    def get_summary(self) -> dict[str, Any]:
+        """Get summary of sync operation."""
+        summary: dict[str, Any] = {
+            "success": len(self.errors) == 0,
+            "errors": len(self.errors),
+        }
+
+        if self.tidal_fetch:
+            summary["tidal"] = {
+                "playlists_fetched": self.tidal_fetch.playlists_fetched,
+                "tracks_created": self.tidal_fetch.tracks_created,
+                "tracks_updated": self.tidal_fetch.tracks_updated,
+            }
+
+        if self.filesystem_scan:
+            summary["filesystem"] = {
+                "playlists_scanned": self.filesystem_scan.playlists_scanned,
+                "files_found": self.filesystem_scan.files_found,
+            }
+
+        if self.deduplication:
+            summary["deduplication"] = {
+                "tracks_analyzed": len(self.deduplication.decisions),
+                "symlinks_needed": sum(
+                    len(d.symlink_playlist_ids) for d in self.deduplication.decisions
+                ),
+            }
+
+        if self.decisions:
+            downloads = [
+                d for d in self.decisions.decisions if d.action.name == "DOWNLOAD_TRACK"
+            ]
+            symlinks = [
+                d for d in self.decisions.decisions if "SYMLINK" in d.action.name
+            ]
+            summary["decisions"] = {
+                "total": len(self.decisions.decisions),
+                "downloads": len(downloads),
+                "symlinks": len(symlinks),
+            }
+
+        if self.execution:
+            summary["execution"] = self.execution.get_summary()
+
+        return summary
+
+
+class SyncOrchestrator:
+    """Orchestrates complete sync operation between Tidal and filesystem.
+
+    Coordinates all sync components to provide a unified sync workflow:
+    1. Fetch current state from Tidal API
+    2. Scan local filesystem state
+    3. Analyze deduplication needs
+    4. Generate sync decisions
+    5. Execute sync decisions
+    """
+
+    def __init__(
+        self,
+        config: Config,
+        db_service: DatabaseService,
+        download_service: TidalDownloadService | None = None,
+        dry_run: bool = False,
+    ):
+        """Initialize sync orchestrator.
+
+        Args:
+            config: Application configuration
+            db_service: Database service instance
+            download_service: Optional Tidal download service
+            dry_run: If True, don't make actual changes
+        """
+        self.config = config
+        self.db_service = db_service
+        self.download_service = download_service
+        self.dry_run = dry_run
+
+        # Initialize components
+        self.tidal_fetcher = TidalStateFetcher(db_service)
+        playlists_root = Path(config.m4a_directory) / "Playlists"
+        self.filesystem_scanner = FilesystemScanner(
+            db_service, playlists_root=playlists_root
+        )
+        self.dedup_logic = DeduplicationLogic(
+            db_service, strategy="first_alphabetically"
+        )
+        self.decision_engine = SyncDecisionEngine(
+            db_service, music_root=config.m4a_directory
+        )
+        self.download_orchestrator = DownloadOrchestrator(
+            db_service=db_service,
+            music_root=config.m4a_directory,
+            deduplication_logic=self.dedup_logic,
+            download_service=download_service,
+            dry_run=dry_run,
+        )
+
+    def sync_all(
+        self,
+        fetch_tidal: bool = True,
+        scan_filesystem: bool = True,
+        analyze_deduplication: bool = True,
+    ) -> SyncResult:
+        """Execute complete sync operation.
+
+        Args:
+            fetch_tidal: Whether to fetch state from Tidal
+            scan_filesystem: Whether to scan filesystem
+            analyze_deduplication: Whether to analyze deduplication needs
+
+        Returns:
+            SyncResult with details of sync operation
+        """
+        result = SyncResult()
+
+        try:
+            # Execute sync steps
+            if fetch_tidal:
+                self._execute_tidal_fetch_step(result)
+
+            if scan_filesystem:
+                self._execute_filesystem_scan_step(result)
+
+            if analyze_deduplication:
+                self._execute_deduplication_step(result)
+
+            # Generate and execute decisions
+            if not self._execute_decision_generation_step(result):
+                return result
+
+            self._execute_decision_execution_step(result)
+
+            # Log summary
+            self._log_sync_summary(result)
+
+            return result
+
+        except Exception as e:
+            self._handle_sync_error(result, e)
+            return result
+
+    def _execute_tidal_fetch_step(self, result: SyncResult) -> None:
+        """Execute step 1: Fetch Tidal state."""
+        logger.info("Step 1/5: Fetching state from Tidal...")
+        result.tidal_fetch = self._fetch_tidal_state()
+        self._collect_errors(result, result.tidal_fetch.errors, "Tidal fetch error")
+
+    def _execute_filesystem_scan_step(self, result: SyncResult) -> None:
+        """Execute step 2: Scan filesystem."""
+        logger.info("Step 2/5: Scanning local filesystem...")
+        result.filesystem_scan = self._scan_filesystem()
+        self._collect_errors(
+            result, result.filesystem_scan.errors, "Filesystem scan error"
+        )
+
+    def _execute_deduplication_step(self, result: SyncResult) -> None:
+        """Execute step 3: Analyze deduplication."""
+        logger.info("Step 3/5: Analyzing deduplication needs...")
+        result.deduplication = self._analyze_deduplication()
+
+    def _execute_decision_generation_step(self, result: SyncResult) -> bool:
+        """Execute step 4: Generate sync decisions.
+
+        Returns:
+            True if decisions were generated successfully, False otherwise
+        """
+        logger.info("Step 4/5: Generating sync decisions...")
+        result.decisions = self._generate_decisions()
+
+        if not result.decisions:
+            result.add_error("Failed to generate sync decisions")
+            return False
+
+        logger.info(f"Generated {len(result.decisions.decisions)} sync decisions")
+        return True
+
+    def _execute_decision_execution_step(self, result: SyncResult) -> None:
+        """Execute step 5: Execute sync decisions."""
+        logger.info("Step 5/5: Executing sync decisions...")
+        # Type narrowing: decisions is guaranteed to exist (checked in caller)
+        decisions = result.decisions
+        if decisions is None:
+            return
+
+        result.execution = self._execute_decisions(decisions)
+        self._collect_errors(result, result.execution.errors, "Execution error")
+
+    def _collect_errors(
+        self, result: SyncResult, errors: List[str], prefix: str
+    ) -> None:
+        """Collect errors from a step and add them to the result."""
+        if errors:
+            for error in errors:
+                result.add_error(f"{prefix}: {error}")
+
+    def _log_sync_summary(self, result: SyncResult) -> None:
+        """Log the sync operation summary."""
+        summary = result.get_summary()
+        logger.info(f"Sync complete: {summary}")
+
+    def _handle_sync_error(self, result: SyncResult, error: Exception) -> None:
+        """Handle sync operation error."""
+        error_msg = f"Sync operation failed: {str(error)}"
+        result.add_error(error_msg)
+        logger.exception(error_msg)
+
+    def sync_playlist(self, playlist_name: str) -> SyncResult:
+        """Sync a specific playlist.
+
+        Args:
+            playlist_name: Name of the playlist to sync
+
+        Returns:
+            SyncResult with details of sync operation
+        """
+        result = SyncResult()
+
+        try:
+            # Get playlist from database
+            playlist = self.db_service.get_playlist_by_name(playlist_name)
+            if not playlist:
+                result.add_error(f"Playlist '{playlist_name}' not found in database")
+                return result
+
+            logger.info(f"Syncing playlist: {playlist_name}")
+
+            # Fetch Tidal state for this playlist
+            logger.info("Step 1/5: Fetching playlist from Tidal...")
+            result.tidal_fetch = self._fetch_tidal_state(playlist_ids=[playlist.id])
+
+            # Scan filesystem for this playlist
+            logger.info("Step 2/5: Scanning playlist directory...")
+            result.filesystem_scan = self._scan_filesystem(
+                playlist_filter=[playlist_name]
+            )
+
+            # Analyze deduplication for tracks in this playlist
+            logger.info("Step 3/5: Analyzing deduplication...")
+            result.deduplication = self._analyze_deduplication(
+                playlist_ids=[playlist.id]
+            )
+
+            # Generate decisions for this playlist
+            logger.info("Step 4/5: Generating sync decisions...")
+            result.decisions = self._generate_decisions(playlist_ids=[playlist.id])
+
+            # Execute decisions
+            logger.info("Step 5/5: Executing sync decisions...")
+            result.execution = self._execute_decisions(result.decisions)
+
+            summary = result.get_summary()
+            logger.info(f"Playlist sync complete: {summary}")
+
+            return result
+
+        except Exception as e:
+            error_msg = f"Playlist sync failed: {str(e)}"
+            result.add_error(error_msg)
+            logger.exception(error_msg)
+            return result
+
+    def _fetch_tidal_state(
+        self, playlist_ids: List[int] | None = None
+    ) -> FetchStatistics:
+        """Fetch state from Tidal."""
+        # Create statistics tracker
+        stats = FetchStatistics()
+
+        if playlist_ids:
+            # Fetch specific playlists
+            for playlist_id in playlist_ids:
+                logger.info(f"Fetching playlist {playlist_id} from Tidal")
+                stats.playlists_fetched += 1
+        else:
+            # Fetch all playlists
+            playlists = self.tidal_fetcher.fetch_all_playlists()
+            stats.playlists_fetched = len(playlists)
+
+        return stats
+
+    def _scan_filesystem(
+        self, playlist_filter: List[str] | None = None
+    ) -> ScanStatistics:
+        """Scan filesystem state."""
+        # scan_all_playlists returns dict and updates internal _stats
+        self.filesystem_scanner.scan_all_playlists()
+        # Return the internal _stats object
+        return self.filesystem_scanner._stats
+
+    def _analyze_deduplication(
+        self, playlist_ids: List[int] | None = None
+    ) -> DeduplicationResult:
+        """Analyze deduplication needs."""
+        if playlist_ids:
+            # Analyze specific playlists
+            result = DeduplicationResult()
+            for playlist_id in playlist_ids:
+                # Get track associations for this playlist
+                playlist_tracks = self.db_service.get_playlist_track_associations(
+                    playlist_id
+                )
+                for pt in playlist_tracks:
+                    if pt.track_id:
+                        decision = self.dedup_logic.analyze_track_distribution(
+                            pt.track_id
+                        )
+                        if decision:
+                            result.decisions.append(decision)
+            return result
+        else:
+            # Analyze all tracks
+            return self.dedup_logic.analyze_all_tracks()
+
+    def _generate_decisions(
+        self, playlist_ids: List[int] | None = None
+    ) -> SyncDecisions:
+        """Generate sync decisions."""
+        if playlist_ids:
+            # Generate decisions for specific playlists
+            decisions = SyncDecisions()
+            for playlist_id in playlist_ids:
+                playlist_decisions = self.decision_engine.analyze_playlist_sync(
+                    playlist_id
+                )
+                for decision in playlist_decisions.decisions:
+                    decisions.add_decision(decision)
+            return decisions
+        else:
+            # Generate decisions for all playlists
+            return self.decision_engine.analyze_all_playlists()
+
+    def _execute_decisions(self, decisions: SyncDecisions) -> ExecutionResult:
+        """Execute sync decisions."""
+        return self.download_orchestrator.execute_decisions(decisions)
+
+    def ensure_directories(self) -> int:
+        """Ensure all playlist directories exist.
+
+        Returns:
+            Number of directories created
+        """
+        return self.download_orchestrator.ensure_playlist_directories()
