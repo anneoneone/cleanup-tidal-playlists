@@ -271,6 +271,80 @@ class TidalDownloadService:
             logger.error(f"Failed to download playlists: {e}")
             raise TidalDownloadError(f"Playlists download failed: {e}")
 
+    def download_track(
+        self, track_id: int, target_path: Path, quality: str | None = None
+    ) -> Path:
+        """Download a single track by ID to specified location.
+
+        Args:
+            track_id: Tidal track ID
+            target_path: Target file path for the download
+            quality: Audio quality (defaults to settings if None)
+
+        Returns:
+            Path to the downloaded track file
+
+        Raises:
+            TidalDownloadError: If download fails
+        """
+        if not self._authenticated or not self.tidal_dl:
+            raise TidalDownloadError("Not authenticated with Tidal")
+
+        try:
+            logger.info(f"Downloading track {track_id} to {target_path}")
+
+            # Get track from Tidal API (type narrowing for mypy)
+            tidal_dl = self.tidal_dl
+            track = self._retry_api_call(lambda: tidal_dl.session.track(track_id))
+
+            if not track:
+                raise TidalDownloadError(f"Track {track_id} not found on Tidal")
+
+            # Ensure parent directory exists
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Create Download instance
+            from threading import Event
+
+            from rich.progress import Progress
+
+            fn_logger = _LoggerAdapter(logger)
+            progress = Progress()
+            event_abort = Event()
+            event_run = Event()
+            event_run.set()
+
+            dl = Download(
+                session=self.tidal_dl.session,
+                path_base=str(target_path.parent),
+                fn_logger=fn_logger,
+                skip_existing=True,
+                progress=progress,
+                event_abort=event_abort,
+                event_run=event_run,
+            )
+
+            # Use simple file template (just filename)
+            file_template = target_path.name
+
+            # Download the track
+            dl.items(
+                media=track,
+                file_template=file_template,
+                video_download=False,
+                download_delay=False,
+                quality_audio=quality or self.tidal_dl_settings.data.quality_audio,
+            )
+
+            logger.info(f"Successfully downloaded track to {target_path}")
+            return target_path
+
+        except TidalDownloadError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to download track {track_id}: {e}")
+            raise TidalDownloadError(f"Track download failed: {e}")
+
     def _download_playlist_tracks(
         self, playlist: TidalPlaylist, target_dir: Path
     ) -> None:

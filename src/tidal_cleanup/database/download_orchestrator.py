@@ -11,8 +11,12 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Dict, List
 
+from ..services.tidal_download_service import (
+    TidalDownloadError,
+    TidalDownloadService,
+)
 from .deduplication_logic import DeduplicationLogic
-from .models import DownloadStatus
+from .models import DownloadStatus, Track
 from .service import DatabaseService
 from .sync_decision_engine import DecisionResult, SyncAction, SyncDecisions
 
@@ -65,6 +69,7 @@ class DownloadOrchestrator:
         db_service: DatabaseService,
         music_root: Path | str,
         deduplication_logic: DeduplicationLogic | None = None,
+        download_service: TidalDownloadService | None = None,
         dry_run: bool = False,
     ):
         """Initialize download orchestrator.
@@ -73,6 +78,7 @@ class DownloadOrchestrator:
             db_service: Database service instance
             music_root: Root directory for music files (contains Playlists/)
             deduplication_logic: Logic for determining primary file locations
+            download_service: Tidal download service for downloading tracks
             dry_run: If True, don't actually make changes, just log what would happen
         """
         self.db_service = db_service
@@ -81,6 +87,7 @@ class DownloadOrchestrator:
         self.dedup_logic = deduplication_logic or DeduplicationLogic(
             db_service, strategy="first_alphabetically"
         )
+        self.download_service = download_service
         self.dry_run = dry_run
 
     def execute_decisions(self, decisions: SyncDecisions) -> ExecutionResult:
@@ -147,38 +154,144 @@ class DownloadOrchestrator:
         result.downloads_attempted += 1
 
         if self.dry_run:
-            logger.info(
-                f"DRY RUN: Would download track {decision.track_id} "
-                f"to {decision.target_path}"
-            )
-            result.downloads_successful += 1
+            self._handle_dry_run_download(decision, result)
             return
 
-        # For now, just mark as attempted and update status
-        # Actual download implementation would use TidalDownloadService
-        logger.info(
-            f"Download requested for track {decision.track_id} "
-            f"to {decision.target_path}"
-        )
+        # Validate decision
+        if not self._validate_download_decision(decision, result):
+            return
 
-        # For now, just update the database to mark download as attempted
-        if decision.track_id is None:
-            result.downloads_failed += 1
-            result.add_error("Cannot download track: track_id is None")
+        # Type narrowing: track_id is guaranteed to be int here (validated above)
+        track_id = decision.track_id
+        if track_id is None:  # Defensive check
             return
 
         try:
-            track = self.db_service.get_track_by_id(decision.track_id)
-            if track:
-                with self.db_service.get_session() as session:
-                    track_obj = session.merge(track)
-                    track_obj.download_status = DownloadStatus.DOWNLOADING
-                    session.commit()
-                result.downloads_successful += 1
-                logger.info(f"Marked track {decision.track_id} as downloading")
+            # Get track from database
+            track = self.db_service.get_track_by_id(track_id)
+            if not track:
+                result.downloads_failed += 1
+                result.add_error(f"Track {decision.track_id} not found in database")
+                return
+
+            # Mark as downloading
+            self._update_track_status(track, DownloadStatus.DOWNLOADING)
+
+            logger.info(
+                f"Downloading track {decision.track_id} to {decision.target_path}"
+            )
+
+            # Download the track using TidalDownloadService if available
+            if self.download_service:
+                self._perform_download(track, decision, result)
+            else:
+                self._handle_no_download_service(result)
+
         except Exception as e:
             result.downloads_failed += 1
-            result.add_error(f"Failed to update download status: {str(e)}")
+            result.add_error(f"Failed to download track: {str(e)}")
+
+    def _handle_dry_run_download(
+        self, decision: DecisionResult, result: ExecutionResult
+    ) -> None:
+        """Handle dry run mode for downloads."""
+        logger.info(
+            f"DRY RUN: Would download track {decision.track_id} "
+            f"to {decision.target_path}"
+        )
+        result.downloads_successful += 1
+
+    def _validate_download_decision(
+        self, decision: DecisionResult, result: ExecutionResult
+    ) -> bool:
+        """Validate download decision has required fields.
+
+        Returns:
+            True if valid, False otherwise
+        """
+        if decision.track_id is None:
+            result.downloads_failed += 1
+            result.add_error("Cannot download track: track_id is None")
+            return False
+
+        if not decision.target_path:
+            result.downloads_failed += 1
+            result.add_error("Cannot download track: target_path is None")
+            return False
+
+        return True
+
+    def _update_track_status(self, track: Track, status: DownloadStatus) -> None:
+        """Update track download status in database."""
+        with self.db_service.get_session() as session:
+            track_obj = session.merge(track)
+            track_obj.download_status = status
+            session.commit()
+
+    def _perform_download(
+        self, track: Track, decision: DecisionResult, result: ExecutionResult
+    ) -> None:
+        """Perform the actual download using TidalDownloadService."""
+        try:
+            # Type narrowing: target_path is guaranteed to be str here (validated above)
+            target_path_str = decision.target_path
+            if target_path_str is None:  # Defensive check
+                raise ValueError("target_path is None")
+            target_path = Path(target_path_str)
+            tidal_track_id = self._get_tidal_track_id(track)
+
+            # Type narrowing: download_service guaranteed to exist
+            download_service = self.download_service
+            if download_service is None:  # Defensive check
+                raise ValueError("download_service is None")
+            download_service.download_track(
+                track_id=tidal_track_id, target_path=target_path
+            )
+
+            # Update database with success
+            self._update_track_after_download(track, target_path)
+
+            result.downloads_successful += 1
+            logger.info(f"Successfully downloaded track {decision.track_id}")
+
+        except (TidalDownloadError, ValueError) as e:
+            self._handle_download_failure(track, decision, result, e)
+
+    def _get_tidal_track_id(self, track: Track) -> int:
+        """Get Tidal track ID from track object.
+
+        Raises:
+            ValueError: If track has no tidal_id
+        """
+        tidal_track_id = int(track.tidal_id) if track.tidal_id else None
+        if tidal_track_id is None:
+            raise ValueError(f"Track {track.id} has no tidal_id")
+        return tidal_track_id
+
+    def _update_track_after_download(self, track: Track, target_path: Path) -> None:
+        """Update track in database after successful download."""
+        with self.db_service.get_session() as session:
+            track_obj = session.merge(track)
+            track_obj.download_status = DownloadStatus.DOWNLOADED
+            track_obj.file_path = str(target_path)
+            session.commit()
+
+    def _handle_download_failure(
+        self,
+        track: Track,
+        decision: DecisionResult,
+        result: ExecutionResult,
+        error: Exception,
+    ) -> None:
+        """Handle download failure by updating database and result."""
+        self._update_track_status(track, DownloadStatus.ERROR)
+        result.downloads_failed += 1
+        result.add_error(f"Failed to download track {decision.track_id}: {str(error)}")
+
+    def _handle_no_download_service(self, result: ExecutionResult) -> None:
+        """Handle case where no download service is configured."""
+        logger.warning("No download service configured, marking as downloading only")
+        result.downloads_successful += 1
 
     def _execute_create_symlink(
         self, decision: DecisionResult, result: ExecutionResult

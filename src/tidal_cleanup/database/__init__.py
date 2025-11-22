@@ -25,6 +25,7 @@ from .sync_decision_engine import (
     SyncDecisionEngine,
     SyncDecisions,
 )
+from .sync_orchestrator import SyncOrchestrator, SyncResult
 from .sync_state import Change, ChangeType, SyncState, SyncStateComparator
 from .tidal_snapshot_service import TidalSnapshotService
 from .tidal_state_fetcher import TidalStateFetcher
@@ -53,6 +54,8 @@ __all__ = [
     "PrimaryFileDecision",
     "DownloadOrchestrator",
     "ExecutionResult",
+    "SyncOrchestrator",
+    "SyncResult",
     "DownloadStatus",
     "PlaylistSyncStatus",
     "TrackSyncStatus",
