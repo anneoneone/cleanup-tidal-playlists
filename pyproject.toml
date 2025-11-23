@@ -186,6 +186,13 @@ disallow_untyped_defs = false
 module = ["alembic.*"]
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = [
+    "src.tidal_cleanup.database.file_scanner_service",
+    "tidal_cleanup.database.file_scanner_service",
+]
+warn_unused_ignores = false
+
 # Pytest configuration
 [tool.pytest.ini_options]
 minversion = "7.0"

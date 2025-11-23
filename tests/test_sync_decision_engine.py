@@ -96,7 +96,8 @@ def db_service(temp_dir):
     db_path = temp_dir / "test.db"
     service = DatabaseService(db_path=str(db_path))
     service.init_db()
-    return service
+    yield service
+    service.close()
 
 
 @pytest.fixture

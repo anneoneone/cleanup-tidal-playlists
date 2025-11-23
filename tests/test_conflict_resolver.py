@@ -65,7 +65,8 @@ class TestConflict:
         )
         result = str(conflict)
         assert "file_missing: File not found" in result
-        assert "(file: /test/file.txt)" in result
+        assert "(file:" in result
+        assert "file.txt)" in result
 
     def test_conflict_str_with_resolution(self):
         """Test conflict string with resolution."""
@@ -88,7 +89,8 @@ class TestConflict:
         )
         result = str(conflict)
         assert "file_exists: Already exists" in result
-        assert "(file: /test/file.txt)" in result
+        assert "(file:" in result
+        assert "file.txt)" in result
         assert "[resolved: overwrite]" in result
 
 
@@ -518,7 +520,11 @@ class TestBackupFile:
 
         assert backup_path is not None
         assert backup_path.is_symlink()
-        assert os.readlink(backup_path) == str(source)
+        # Normalize paths for Windows (remove \\?\ prefix)
+        target_path = os.readlink(backup_path)
+        if target_path.startswith("\\\\?\\"):
+            target_path = target_path[4:]
+        assert target_path == str(source)
 
     def test_backup_missing_file(self, resolver, tmp_path):
         """Test backing up a file that doesn't exist."""

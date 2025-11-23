@@ -80,13 +80,14 @@ def db_service():
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as temp_db:
         db_path = temp_db.name
 
-    # Create service and initialize schema
-    service = DatabaseService(f"sqlite:///{db_path}")
+    # Create service and initialize schema (use path directly, not SQLite URL)
+    service = DatabaseService(db_path)
     service.init_db()
 
     yield service
 
     # Cleanup
+    service.close()
     Path(db_path).unlink(missing_ok=True)
 
 

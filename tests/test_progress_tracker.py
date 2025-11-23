@@ -472,7 +472,7 @@ class TestTqdmProgressReporter:
 
     def test_initialization_with_tqdm(self):
         """Test TqdmProgressReporter initialization when tqdm is available."""
-        # Just test with actual tqdm (it's installed in the environment)
+        pytest.importorskip("tqdm")
         reporter = TqdmProgressReporter()
         assert reporter.tqdm is not None
         assert reporter._bars == {}

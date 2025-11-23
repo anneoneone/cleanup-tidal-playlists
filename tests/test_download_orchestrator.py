@@ -1,6 +1,7 @@
 """Tests for download orchestrator."""
 
 import os
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
@@ -432,7 +433,12 @@ class TestExecuteCreateSymlink:
 
         assert result.symlinks_created == 1
         assert source.is_symlink()
-        assert os.readlink(source) == str(target)
+
+        # Windows may prepend \\?\ prefix for long paths
+        target_link = os.readlink(source)
+        if target_link.startswith("\\\\?\\"):
+            target_link = target_link[4:]
+        assert target_link == str(target)
 
     def test_create_symlink_missing_paths(self, orchestrator):
         """Test symlink creation with missing paths."""
@@ -556,7 +562,12 @@ class TestExecuteUpdateSymlink:
 
         assert result.symlinks_updated == 1
         assert source.is_symlink()
-        assert os.readlink(source) == str(new_target)
+
+        # Windows may prepend \\?\ prefix for long paths
+        target_link = os.readlink(source)
+        if target_link.startswith("\\\\?\\"):
+            target_link = target_link[4:]
+        assert target_link == str(new_target)
 
     def test_update_symlink_missing_paths(self, orchestrator):
         """Test symlink update with missing paths."""
@@ -1074,6 +1085,9 @@ class TestDownloadOrchestratorEdgeCases:
         with pytest.raises(ValueError, match="Track 1 has no tidal_id"):
             orchestrator._get_tidal_track_id(track)
 
+    @pytest.mark.skipif(
+        sys.platform.startswith("win"), reason="Unix-specific permission test"
+    )
     def test_execute_create_symlink_exception_handling(
         self, orchestrator, tmp_path, caplog
     ):
@@ -1096,6 +1110,9 @@ class TestDownloadOrchestratorEdgeCases:
         assert len(result.errors) > 0
         assert "Failed to create symlink" in result.errors[0]
 
+    @pytest.mark.skipif(
+        sys.platform.startswith("win"), reason="Unix-specific permission test"
+    )
     def test_execute_update_symlink_exception_handling(
         self, orchestrator, tmp_path, caplog
     ):

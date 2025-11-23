@@ -187,7 +187,7 @@ class ProgressTracker:
 
         # Estimate remaining time
         estimated_remaining = None
-        if self._total > 0 and self._current > 0:
+        if self._total > 0 and self._current > 0 and elapsed > 0:
             progress_rate = self._current / elapsed
             remaining_items = self._total - self._current
             estimated_remaining = remaining_items / progress_rate

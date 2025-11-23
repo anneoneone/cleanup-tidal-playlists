@@ -5,10 +5,13 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from mutagen import File as MutagenFile
+import mutagen
 
 from .models import Track
 from .service import DatabaseService
+
+# Alias for mutagen.File - mutagen doesn't have type stubs
+MutagenFile = mutagen.File  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 

@@ -1,11 +1,13 @@
 """Tidal Snapshot Service for capturing and syncing Tidal state to database."""
 
 import logging
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
-from ..services.tidal_service import TidalService
 from .service import DatabaseService
 from .sync_state import Change, ChangeType, SyncState, SyncStateComparator
+
+if TYPE_CHECKING:
+    from ..services.tidal_service import TidalService
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +15,7 @@ logger = logging.getLogger(__name__)
 class TidalSnapshotService:
     """Service for capturing Tidal state and syncing to database."""
 
-    def __init__(self, tidal_service: TidalService, db_service: DatabaseService):
+    def __init__(self, tidal_service: "TidalService", db_service: DatabaseService):
         """Initialize Tidal snapshot service.
 
         Args:
