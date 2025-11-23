@@ -25,7 +25,7 @@ repos:
     hooks:
       - id: black
         language_version: python3
-        exclude: ^(scripts/.*_spike\.py|spikes/.*)$
+        exclude: ^(scripts/.*_spike\.py|spikes/.*|alembic/.*)$
 
   # Import sorting
   - repo: https://github.com/pycqa/isort
@@ -33,7 +33,7 @@ repos:
     hooks:
       - id: isort
         args: ["--profile", "black"]
-        exclude: ^(scripts/.*_spike\.py|spikes/.*)$
+        exclude: ^(scripts/.*_spike\.py|spikes/.*|alembic/.*)$
 
   # Python linting
   - repo: https://github.com/pycqa/flake8
@@ -46,15 +46,19 @@ repos:
           - flake8-comprehensions
           - flake8-simplify
           - flake8-bandit
-        exclude: ^(scripts/.*_spike\.py|spikes/.*)$
+        exclude: ^(scripts/.*_spike\.py|spikes/.*|alembic/.*)$
 
   # Type checking with mypy
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.16.0
     hooks:
       - id: mypy
-        additional_dependencies: [types-requests]
-        exclude: ^(tests/|scripts/|spikes/.*)
+        pass_filenames: false
+        args: [src/tidal_cleanup, --python-version=3.12]
+        additional_dependencies:
+          - types-requests
+          - sqlalchemy>=2.0.0
+        exclude: ^(tests/|scripts/|spikes/.*|alembic/.*)$
 
   # Docstring formatting
   - repo: https://github.com/pycqa/docformatter
@@ -62,7 +66,7 @@ repos:
     hooks:
       - id: docformatter
         args: ["--in-place", "--wrap-summaries=88", "--wrap-descriptions=88"]
-        exclude: ^(scripts/.*_spike\.py|spikes/.*)$
+        exclude: ^(scripts/.*_spike\.py|spikes/.*|alembic/.*)$
 
   # Commit message validation
   - repo: https://github.com/commitizen-tools/commitizen

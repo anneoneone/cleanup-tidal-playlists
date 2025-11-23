@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tidal-cleanup"
 version = "2.0.0"
-description = "A modern tool for synchronizing Tidal playlists with local audio files"
+description = "A modern tool for synchronizing Tidal playlists with local audio files."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Anton Kress", email = "anton.kress@posteo.de" }]
@@ -33,6 +33,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pyrekordbox>=0.1.0",
     "tidal-dl-ng>=0.31.4",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]
@@ -89,6 +91,7 @@ exclude = '''
   | buck-out
   | build
   | dist
+  | alembic
 )/
 '''
 
@@ -110,7 +113,7 @@ sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 
 # MyPy configuration
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -163,6 +166,11 @@ disallow_untyped_calls = false
 disable_error_code = ["attr-defined"]
 
 [[tool.mypy.overrides]]
+module = ["src.tidal_cleanup.database.*", "tidal_cleanup.database.*"]
+disallow_subclassing_any = false
+disable_error_code = ["no-any-return", "misc"]
+
+[[tool.mypy.overrides]]
 module = ["tests.*"]
 ignore_errors = true
 disallow_untyped_calls = false
@@ -173,6 +181,17 @@ module = ["scripts.*"]
 ignore_errors = true
 disallow_untyped_calls = false
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["alembic.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "src.tidal_cleanup.database.file_scanner_service",
+    "tidal_cleanup.database.file_scanner_service",
+]
+warn_unused_ignores = false
 
 # Pytest configuration
 [tool.pytest.ini_options]

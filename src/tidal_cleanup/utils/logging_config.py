@@ -3,6 +3,7 @@
 import logging
 import logging.handlers
 import sys
+import warnings
 from pathlib import Path
 from typing import Any, Optional
 
@@ -47,6 +48,9 @@ def setup_logging(
         max_file_size: Maximum size of log file before rotation
         backup_count: Number of backup log files to keep
     """
+    # Suppress deprecation warnings from tidalapi library
+    warnings.filterwarnings("ignore", category=DeprecationWarning, module="tidalapi")
+
     # Convert string level to logging constant
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
 
