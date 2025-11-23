@@ -373,3 +373,203 @@ class TestDeduplicationResultDataclass:
         assert summary["tracks_with_primary"] == 7
         assert summary["tracks_needing_primary"] == 3
         assert summary["symlinks_needed"] == 5
+
+
+class TestDeduplicationLogicEdgeCases:
+    """Test edge cases and error handling in DeduplicationLogic."""
+
+    def test_analyze_track_distribution_no_playlists_found(
+        self, dedup_logic, db_service
+    ):
+        """Test analyze_track_distribution when track has no valid playlists."""
+        # Create a track but don't add it to any playlists
+        track_id = create_test_track(db_service)
+
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="not found in any playlists"):
+            dedup_logic.analyze_track_distribution(track_id)
+
+    def test_analyze_all_tracks_with_exception(
+        self, dedup_logic, db_service, monkeypatch, caplog
+    ):
+        """Test analyze_all_tracks handles exceptions gracefully."""
+        import logging
+
+        caplog.set_level(logging.ERROR)
+
+        # Create tracks and playlists
+        track_id_1 = create_test_track(db_service, tidal_id="111", title="Track1")
+        track_id_2 = create_test_track(db_service, tidal_id="222", title="Track2")
+
+        playlist_id_a = create_test_playlist(
+            db_service, tidal_id="playlist-a-exception", name="Playlist A"
+        )
+        playlist_id_b = create_test_playlist(
+            db_service, tidal_id="playlist-b-exception", name="Playlist B"
+        )
+
+        # Add first track to multiple playlists (needs deduplication)
+        db_service.add_track_to_playlist(playlist_id_a, track_id_1, position=1)
+        db_service.add_track_to_playlist(playlist_id_b, track_id_1, position=1)
+
+        # Add second track to one playlist
+        db_service.add_track_to_playlist(playlist_id_a, track_id_2, position=2)
+
+        # Mock analyze_track_distribution to fail for the first track
+        original_analyze = dedup_logic.analyze_track_distribution
+
+        def mock_analyze(track_id):
+            if track_id == track_id_1:
+                raise RuntimeError("Simulated error for track 1")
+            return original_analyze(track_id)
+
+        monkeypatch.setattr(dedup_logic, "analyze_track_distribution", mock_analyze)
+
+        # Should handle exception and continue
+        result = dedup_logic.analyze_all_tracks()
+
+        # First track should have error logged but processing continues
+        assert any(
+            "Error analyzing track" in record.message for record in caplog.records
+        )
+
+        # Result should still have valid data (second track is single playlist)
+        assert result.tracks_analyzed == 1  # Only track_2 counted
+
+    def test_strategy_prefer_existing_with_file_path(self, db_service, temp_dir):
+        """Test prefer_existing strategy when file exists."""
+        # Create a temporary file
+        file_path = temp_dir / "Playlists" / "PlaylistA" / "track.mp3"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("test content")
+
+        # Create track with file path
+        track_data = {
+            "tidal_id": "123",
+            "title": "Test Track",
+            "artist": "Test Artist",
+            "duration": 180,
+            "normalized_name": "test artist - test track",
+            "file_path": str(file_path),
+        }
+        track = db_service.create_track(track_data)
+
+        # Create playlists
+        playlist_a_id = create_test_playlist(
+            db_service, tidal_id="playlist-a-uuid", name="PlaylistA"
+        )
+        playlist_b_id = create_test_playlist(
+            db_service, tidal_id="playlist-b-uuid", name="PlaylistB"
+        )
+
+        # Add track to both playlists
+        db_service.add_track_to_playlist(playlist_a_id, track.id, position=1)
+        db_service.add_track_to_playlist(playlist_b_id, track.id, position=1)
+
+        # Use prefer_existing strategy
+        dedup = DeduplicationLogic(db_service=db_service, strategy="prefer_existing")
+
+        decision = dedup.analyze_track_distribution(track.id)
+
+        # Should prefer PlaylistA because file path contains "PlaylistA"
+        assert decision.primary_playlist_name == "PlaylistA"
+        assert playlist_b_id in decision.symlink_playlist_ids
+
+    def test_strategy_prefer_existing_file_not_in_any_playlist(
+        self, db_service, temp_dir
+    ):
+        """Test prefer_existing when file exists but not in any playlist dir."""
+        # Create a temporary file outside playlists
+        file_path = temp_dir / "other" / "track.mp3"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("test content")
+
+        # Create track with file path
+        track_data = {
+            "tidal_id": "123",
+            "title": "Test Track",
+            "artist": "Test Artist",
+            "duration": 180,
+            "normalized_name": "test artist - test track",
+            "file_path": str(file_path),
+        }
+        track = db_service.create_track(track_data)
+
+        # Create playlists
+        playlist_a_id = create_test_playlist(
+            db_service, tidal_id="zebra-uuid", name="Zebra"
+        )
+        playlist_b_id = create_test_playlist(
+            db_service, tidal_id="alpha-uuid", name="Alpha"
+        )
+
+        # Add track to both playlists
+        db_service.add_track_to_playlist(playlist_a_id, track.id, position=1)
+        db_service.add_track_to_playlist(playlist_b_id, track.id, position=1)
+
+        # Use prefer_existing strategy
+        dedup = DeduplicationLogic(db_service=db_service, strategy="prefer_existing")
+
+        decision = dedup.analyze_track_distribution(track.id)
+
+        # Should fall back to alphabetical (Alpha before Zebra)
+        assert decision.primary_playlist_name == "Alpha"
+
+    def test_strategy_prefer_existing_no_file_path(self, db_service):
+        """Test prefer_existing strategy when track has no file path."""
+        # Create track without file path
+        track_id = create_test_track(db_service)
+
+        # Create playlists
+        playlist_a_id = create_test_playlist(
+            db_service, tidal_id="zebra-no-path-uuid", name="Zebra"
+        )
+        playlist_b_id = create_test_playlist(
+            db_service, tidal_id="alpha-no-path-uuid", name="Alpha"
+        )
+
+        # Add track to both playlists
+        db_service.add_track_to_playlist(playlist_a_id, track_id, position=1)
+        db_service.add_track_to_playlist(playlist_b_id, track_id, position=1)
+
+        # Use prefer_existing strategy
+        dedup = DeduplicationLogic(db_service=db_service, strategy="prefer_existing")
+
+        decision = dedup.analyze_track_distribution(track_id)
+
+        # Should fall back to alphabetical (Alpha before Zebra)
+        assert decision.primary_playlist_name == "Alpha"
+
+    def test_strategy_prefer_existing_file_does_not_exist(self, db_service, temp_dir):
+        """Test prefer_existing when file_path is set but file doesn't exist."""
+        # Create track with non-existent file path
+        file_path = temp_dir / "nonexistent" / "track.mp3"
+        track_data = {
+            "tidal_id": "123",
+            "title": "Test Track",
+            "artist": "Test Artist",
+            "duration": 180,
+            "normalized_name": "test artist - test track",
+            "file_path": str(file_path),
+        }
+        track = db_service.create_track(track_data)
+
+        # Create playlists
+        playlist_a_id = create_test_playlist(
+            db_service, tidal_id="zebra-nofile-uuid", name="Zebra"
+        )
+        playlist_b_id = create_test_playlist(
+            db_service, tidal_id="alpha-nofile-uuid", name="Alpha"
+        )
+
+        # Add track to both playlists
+        db_service.add_track_to_playlist(playlist_a_id, track.id, position=1)
+        db_service.add_track_to_playlist(playlist_b_id, track.id, position=1)
+
+        # Use prefer_existing strategy
+        dedup = DeduplicationLogic(db_service=db_service, strategy="prefer_existing")
+
+        decision = dedup.analyze_track_distribution(track.id)
+
+        # Should fall back to alphabetical (Alpha before Zebra)
+        assert decision.primary_playlist_name == "Alpha"

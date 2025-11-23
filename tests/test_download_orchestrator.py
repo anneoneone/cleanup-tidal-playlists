@@ -898,3 +898,372 @@ class TestDatabaseHelperMethods:
         orchestrator._update_track_file_path(
             track_id=999, file_path="/path/to/file.flac"
         )
+
+
+class TestDownloadOrchestratorEdgeCases:
+    """Test edge cases and error paths in DownloadOrchestrator."""
+
+    def test_execute_decisions_with_conflicts(
+        self, orchestrator, mock_db_service, caplog
+    ):
+        """Test execute_decisions handles conflicts correctly."""
+        # Mock conflict resolver to return conflicts
+        conflict1 = [
+            DecisionResult(
+                action=SyncAction.DOWNLOAD_TRACK,
+                track_id=1,
+                target_path="/path1",
+                priority=5,
+            ),
+            DecisionResult(
+                action=SyncAction.REMOVE_FILE,
+                track_id=1,
+                source_path="/path1",
+                priority=3,
+            ),
+        ]
+
+        orchestrator.conflict_resolver.detect_decision_conflicts = MagicMock(
+            return_value=[conflict1]
+        )
+        orchestrator.conflict_resolver.resolve_decision_conflicts = MagicMock(
+            return_value=[conflict1[0]]  # Keep higher priority
+        )
+
+        decisions = SyncDecisions()
+        decisions.add_decision(conflict1[0])
+        decisions.add_decision(conflict1[1])
+
+        # Mock track for download
+        track = Track(id=1, tidal_id="123", title="Test")
+        mock_db_service.get_track_by_id.return_value = track
+
+        exec_result = orchestrator.execute_decisions(decisions)
+
+        # Verify conflict detection was called
+        orchestrator.conflict_resolver.detect_decision_conflicts.assert_called_once()
+        assert "Detected 1 decision conflicts" in caplog.text
+        # Note: logger.info doesn't appear in caplog by default, only warnings+
+        assert exec_result is not None
+
+    def test_execute_decision_no_action(self, orchestrator):
+        """Test _execute_decision with NO_ACTION does nothing."""
+        decision = DecisionResult(action=SyncAction.NO_ACTION, priority=1)
+        result = ExecutionResult()
+
+        # Should not raise exception
+        orchestrator._execute_decision(decision, result)
+        assert result.decisions_executed == 0
+
+    def test_execute_decision_unknown_action(self, orchestrator, caplog):
+        """Test _execute_decision with unknown action logs warning."""
+        decision = DecisionResult(action="UNKNOWN_ACTION", priority=1)
+        result = ExecutionResult()
+
+        orchestrator._execute_decision(decision, result)
+        assert "Unhandled action type: UNKNOWN_ACTION" in caplog.text
+
+    def test_execute_download_defensive_track_id_none(
+        self, orchestrator, mock_db_service
+    ):
+        """Test _execute_download defensive check for track_id None."""
+        decision = DecisionResult(
+            action=SyncAction.DOWNLOAD_TRACK,
+            track_id=None,  # Invalid but passed validation somehow
+            target_path="/path/to/track.flac",
+            priority=5,
+        )
+        result = ExecutionResult()
+
+        # Mock validation to pass
+        orchestrator._validate_download_decision = MagicMock(return_value=True)
+
+        # Should handle gracefully
+        orchestrator._execute_download(decision, result)
+        # Should return early without error
+
+    def test_execute_download_track_status_update(self, orchestrator, mock_db_service):
+        """Test _execute_download updates track status to DOWNLOADING."""
+        track = Track(id=1, tidal_id="123", title="Test", download_status="pending")
+        mock_db_service.get_track_by_id.return_value = track
+
+        # Mock session for status update
+        mock_session = MagicMock()
+        mock_track_obj = MagicMock()
+        mock_session.merge.return_value = mock_track_obj
+        mock_db_service.get_session.return_value.__enter__.return_value = mock_session
+
+        decision = DecisionResult(
+            action=SyncAction.DOWNLOAD_TRACK,
+            track_id=1,
+            target_path="/path/to/track.flac",
+            priority=5,
+        )
+        result = ExecutionResult()
+
+        # No download service - will fail but status should update
+        orchestrator.download_service = None
+        orchestrator._execute_download(decision, result)
+
+        # Verify status was set to DOWNLOADING
+        assert mock_track_obj.download_status == DownloadStatus.DOWNLOADING
+        mock_session.commit.assert_called()
+
+    def test_handle_no_download_service(self, orchestrator):
+        """Test _handle_no_download_service marks as successful."""
+        result = ExecutionResult()
+
+        orchestrator._handle_no_download_service(result)
+
+        # Without download service, it just marks as successful
+        assert result.downloads_successful == 1
+        assert result.downloads_failed == 0
+
+    def test_perform_download_defensive_target_path_none(
+        self, orchestrator, mock_db_service
+    ):
+        """Test _perform_download defensive check for target_path None."""
+        track = Track(id=1, tidal_id="123", title="Test")
+        mock_db_service.get_track_by_id.return_value = track
+
+        decision = DecisionResult(
+            action=SyncAction.DOWNLOAD_TRACK,
+            track_id=1,
+            target_path=None,  # Invalid but passed validation somehow
+            priority=5,
+        )
+        result = ExecutionResult()
+
+        # The exception is caught and logged in _execute_download, not raised
+        # Test that it's caught properly by calling through _execute_download
+        orchestrator._execute_download(decision, result)
+
+        # Should have resulted in a failed download
+        assert result.downloads_failed == 1
+        assert len(result.errors) > 0
+
+    def test_perform_download_defensive_download_service_none(
+        self, orchestrator, mock_db_service
+    ):
+        """Test _perform_download defensive check for download_service None."""
+        track = Track(id=1, tidal_id="123", title="Test")
+        mock_db_service.get_track_by_id.return_value = track
+
+        decision = DecisionResult(
+            action=SyncAction.DOWNLOAD_TRACK,
+            track_id=1,
+            target_path="/path/to/track.flac",
+            priority=5,
+        )
+        result = ExecutionResult()
+
+        orchestrator.download_service = None
+
+        # When download_service is None, it calls _handle_no_download_service
+        # which marks download as successful (not failed)
+        orchestrator._execute_download(decision, result)
+
+        # Should mark as successful even without download service
+        assert result.downloads_successful == 1
+        assert result.downloads_failed == 0
+
+    def test_get_tidal_track_id_no_tidal_id(self, orchestrator):
+        """Test _get_tidal_track_id raises error when track has no tidal_id."""
+        track = Track(id=1, tidal_id=None, title="Test")
+
+        with pytest.raises(ValueError, match="Track 1 has no tidal_id"):
+            orchestrator._get_tidal_track_id(track)
+
+    def test_execute_create_symlink_exception_handling(
+        self, orchestrator, tmp_path, caplog
+    ):
+        """Test _execute_create_symlink handles exceptions with permissions."""
+        # Use a path that will definitely cause an error (e.g., /root)
+        source = Path("/root/playlist/track.flac")
+        target = tmp_path / "music" / "track.flac"
+
+        decision = DecisionResult(
+            action=SyncAction.CREATE_SYMLINK,
+            source_path=str(source),
+            target_path=str(target),
+            priority=3,
+        )
+        result = ExecutionResult()
+
+        orchestrator._execute_create_symlink(decision, result)
+
+        # Should have error due to permission denied
+        assert len(result.errors) > 0
+        assert "Failed to create symlink" in result.errors[0]
+
+    def test_execute_update_symlink_exception_handling(
+        self, orchestrator, tmp_path, caplog
+    ):
+        """Test _execute_update_symlink handles exceptions with permissions."""
+        # Use a path that will definitely cause an error (e.g., /root)
+        source = Path("/root/playlist/track.flac")
+        target = tmp_path / "music" / "track.flac"
+
+        decision = DecisionResult(
+            action=SyncAction.UPDATE_SYMLINK,
+            source_path=str(source),
+            target_path=str(target),
+            priority=3,
+        )
+        result = ExecutionResult()
+
+        orchestrator._execute_update_symlink(decision, result)
+
+        # Should handle exception due to permission denied
+        assert len(result.errors) > 0
+        assert "Failed to update symlink" in result.errors[0]
+
+    def test_execute_remove_symlink_exception_handling(
+        self, orchestrator, tmp_path, caplog
+    ):
+        """Test _execute_remove_symlink handles exceptions."""
+        # Create a directory instead of symlink
+        source = tmp_path / "playlist" / "track_dir"
+        source.mkdir(parents=True, exist_ok=True)
+
+        decision = DecisionResult(
+            action=SyncAction.REMOVE_SYMLINK,
+            source_path=str(source),
+            priority=3,
+        )
+        result = ExecutionResult()
+
+        orchestrator._execute_remove_symlink(decision, result)
+
+        # Should log warning that it's not a symlink
+        assert "Path is not a symlink" in caplog.text
+
+    def test_execute_remove_file_exception_handling(self, orchestrator, tmp_path):
+        """Test _execute_remove_file handles exceptions."""
+        # Create a directory instead of file
+        source = tmp_path / "track_dir"
+        source.mkdir()
+
+        decision = DecisionResult(
+            action=SyncAction.REMOVE_FILE,
+            source_path=str(source),
+            track_id=1,
+            priority=3,
+        )
+        result = ExecutionResult()
+
+        orchestrator._execute_remove_file(decision, result)
+
+        # Should have error (can't unlink directory with unlink())
+        assert len(result.errors) > 0
+        assert "Failed to remove file" in result.errors[0]
+
+    def test_ensure_playlist_directories_with_none_playlist(
+        self, orchestrator, mock_db_service
+    ):
+        """Test ensure_playlist_directories handles None in playlist list."""
+        # Return one valid and one None - need to handle list comprehension call
+        playlist = Playlist(id=1, tidal_id="pl1", name="Test Playlist")
+
+        def side_effect_fn(pid):
+            if pid == 1:
+                return playlist
+            return None
+
+        mock_db_service.get_playlist_by_id.side_effect = side_effect_fn
+
+        created = orchestrator.ensure_playlist_directories(playlist_ids=[1, 999])
+
+        # Should only create for valid playlist
+        assert created == 1
+
+    def test_validate_download_decision_missing_target_path(self, orchestrator):
+        """Test _validate_download_decision with empty target_path."""
+        decision = DecisionResult(
+            action=SyncAction.DOWNLOAD_TRACK,
+            track_id=1,
+            target_path="",  # Empty string
+            priority=5,
+        )
+        result = ExecutionResult()
+
+        is_valid = orchestrator._validate_download_decision(decision, result)
+
+        assert is_valid is False
+        assert result.downloads_failed == 1
+        assert "target_path is None" in result.errors[0]
+
+    def test_update_track_status_db_session(self, orchestrator, mock_db_service):
+        """Test _update_track_status correctly updates database."""
+        track = Track(id=1, tidal_id="123", title="Test")
+
+        mock_session = MagicMock()
+        mock_track_obj = MagicMock()
+        mock_session.merge.return_value = mock_track_obj
+        mock_db_service.get_session.return_value.__enter__.return_value = mock_session
+
+        orchestrator._update_track_status(track, DownloadStatus.DOWNLOADING)
+
+        assert mock_track_obj.download_status == DownloadStatus.DOWNLOADING
+        mock_session.commit.assert_called_once()
+
+    def test_execute_decisions_exception_in_decision_execution(
+        self, orchestrator, mock_db_service, caplog
+    ):
+        """Test execute_decisions continues after exception in single decision."""
+        decision1 = DecisionResult(
+            action=SyncAction.DOWNLOAD_TRACK,
+            track_id=1,
+            target_path="/path1",
+            priority=5,
+        )
+        decision2 = DecisionResult(
+            action=SyncAction.DOWNLOAD_TRACK,
+            track_id=2,
+            target_path="/path2",
+            priority=4,
+        )
+
+        decisions = SyncDecisions()
+        decisions.add_decision(decision1)
+        decisions.add_decision(decision2)
+
+        # First decision will fail
+        mock_db_service.get_track_by_id.side_effect = [
+            Exception("Database error"),
+            Track(id=2, tidal_id="456", title="Track 2"),
+        ]
+
+        result = orchestrator.execute_decisions(decisions)
+
+        # Should continue to second decision despite first failing
+        assert len(result.errors) > 0
+        assert "Failed to download track" in result.errors[0]
+        assert "Database error" in result.errors[0]
+
+    def test_perform_download_success_with_valid_service(
+        self, orchestrator, mock_db_service, tmp_path
+    ):
+        """Test _perform_download successfully calls download service."""
+        track = Track(id=1, tidal_id="123456", title="Test Track")
+        target_path = tmp_path / "track.flac"
+
+        decision = DecisionResult(
+            action=SyncAction.DOWNLOAD_TRACK,
+            track_id=1,
+            target_path=str(target_path),
+            priority=5,
+        )
+        result = ExecutionResult()
+
+        # Setup download service mock
+        mock_download_service = MagicMock()
+        orchestrator.download_service = mock_download_service
+
+        orchestrator._perform_download(track, decision, result)
+
+        # Verify download was called
+        mock_download_service.download_track.assert_called_once()
+        call_args = mock_download_service.download_track.call_args
+        assert call_args[1]["track_id"] == 123456
+        assert call_args[1]["target_path"] == target_path

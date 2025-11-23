@@ -638,3 +638,240 @@ class TestGetScanStatistics:
         assert stats["playlists_scanned"] == 1
         assert stats["files_found"] == 1
         assert stats["tracks_updated"] == 1
+
+
+class TestFilesystemScannerEdgeCases:
+    """Test edge cases and error handling in FilesystemScanner."""
+
+    def test_scan_all_playlists_nonexistent_root(
+        self, db_service: DatabaseService, temp_dir: Path
+    ):
+        """Test scanning when playlists root doesn't exist."""
+        nonexistent_path = temp_dir / "nonexistent" / "Playlists"
+        scanner = FilesystemScanner(db_service, str(nonexistent_path))
+
+        with pytest.raises(RuntimeError, match="does not exist"):
+            scanner.scan_all_playlists()
+
+    def test_process_playlist_not_in_database(
+        self,
+        filesystem_scanner: FilesystemScanner,
+        db_service: DatabaseService,
+        temp_dir: Path,
+    ):
+        """Test processing playlist directory that's not in database."""
+        # Create playlist directory without creating in database
+        playlist_dir = create_playlist_directory(temp_dir, "UnknownPlaylist")
+        create_test_file(playlist_dir, "some_file.mp3")
+
+        # Scan should skip this playlist
+        result = filesystem_scanner.scan_all_playlists()
+
+        assert result["playlists_scanned"] == 1
+        assert result["files_found"] == 0
+        assert result["tracks_updated"] == 0
+
+    def test_process_playlist_directory_exception(
+        self,
+        filesystem_scanner: FilesystemScanner,
+        db_service: DatabaseService,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        """Test exception handling in _process_playlist_directory."""
+        # Create playlist and directory
+        create_test_playlist(db_service, name="TestPlaylist")
+        playlist_dir = create_playlist_directory(temp_dir, "TestPlaylist")
+        create_test_file(playlist_dir, "test.mp3")
+
+        # Mock _find_audio_files to raise an exception
+        def mock_find_audio_files(directory):
+            raise ValueError("Simulated error in find_audio_files")
+
+        monkeypatch.setattr(
+            filesystem_scanner, "_find_audio_files", mock_find_audio_files
+        )
+
+        # Scan should handle the exception
+        result = filesystem_scanner.scan_all_playlists()
+
+        # When exception occurs, playlists_scanned is not incremented
+        # (happens after processing)
+        assert result["playlists_scanned"] == 0
+        assert result["error_count"] == 1
+        assert any("Simulated error" in error for error in result["errors"])
+
+    def test_process_file_exception(
+        self,
+        filesystem_scanner: FilesystemScanner,
+        db_service: DatabaseService,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        """Test exception handling in _process_file."""
+        # Create playlist and track
+        playlist = create_test_playlist(db_service, name="TestPlaylist")
+        track = create_test_track(db_service)
+        db_service.add_track_to_playlist(playlist.id, track.id)
+
+        # Create file
+        playlist_dir = create_playlist_directory(temp_dir, "TestPlaylist")
+        create_test_file(playlist_dir, "Test Artist - Test Track.mp3")
+
+        # Mock is_symlink to raise an exception
+        original_process_file = filesystem_scanner._process_file
+
+        def mock_process_file(playlist, file_path):
+            if file_path.name.endswith(".mp3"):
+                raise OSError("Simulated file processing error")
+            return original_process_file(playlist, file_path)
+
+        monkeypatch.setattr(filesystem_scanner, "_process_file", mock_process_file)
+
+        # Scan should handle the exception
+        result = filesystem_scanner.scan_all_playlists()
+
+        assert result["error_count"] == 1
+        assert any(
+            "Simulated file processing error" in error for error in result["errors"]
+        )
+
+    def test_validate_symlink_with_os_error(
+        self,
+        filesystem_scanner: FilesystemScanner,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        """Test _validate_symlink when OSError occurs."""
+        # Create a symlink
+        target = temp_dir / "target.mp3"
+        target.write_text("content")
+        symlink = temp_dir / "link.mp3"
+        symlink.symlink_to(target)
+
+        # Mock resolve() to raise OSError
+        original_resolve = Path.resolve
+
+        def mock_resolve(self, strict=False):
+            if self == symlink:
+                raise OSError("Simulated OS error")
+            return original_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", mock_resolve)
+
+        # Should handle the error and return False, None
+        is_valid, target_path = filesystem_scanner._validate_symlink(symlink)
+
+        assert is_valid is False
+        assert target_path is None
+
+    def test_validate_symlink_with_runtime_error(
+        self,
+        filesystem_scanner: FilesystemScanner,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        """Test _validate_symlink when RuntimeError occurs."""
+        # Create a symlink
+        target = temp_dir / "target.mp3"
+        target.write_text("content")
+        symlink = temp_dir / "link.mp3"
+        symlink.symlink_to(target)
+
+        # Mock resolve() to raise RuntimeError
+        original_resolve = Path.resolve
+
+        def mock_resolve(self, strict=False):
+            if self == symlink:
+                raise RuntimeError("Simulated runtime error")
+            return original_resolve(self, strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", mock_resolve)
+
+        # Should handle the error and return False, None
+        is_valid, target_path = filesystem_scanner._validate_symlink(symlink)
+
+        assert is_valid is False
+        assert target_path is None
+
+    def test_log_scan_summary_with_errors(
+        self,
+        filesystem_scanner: FilesystemScanner,
+        db_service: DatabaseService,
+        temp_dir: Path,
+        monkeypatch,
+        caplog,
+    ):
+        """Test that errors are logged in scan summary."""
+        import logging
+
+        caplog.set_level(logging.WARNING)
+
+        # Create playlist and directory
+        create_test_playlist(db_service, name="TestPlaylist")
+        playlist_dir = create_playlist_directory(temp_dir, "TestPlaylist")
+        create_test_file(playlist_dir, "test.mp3")
+
+        # Mock _process_file to add an error
+        def mock_process_file(playlist, file_path):
+            raise ValueError("Test error for logging")
+
+        monkeypatch.setattr(filesystem_scanner, "_process_file", mock_process_file)
+
+        # Scan (will generate errors)
+        filesystem_scanner.scan_all_playlists()
+
+        # Check that error logging occurred
+        assert any("errors during scan" in record.message for record in caplog.records)
+
+    def test_validate_symlink_target_not_a_file(
+        self,
+        filesystem_scanner: FilesystemScanner,
+        temp_dir: Path,
+    ):
+        """Test _validate_symlink when target is not a file."""
+        # Create a symlink pointing to a directory
+        target_dir = temp_dir / "target_dir"
+        target_dir.mkdir()
+        symlink = temp_dir / "link.mp3"
+        symlink.symlink_to(target_dir)
+
+        # Should return False because target is not a file
+        is_valid, target_path = filesystem_scanner._validate_symlink(symlink)
+
+        assert is_valid is False
+        assert target_path == target_dir.resolve()
+
+    def test_process_file_is_symlink_exception(
+        self,
+        filesystem_scanner: FilesystemScanner,
+        db_service: DatabaseService,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        """Test exception handling when checking if file is symlink."""
+        # Create playlist and track
+        playlist = create_test_playlist(db_service, name="TestPlaylist")
+        track = create_test_track(db_service)
+        db_service.add_track_to_playlist(playlist.id, track.id)
+
+        # Create file
+        playlist_dir = create_playlist_directory(temp_dir, "TestPlaylist")
+        file_path = create_test_file(playlist_dir, "Test Artist - Test Track.mp3")
+
+        # Mock is_symlink to raise an exception
+        original_is_symlink = Path.is_symlink
+
+        def mock_is_symlink(self):
+            if self == file_path:
+                raise OSError("Simulated is_symlink error")
+            return original_is_symlink(self)
+
+        monkeypatch.setattr(Path, "is_symlink", mock_is_symlink)
+
+        # Scan should handle the exception
+        result = filesystem_scanner.scan_all_playlists()
+
+        # Error should be recorded
+        assert result["error_count"] == 1
+        assert any("Simulated is_symlink error" in error for error in result["errors"])

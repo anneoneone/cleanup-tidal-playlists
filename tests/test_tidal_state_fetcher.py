@@ -304,11 +304,12 @@ class TestUpdatePlaylist:
             "last_updated_tidal": datetime(2024, 1, 1, 12, 0, 0),
         }
 
-        updated = tidal_fetcher._update_playlist(
+        updated, was_updated = tidal_fetcher._update_playlist(
             existing, playlist_data, mark_needs_sync=True
         )
 
         assert updated.sync_status == PlaylistSyncStatus.IN_SYNC.value
+        assert was_updated is False  # No changes, so not updated
 
     def test_update_playlist_with_changes(self, tidal_fetcher, db_service):
         """Test updating playlist with changes."""
@@ -328,12 +329,13 @@ class TestUpdatePlaylist:
             "last_updated_tidal": datetime(2024, 1, 15, 12, 0, 0),
         }
 
-        updated = tidal_fetcher._update_playlist(
+        updated, was_updated = tidal_fetcher._update_playlist(
             existing, playlist_data, mark_needs_sync=True
         )
 
         assert updated.name == "New Name"
         assert updated.sync_status == PlaylistSyncStatus.NEEDS_UPDATE.value
+        assert was_updated is True  # Playlist changed, so it was updated
 
 
 class TestCreateTrack:
@@ -508,6 +510,57 @@ class TestFetchAllPlaylists:
         assert stats["playlists_skipped"] == 1
         assert stats["error_count"] == 1
 
+    def test_fetch_creates_snapshot(
+        self, tidal_fetcher, db_service, mock_tidal_session
+    ):
+        """Test that fetch_all_playlists creates a sync snapshot."""
+        # Create mock playlists
+        playlist1 = create_mock_playlist("pl-1", "Playlist 1")
+        mock_tidal_session.user.playlists.return_value = [playlist1]
+
+        # Verify no snapshots exist yet
+        assert db_service.get_latest_snapshot("tidal_sync") is None
+
+        # Fetch playlists
+        tidal_fetcher.fetch_all_playlists()
+
+        # Verify snapshot was created
+        snapshot = db_service.get_latest_snapshot("tidal_sync")
+        assert snapshot is not None
+        assert snapshot.snapshot_type == "tidal_sync"
+
+        # Verify snapshot data
+        import json
+
+        data = json.loads(snapshot.snapshot_data)
+        assert data["status"] == "completed"
+        assert data["playlists_fetched"] == 1
+        assert data["playlists_created"] == 1
+
+    def test_fetch_optimization_skips_unchanged_playlists(
+        self, tidal_fetcher, db_service, mock_tidal_session
+    ):
+        """Test that second fetch skips unchanged playlists."""
+        from datetime import datetime, timezone
+
+        # Create mock playlist with timestamp
+        playlist = create_mock_playlist("pl-1", "Playlist 1")
+        playlist.last_updated = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        mock_tidal_session.user.playlists.return_value = [playlist]
+
+        # First fetch - creates playlist
+        tidal_fetcher.fetch_all_playlists()
+        stats1 = tidal_fetcher.get_fetch_statistics()
+        assert stats1["playlists_created"] == 1
+        assert stats1["playlists_skipped"] == 0
+
+        # Second fetch - should skip unchanged playlist
+        tidal_fetcher.fetch_all_playlists()
+        stats2 = tidal_fetcher.get_fetch_statistics()
+        assert stats2["playlists_created"] == 0
+        assert stats2["playlists_updated"] == 0
+        assert stats2["playlists_skipped"] == 1
+
 
 class TestMarkRemovedPlaylists:
     """Test mark_removed_playlists method."""
@@ -602,3 +655,218 @@ class TestGetFetchStatistics:
         assert stats["playlists_created"] == 1
         assert stats["playlists_updated"] == 0
         assert stats["playlists_skipped"] == 0
+
+
+class TestTidalStateFetcherEdgeCases:
+    """Test edge cases and error handling."""
+
+    def test_fetch_without_tidal_session(self, db_service):
+        """Test error when no Tidal session provided."""
+        fetcher = TidalStateFetcher(db_service, tidal_session=None)
+
+        with pytest.raises(RuntimeError, match="Tidal session required"):
+            fetcher.fetch_all_playlists()
+
+    def test_fetch_playlists_api_error(self, tidal_fetcher, mock_tidal_session):
+        """Test handling API error when fetching playlists."""
+        mock_tidal_session.user.playlists.side_effect = Exception("API Error")
+
+        with pytest.raises(Exception, match="API Error"):
+            tidal_fetcher.fetch_all_playlists()
+
+    def test_fetch_tracks_error_continues(
+        self, tidal_fetcher, db_service, mock_tidal_session
+    ):
+        """Test that error in track processing doesn't stop the fetch."""
+        # Create a playlist first
+        playlist_data = {
+            "tidal_id": "pl-error",
+            "name": "Error Playlist",
+            "num_tracks": 2,
+        }
+        db_playlist = db_service.create_playlist(playlist_data)
+
+        # Mock track that will cause an error
+        artist = create_mock_artist()
+        album = create_mock_album(artist=artist)
+        track1 = create_mock_track(track_id=1, name="Good Track", album=album)
+
+        # Create a mock that will fail when converting
+        track2 = Mock()
+        track2.id = 2
+        track2.name = None  # Missing required field
+        track2.artist = None  # This will cause an error
+
+        mock_tidal_playlist = Mock()
+        mock_tidal_playlist.tracks.return_value = [track1, track2]
+
+        # Fetch should not raise but should log error
+        stats = tidal_fetcher._fetch_playlist_tracks(mock_tidal_playlist, db_playlist)
+
+        # Should have processed at least the good track
+        assert stats["created"] >= 1
+
+    def test_extract_track_metadata_with_release_date(self, tidal_fetcher):
+        """Test extracting track with release date."""
+        artist = create_mock_artist()
+        album = create_mock_album(artist=artist)
+
+        track = Mock()
+        track.id = 1000
+        track.name = "Test Track"
+        track.artist = artist
+        track.album = album
+        track.duration = 240
+        track.track_number = 1
+        track.volume_number = None
+        track.year = None
+        track.popularity = None
+        track.explicit = False
+        track.isrc = None
+        track.copyright = None
+        track.version = None
+        track.tidal_release_date = "2023-01-15"
+
+        track_data = tidal_fetcher._convert_tidal_track(track)
+
+        assert track_data["tidal_release_date"] == "2023-01-15"
+
+    def test_extract_album_metadata_with_upc(self, tidal_fetcher):
+        """Test extracting album metadata with UPC."""
+        artist = create_mock_artist()
+
+        album = Mock()
+        album.id = "album-123"
+        album.name = "Test Album"
+        album.artist = artist
+        album.upc = "123456789012"
+        album.release_date = "2023-01-01"
+
+        track = Mock()
+        track.id = 1000
+        track.name = "Test Track"
+        track.artist = artist
+        track.album = album
+        track.duration = 240
+        track.track_number = 1
+        track.volume_number = None
+        track.year = None
+        track.popularity = None
+        track.explicit = False
+        track.isrc = None
+        track.copyright = None
+        track.version = None
+
+        track_data = tidal_fetcher._convert_tidal_track(track)
+
+        assert track_data["album_upc"] == "123456789012"
+        assert track_data["album_release_date"] == "2023-01-01"
+
+    def test_extract_album_cover_url(self, tidal_fetcher):
+        """Test extracting album cover URL."""
+        artist = create_mock_artist()
+
+        album = Mock()
+        album.id = "abc123"
+        album.name = "Test Album"
+        album.artist = artist
+        album.upc = None
+        album.release_date = None
+
+        track = Mock()
+        track.id = 1000
+        track.name = "Test Track"
+        track.artist = artist
+        track.album = album
+        track.duration = 240
+        track.track_number = 1
+        track.volume_number = None
+        track.year = None
+        track.popularity = None
+        track.explicit = False
+        track.isrc = None
+        track.copyright = None
+        track.version = None
+
+        track_data = tidal_fetcher._convert_tidal_track(track)
+
+        assert "album_cover_url" in track_data
+        assert "abc123" in track_data["album_cover_url"]
+
+    def test_extract_audio_metadata(self, tidal_fetcher):
+        """Test extracting audio quality metadata."""
+        artist = create_mock_artist()
+        album = create_mock_album(artist=artist)
+
+        track = Mock()
+        track.id = 1000
+        track.name = "Test Track"
+        track.artist = artist
+        track.album = album
+        track.duration = 240
+        track.track_number = 1
+        track.volume_number = None
+        track.year = None
+        track.popularity = None
+        track.explicit = False
+        track.isrc = None
+        track.copyright = None
+        track.version = None
+        track.audio_quality = "HI_RES"
+        track.audio_modes = ["STEREO", "DOLBY_ATMOS"]
+
+        track_data = tidal_fetcher._convert_tidal_track(track)
+
+        assert track_data["audio_quality"] == "HI_RES"
+        assert "STEREO" in track_data["audio_modes"]
+
+    def test_update_playlist_timezone_aware(self, tidal_fetcher, db_service):
+        """Test updating playlist with timezone-aware timestamps."""
+        from datetime import timezone
+
+        # Create existing playlist with naive datetime
+        playlist_data = {
+            "tidal_id": "pl-tz",
+            "name": "Timezone Test",
+            "last_updated_tidal": datetime(2023, 1, 1, 12, 0, 0),
+        }
+        existing = db_service.create_playlist(playlist_data)
+
+        # Update with newer timezone-aware timestamp
+        new_data = {
+            "tidal_id": "pl-tz",
+            "name": "Timezone Test Updated",
+            "last_updated_tidal": datetime(2023, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
+        }
+
+        updated, was_updated = tidal_fetcher._update_playlist(
+            existing, new_data, mark_needs_sync=True
+        )
+
+        assert was_updated is True
+        assert updated.name == "Timezone Test Updated"
+
+    def test_update_playlist_new_timestamp_no_old(self, tidal_fetcher, db_service):
+        """Test updating playlist when new has timestamp but old doesn't."""
+        from datetime import timezone
+
+        # Create existing playlist without timestamp
+        playlist_data = {
+            "tidal_id": "pl-no-old",
+            "name": "No Old Timestamp",
+            "last_updated_tidal": None,
+        }
+        existing = db_service.create_playlist(playlist_data)
+
+        # Update with timestamp
+        new_data = {
+            "tidal_id": "pl-no-old",
+            "name": "No Old Timestamp",
+            "last_updated_tidal": datetime(2023, 6, 1, 12, 0, 0, tzinfo=timezone.utc),
+        }
+
+        updated, was_updated = tidal_fetcher._update_playlist(
+            existing, new_data, mark_needs_sync=True
+        )
+
+        assert was_updated is True
