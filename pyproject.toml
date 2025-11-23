@@ -91,6 +91,7 @@ exclude = '''
   | buck-out
   | build
   | dist
+  | alembic
 )/
 '''
 
@@ -180,6 +181,10 @@ module = ["scripts.*"]
 ignore_errors = true
 disallow_untyped_calls = false
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["alembic.*"]
+ignore_errors = true
 
 # Pytest configuration
 [tool.pytest.ini_options]
