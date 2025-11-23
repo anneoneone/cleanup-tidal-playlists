@@ -402,7 +402,7 @@ class TidalSnapshotService:
             update_data[field] = values["new"]
 
         if update_data:
-            self.db_service.update_track(change.track_id, **update_data)
+            self.db_service.update_track(change.track_id, update_data)
             logger.info(
                 f"Updated metadata for track {change.track_id}: "
                 f"{list(update_data.keys())}"

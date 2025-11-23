@@ -97,15 +97,6 @@ class TidalStateFetcher:
 
         logger.info(f"Found {len(tidal_playlists)} playlists in Tidal")
 
-        # Create snapshot at start of sync
-        snapshot_data = {
-            "status": "started",
-            "playlists_to_process": len(tidal_playlists),
-            "last_sync_time": last_sync_time.isoformat() if last_sync_time else None,
-        }
-        snapshot = self.db_service.create_snapshot("tidal_sync", snapshot_data)
-        logger.info(f"Created sync snapshot: {snapshot.id}")
-
         # Process each playlist
         updated_playlists: List[Playlist] = []
         for tidal_playlist in tidal_playlists:
@@ -115,15 +106,15 @@ class TidalStateFetcher:
             if result:
                 updated_playlists.append(result)
 
-        # Update snapshot with final statistics
-        final_snapshot_data = {
+        # Create snapshot with final statistics
+        snapshot_data = {
             "status": "completed",
             "playlists_to_process": len(tidal_playlists),
             "last_sync_time": last_sync_time.isoformat() if last_sync_time else None,
             **self._stats.to_dict(),
         }
-        self.db_service.create_snapshot("tidal_sync", final_snapshot_data)
-        logger.info("Updated sync snapshot with final statistics")
+        snapshot = self.db_service.create_snapshot("tidal_sync", snapshot_data)
+        logger.info(f"Created sync snapshot: {snapshot.id}")
 
         # Log summary
         self._log_fetch_summary()
@@ -172,12 +163,14 @@ class TidalStateFetcher:
             # Check if playlist exists
             existing = self.db_service.get_playlist_by_tidal_id(tidal_id)
 
+            was_updated = False
             if existing:
-                # Update existing playlist
-                updated = self._update_playlist(
+                # Update existing playlist (returns tuple: playlist, was_updated)
+                updated, was_updated = self._update_playlist(
                     existing, playlist_data, mark_needs_sync
                 )
-                self._stats.playlists_updated += 1
+                if was_updated:
+                    self._stats.playlists_updated += 1
             else:
                 # Create new playlist
                 updated = self._create_playlist(playlist_data, mark_needs_sync)
@@ -314,7 +307,7 @@ class TidalStateFetcher:
         existing: Playlist,
         playlist_data: Dict[str, Any],
         mark_needs_sync: bool,
-    ) -> Playlist:
+    ) -> tuple[Playlist, bool]:
         """Update existing playlist in database.
 
         Args:
@@ -323,7 +316,7 @@ class TidalStateFetcher:
             mark_needs_sync: Whether to mark as needing sync
 
         Returns:
-            Updated Playlist object
+            Tuple of (Updated Playlist object, was_actually_updated boolean)
         """
         # Check if playlist has changed in Tidal
         tidal_updated = playlist_data.get("last_updated_tidal")
@@ -359,14 +352,20 @@ class TidalStateFetcher:
                 f"Playlist '{existing.name}' changed in Tidal, " "marked for update"
             )
 
-        # Update last seen timestamp
+        # Always update last seen timestamp
         playlist_data["last_seen_in_tidal"] = datetime.now(timezone.utc)
 
-        # Update playlist
-        updated = self.db_service.update_playlist(existing.id, playlist_data)
-        logger.debug(f"Updated playlist: {updated.name} ({updated.tidal_id})")
-
-        return updated
+        # Only update database if the playlist actually changed in Tidal
+        if has_changed:
+            updated = self.db_service.update_playlist(existing.id, playlist_data)
+            logger.debug(f"Updated playlist: {updated.name} ({updated.tidal_id})")
+            return updated, True
+        else:
+            # No changes in Tidal, just update last_seen timestamp
+            minimal_update = {"last_seen_in_tidal": playlist_data["last_seen_in_tidal"]}
+            updated = self.db_service.update_playlist(existing.id, minimal_update)
+            logger.debug(f"Playlist unchanged: {existing.name} ({existing.tidal_id})")
+            return updated, False
 
     def _fetch_playlist_tracks(
         self, tidal_playlist: Any, db_playlist: Playlist
