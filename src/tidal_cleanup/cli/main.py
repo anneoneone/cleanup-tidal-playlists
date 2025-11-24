@@ -493,8 +493,125 @@ def _display_sync_result(result: dict[str, Any], compact: bool = False) -> None:
         console.print()
 
 
+def _filter_decisions_by_playlist(
+    db_service: DatabaseService,
+    download_decisions: List[Any],
+    playlist_name: str,
+) -> List[Any]:
+    """Filter download decisions by playlist name.
+
+    Args:
+        db_service: Database service instance
+        download_decisions: List of download decisions
+        playlist_name: Playlist name to filter by (fuzzy match)
+
+    Returns:
+        Filtered list of download decisions
+    """
+    with db_service.get_session() as session:
+        from ..database.models import Playlist
+
+        target_playlist = (
+            session.query(Playlist)
+            .filter(Playlist.name.ilike(f"%{playlist_name}%"))
+            .first()
+        )
+
+        if not target_playlist:
+            console.print(
+                f"[yellow]⚠️  No playlist found matching '{playlist_name}'[/yellow]"
+            )
+            return []
+
+        filtered = [
+            d for d in download_decisions if d.playlist_id == target_playlist.id
+        ]
+        console.print(f"[cyan]Filtered to playlist: {target_playlist.name}[/cyan]")
+        return filtered
+
+
+def _display_download_results(result: Any) -> None:
+    """Display download operation results.
+
+    Args:
+        result: DownloadOrchestrator result object
+    """
+    console.print("\n[bold green]✓ Download complete[/bold green]\n")
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Count", style="green", justify="right")
+
+    table.add_row("Downloads Attempted", str(result.downloads_attempted))
+    table.add_row("Downloads Successful", str(result.downloads_successful))
+    table.add_row("Downloads Failed", str(result.downloads_failed))
+
+    console.print(table)
+
+    if result.errors:
+        console.print(f"\n[yellow]⚠️  {len(result.errors)} error(s) occurred:[/yellow]")
+        for error in result.errors[:10]:
+            console.print(f"  • {error}")
+
+
+def _convert_downloaded_files(
+    app: TidalCleanupApp,
+    config: Config,
+    target_format: str,
+    playlist: Optional[str],
+) -> None:
+    """Convert downloaded files to target format.
+
+    Args:
+        app: TidalCleanupApp instance
+        config: Configuration object
+        target_format: Target audio format (e.g., "mp3", "flac")
+        playlist: Optional playlist name filter
+    """
+    console.print(
+        f"\n[bold cyan]🔄 Converting downloaded files to "
+        f"{target_format.upper()}...[/bold cyan]"
+    )
+
+    target_format_with_dot = (
+        f".{target_format}" if not target_format.startswith(".") else target_format
+    )
+
+    # Determine target directory based on format
+    if target_format.lower() in ["mp3", ".mp3"]:
+        target_dir = config.mp3_directory
+    else:
+        # Use a generic output directory for other formats
+        target_dir = config.m4a_directory.parent / f"{target_format.upper()}"
+
+    try:
+        playlist_jobs = app.file_service.convert_directory(
+            config.m4a_directory,
+            target_dir,
+            target_format=target_format_with_dot,
+            quality=config.ffmpeg_quality,
+            playlist_filter=playlist,
+        )
+
+        if playlist_jobs:
+            console.print("\n[bold green]✓ Conversion complete[/bold green]\n")
+            app.show_result_table(playlist_jobs)
+        else:
+            console.print("[yellow]⚠️  No files were converted[/yellow]")
+    except Exception as conv_error:
+        logger.exception("Conversion failed")
+        console.print(f"\n[red]✗ Conversion failed: {conv_error}[/red]")
+        console.print(
+            "[yellow]Downloaded files are still available in M4A directory[/yellow]"
+        )
+
+
 def _fetch_tidal_playlists(
-    db_service: DatabaseService, tidal_service: Any, download_service: Any
+    db_service: DatabaseService,
+    tidal_service: Any,
+    download_service: Any,
+    force: bool = False,
+    dry_run: bool = False,
 ) -> Dict[str, Any]:
     """Fetch playlists from Tidal and return statistics.
 
@@ -502,6 +619,8 @@ def _fetch_tidal_playlists(
         db_service: Database service instance
         tidal_service: Tidal API service
         download_service: Download service for later use
+        force: If True, fetch all tracks ignoring last update timestamps
+        dry_run: If True, skip creating snapshots
 
     Returns:
         Dictionary with fetch statistics
@@ -516,10 +635,22 @@ def _fetch_tidal_playlists(
         download_service.connect()
 
     # Fetch playlists
-    with console.status("[bold green]Fetching playlists from Tidal..."):
+    status_msg = "[bold green]Fetching playlists from Tidal..."
+    if force:
+        status_msg += " (forced - ignoring timestamps)"
+    if dry_run:
+        status_msg += " (no snapshot)"
+    status_msg += "[/bold green]"
+
+    with console.status(status_msg):
         from ..database import TidalStateFetcher
 
-        fetcher = TidalStateFetcher(db_service, tidal_session=tidal_service.session)
+        fetcher = TidalStateFetcher(
+            db_service,
+            tidal_session=tidal_service.session,
+            force=force,
+            dry_run=dry_run,
+        )
         _ = fetcher.fetch_all_playlists()
         stats = fetcher.get_fetch_statistics()
 
@@ -548,23 +679,47 @@ def _fetch_tidal_playlists(
     is_flag=True,
     help="Skip fetching from Tidal (use existing database)",
 )
+@click.option(
+    "--target-format",
+    type=str,
+    default="mp3",
+    help="Target format for conversion (default: mp3)",
+)
+@click.option(
+    "-f",
+    "--force",
+    is_flag=True,
+    help="Force fetch all tracks, ignoring last update timestamps",
+)
 @click.pass_obj
 def download(
-    app: TidalCleanupApp, playlist: Optional[str], dry_run: bool, skip_fetch: bool
+    app: TidalCleanupApp,
+    playlist: Optional[str],
+    dry_run: bool,
+    skip_fetch: bool,
+    target_format: str,
+    force: bool,
 ) -> None:
-    """Download tracks from Tidal to M4A directory (database-driven).
+    """Download tracks from Tidal and convert to target format.
 
     This command uses the new database-driven sync system to:
     1. Fetch playlist metadata from Tidal (optional)
     2. Determine which tracks need to be downloaded
     3. Download missing tracks to the M4A directory
+    4. Convert downloaded files to target format (default: mp3)
 
     Examples:
-        # Download all playlists
+        # Download all playlists and convert to MP3
         tidal-cleanup download
 
-        # Download specific playlist
+        # Download specific playlist and convert to MP3
         tidal-cleanup download -p "My Playlist"
+
+        # Download and convert to FLAC
+        tidal-cleanup download --target-format flac
+
+        # Force fetch all tracks (ignore last update timestamps)
+        tidal-cleanup download --force
 
         # Dry run to see what would be downloaded
         tidal-cleanup download --dry-run
@@ -577,57 +732,68 @@ def download(
         DownloadOrchestrator,
         SyncDecisionEngine,
     )
+    from ..database.sync_decision_engine import SyncAction
 
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
+
+    # Ensure database schema is initialized
+    db_service.init_db()
+
     download_service = app.download_service
     tidal_service = app.tidal_service
 
     console.print("\n[bold cyan]📥 Database-driven download[/bold cyan]")
     if dry_run:
         console.print("[yellow]DRY RUN MODE - No downloads will be performed[/yellow]")
+        console.print(
+            "[yellow]Note: Database will be updated to calculate diff between "
+            "Tidal and local[/yellow]"
+        )
+    if force:
+        console.print("[cyan]FORCE MODE - Ignoring last update timestamps[/cyan]")
     console.print()
 
     try:
-        # Step 1: Fetch from Tidal (unless skipped)
+        # Step 1: Fetch from Tidal (unless explicitly skipped)
         if not skip_fetch:
-            _ = _fetch_tidal_playlists(db_service, tidal_service, download_service)
-
-        # Step 2: Generate sync decisions
-        with console.status("[bold green]Analyzing what needs to be downloaded..."):
-            decision_engine = SyncDecisionEngine(
-                db_service, music_root=config.m4a_directory
+            _ = _fetch_tidal_playlists(
+                db_service,
+                tidal_service,
+                download_service,
+                force=force,
+                dry_run=dry_run,
             )
+
+        # Step 2: Determine target directory based on format
+        target_format_normalized = target_format.lower().replace(".", "")
+        if target_format_normalized == "mp3":
+            target_root = config.mp3_directory
+        else:
+            target_root = config.m4a_directory.parent / target_format_normalized
+
+        # Step 3: Generate sync decisions
+        with console.status("[bold green]Analyzing what needs to be downloaded..."):
+            decision_engine = SyncDecisionEngine(db_service, music_root=target_root)
             decisions = decision_engine.analyze_all_playlists()
 
         # Filter for download decisions only
         download_decisions = [
-            d for d in decisions.decisions if d.action.value == "DOWNLOAD_TRACK"
+            d for d in decisions.decisions if d.action == SyncAction.DOWNLOAD_TRACK
         ]
 
+        logger.info(
+            f"Generated {len(decisions.decisions)} total decisions, "
+            f"{len(download_decisions)} are download decisions"
+        )
+
+        # Filter by playlist if specified
         if playlist:
-            # Filter by playlist if specified
-            with db_service.get_session() as session:
-                from ..database.models import Playlist
-
-                target_playlist = (
-                    session.query(Playlist)
-                    .filter(Playlist.name.ilike(f"%{playlist}%"))
-                    .first()
-                )
-
-                if not target_playlist:
-                    console.print(
-                        f"[yellow]⚠️  No playlist found matching '{playlist}'[/yellow]"
-                    )
-                    return
-
-                download_decisions = [
-                    d for d in download_decisions if d.playlist_id == target_playlist.id
-                ]
-                console.print(
-                    f"[cyan]Filtered to playlist: {target_playlist.name}[/cyan]"
-                )
+            download_decisions = _filter_decisions_by_playlist(
+                db_service, download_decisions, playlist
+            )
+            if not download_decisions:
+                return
 
         if not download_decisions:
             console.print("[green]✓[/green] All tracks already downloaded!")
@@ -637,41 +803,27 @@ def download(
             f"[cyan]Found {len(download_decisions)} track(s) to download[/cyan]\n"
         )
 
-        # Step 3: Execute downloads
+        # Step 4: Execute downloads and conversions
+        from ..database.sync_decision_engine import SyncDecisions
+
         orchestrator = DownloadOrchestrator(
             db_service=db_service,
-            music_root=config.m4a_directory,
+            music_root=target_root,
             download_service=download_service,
             dry_run=dry_run,
         )
 
-        # Create a decisions object with only download decisions
-        from ..database.sync_decision_engine import SyncDecisions
-
         download_only = SyncDecisions(decisions=download_decisions)
 
-        with console.status("[bold green]Downloading tracks..."):
-            result = orchestrator.execute_decisions(download_only)
-
-        # Display results
-        console.print("\n[bold green]✓ Download complete[/bold green]\n")
-
-        table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Count", style="green", justify="right")
-
-        table.add_row("Downloads Attempted", str(result.downloads_attempted))
-        table.add_row("Downloads Successful", str(result.downloads_successful))
-        table.add_row("Downloads Failed", str(result.downloads_failed))
-
-        console.print(table)
-
-        if result.errors:
-            console.print(
-                f"\n[yellow]⚠️  {len(result.errors)} error(s) occurred:[/yellow]"
+        with console.status(
+            f"[bold green]Downloading and converting to {target_format.upper()}..."
+        ):
+            result = orchestrator.execute_decisions(
+                download_only, target_format=target_format
             )
-            for error in result.errors[:10]:
-                console.print(f"  • {error}")
+
+        # Step 5: Display results
+        _display_download_results(result)
 
     except Exception as e:
         logger.exception("Download failed")

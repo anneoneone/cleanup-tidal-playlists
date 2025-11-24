@@ -174,11 +174,18 @@ class SyncDecisionEngine:
         # Get all playlists
         playlists = self.db_service.get_all_playlists()
 
+        logger.info(f"Analyzing {len(playlists)} playlists for sync decisions")
+
         for playlist in playlists:
             playlist_decisions = self.analyze_playlist_sync(playlist.id)
             # Merge decisions
             for decision in playlist_decisions.decisions:
                 decisions.add_decision(decision)
+
+        logger.info(
+            f"Analysis complete: {len(decisions.decisions)} total decisions, "
+            f"{decisions.tracks_to_download} tracks to download"
+        )
 
         return decisions
 
@@ -195,31 +202,25 @@ class SyncDecisionEngine:
         Returns:
             DecisionResult with the action to take
         """
-        # Check if track is downloaded
+        # Check if track needs to be downloaded
         if track.download_status == DownloadStatus.NOT_DOWNLOADED:
             return self._decide_download_action(playlist, track, playlist_track)
 
-        # Check if track is in error state
+        # Check if track is in error state - retry download
         if track.download_status == DownloadStatus.ERROR:
-            return DecisionResult(
-                action=SyncAction.DOWNLOAD_TRACK,
-                track_id=track.id,
-                playlist_id=playlist.id,
-                playlist_track_id=playlist_track.id,
-                reason="Track download previously failed, retry needed",
-                priority=5,
-            )
+            decision = self._decide_download_action(playlist, track, playlist_track)
+            # Update reason and priority for retry
+            decision.reason = "Track download previously failed, retry needed"
+            decision.priority = 5
+            return decision
 
         # Track is downloaded, check if file exists
         if not track.file_path or not Path(track.file_path).exists():
-            return DecisionResult(
-                action=SyncAction.DOWNLOAD_TRACK,
-                track_id=track.id,
-                playlist_id=playlist.id,
-                playlist_track_id=playlist_track.id,
-                reason="Track marked as downloaded but file missing",
-                priority=8,
-            )
+            decision = self._decide_download_action(playlist, track, playlist_track)
+            # Update reason and priority for missing file
+            decision.reason = "Track marked as downloaded but file missing"
+            decision.priority = 8
+            return decision
 
         # Track exists, check playlist-track sync status
         return self._decide_symlink_action(playlist, track, playlist_track)
@@ -235,17 +236,65 @@ class SyncDecisionEngine:
             playlist_track: PlaylistTrack association object
 
         Returns:
-            DecisionResult with download action
+            DecisionResult with download action or NO_ACTION if file exists
         """
+        # Validate track has required metadata
+        if not track.artist or not track.title:
+            logger.warning(
+                f"Track {track.id} missing artist or title, skipping download"
+            )
+            return DecisionResult(
+                action=SyncAction.NO_ACTION,
+                track_id=track.id,
+                playlist_id=playlist.id,
+                playlist_track_id=playlist_track.id,
+                reason=f"Track missing metadata (artist: {track.artist}, "
+                f"title: {track.title})",
+                priority=0,
+            )
+
         # Determine where to download
         playlist_dir = self.playlists_root / playlist.name
-        # Use normalized name for filename
-        filename = (
-            f"{track.normalized_name}.mp3"
-            if track.normalized_name
-            else f"{track.title}.mp3"
-        )
+
+        # Construct filename using artist - title format (matches tidal-dl-ng)
+        # Use original Tidal metadata, not normalized name
+        base_filename = f"{track.artist} - {track.title}"
+
+        # Determine target extension from music_root path
+        # e.g., if music_root is /path/to/mp3, use .mp3
+        target_format = self.music_root.name  # Gets last part of path
+        target_ext = f".{target_format}"
+
+        filename = f"{base_filename}{target_ext}"
         target_path = playlist_dir / filename
+
+        # Check if file already exists at target location
+        # Use a more flexible check since tidal-dl-ng may sanitize the filename
+        if playlist_dir.exists():
+            # Look for any file with target extension that matches the pattern
+            # artist - title (accounting for filename sanitization)
+            for existing_file in playlist_dir.glob(f"*{target_ext}"):
+                # Basic match: check if artist and title appear in filename
+                filename_lower = existing_file.stem.lower()
+                artist_lower = track.artist.lower()
+                title_lower = track.title.lower()
+
+                # Check if both artist and title are in the filename
+                # This handles cases where tidal-dl-ng sanitized characters
+                if artist_lower in filename_lower and title_lower in filename_lower:
+                    logger.debug(
+                        f"Track {track.id} already exists as {existing_file}, "
+                        "skipping"
+                    )
+                    return DecisionResult(
+                        action=SyncAction.NO_ACTION,
+                        track_id=track.id,
+                        playlist_id=playlist.id,
+                        playlist_track_id=playlist_track.id,
+                        target_path=str(existing_file),
+                        reason="File already exists at target location",
+                        priority=0,
+                    )
 
         return DecisionResult(
             action=SyncAction.DOWNLOAD_TRACK,
