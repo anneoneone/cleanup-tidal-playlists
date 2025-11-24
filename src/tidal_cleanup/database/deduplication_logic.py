@@ -97,7 +97,7 @@ class DeduplicationLogic:
             playlist_tracks = list(session.scalars(stmt).all())
 
         if not playlist_tracks:
-            logger.warning(f"Track {track_id} not in any playlists")
+            logger.warning("Track %d not in any playlists", track_id)
             raise ValueError(f"Track {track_id} not found in any playlists")
 
         # Get playlist information for each
@@ -179,7 +179,7 @@ class DeduplicationLogic:
                     result.tracks_needing_primary += 1
 
             except Exception as e:
-                logger.error(f"Error analyzing track {track.id}: {e}")
+                logger.error("Error analyzing track %s: %s", track.id, e)
                 continue
 
         return result

@@ -50,7 +50,7 @@ class RekordboxService:
                 self._db = Rekordbox6Database()
                 logger.info("Connected to Rekordbox database")
             except Exception as e:
-                logger.error(f"Failed to connect to Rekordbox database: {e}")
+                logger.error("Failed to connect to Rekordbox database: %s", e)
                 return None
 
         return self._db
@@ -119,7 +119,7 @@ class RekordboxService:
         # Perform sync
         result = synchronizer.sync_playlist(playlist_name)
 
-        logger.info(f"Playlist sync completed: {result}")
+        logger.info("Playlist sync completed: %s", result)
         return result
 
     def ensure_genre_party_folders(
@@ -186,7 +186,7 @@ class RekordboxService:
             playlist = self.db.get_playlist(Name=name).first()
             return playlist
         except Exception as e:
-            logger.debug(f"Playlist '{name}' not found: {e}")
+            logger.debug("Playlist '%s' not found: %s", name, e)
             return None
 
     def create_playlist(self, name: str, tracks: List[Path]) -> Optional[Any]:
@@ -206,7 +206,7 @@ class RekordboxService:
         try:
             # Create the playlist
             playlist = self.db.create_playlist(name)
-            logger.info(f"Created playlist: {name}")
+            logger.info("Created playlist: %s", name)
 
             # Add tracks to the playlist
             added_count = 0
@@ -216,12 +216,12 @@ class RekordboxService:
 
             # Commit changes
             self.db.commit()
-            logger.info(f"Added {added_count} tracks to playlist '{name}'")
+            logger.info("Added %d tracks to playlist '%s'", added_count, name)
 
             return playlist
 
         except Exception as e:
-            logger.error(f"Failed to create playlist '{name}': {e}")
+            logger.error("Failed to create playlist '%s': %s", name, e)
             if self.db:
                 self.db.rollback()
             return None
@@ -253,12 +253,14 @@ class RekordboxService:
 
             # Commit changes
             self.db.commit()
-            logger.info(f"Updated playlist '{playlist.Name}' with {added_count} tracks")
+            logger.info(
+                "Updated playlist '%s' with %d tracks", playlist.Name, added_count
+            )
 
             return playlist
 
         except Exception as e:
-            logger.error(f"Failed to update playlist '{playlist.Name}': {e}")
+            logger.error("Failed to update playlist '%s': %s", playlist.Name, e)
             if self.db:
                 self.db.rollback()
             return None
@@ -286,7 +288,7 @@ class RekordboxService:
                 return True
             else:
                 # Track doesn't exist, add to database with full metadata
-                logger.debug(f"Adding new track to database: {track_path}")
+                logger.debug("Adding new track to database: %s", track_path)
 
                 # Extract comprehensive metadata
                 metadata = self._extract_track_metadata(track_path)
@@ -301,11 +303,11 @@ class RekordboxService:
                     self.db.add_to_playlist(playlist, new_content)
                     return True
                 else:
-                    logger.warning(f"Failed to add track to database: {track_path}")
+                    logger.warning("Failed to add track to database: %s", track_path)
                     return False
 
         except Exception as e:
-            logger.warning(f"Failed to add track {track_path} to playlist: {e}")
+            logger.warning("Failed to add track %s to playlist: %s", track_path, e)
             return False
 
     def _extract_track_metadata(self, file_path: Path) -> Dict[str, Any]:
@@ -336,7 +338,7 @@ class RekordboxService:
                 # Extract metadata that can be set directly
                 self._extract_direct_metadata(audio_file, metadata)
         except Exception as e:
-            logger.warning(f"Failed to extract metadata from {file_path}: {e}")
+            logger.warning("Failed to extract metadata from %s: %s", file_path, e)
 
         return metadata
 
@@ -580,7 +582,7 @@ class RekordboxService:
             )
 
         try:
-            logger.info(f"Generating Rekordbox XML from {input_folder}")
+            logger.info("Generating Rekordbox XML from %s", input_folder)
 
             # Reset state
             self.track_data = {}
@@ -618,14 +620,14 @@ class RekordboxService:
             # Write XML file
             self._write_xml_file(root, output_file)
 
-            logger.info(f"Successfully generated Rekordbox XML: {output_file}")
+            logger.info("Successfully generated Rekordbox XML: %s", output_file)
             logger.info(
                 f"Processed {len(self.track_data)} tracks from "
                 f"{playlist_count} playlists"
             )
 
         except Exception as e:
-            logger.error(f"Failed to generate Rekordbox XML: {e}")
+            logger.error("Failed to generate Rekordbox XML: %s", e)
             raise RekordboxGenerationError(f"XML generation failed: {e}")
 
     def _create_xml_root(self, version: str) -> ET.Element:
@@ -661,7 +663,7 @@ class RekordboxService:
             folder_path: Path to playlist folder
         """
         playlist_name = folder_path.name
-        logger.debug(f"Processing playlist: {playlist_name}")
+        logger.debug("Processing playlist: %s", playlist_name)
 
         # Supported audio extensions
         audio_extensions = {".mp3", ".wav", ".flac", ".aac"}
@@ -671,7 +673,7 @@ class RekordboxService:
                 try:
                     self._process_audio_file(file_path, playlist_name)
                 except Exception as e:
-                    logger.warning(f"Failed to process {file_path}: {e}")
+                    logger.warning("Failed to process %s: %s", file_path, e)
                     continue
 
     def _process_audio_file(self, file_path: Path, playlist_name: str) -> None:
@@ -685,7 +687,7 @@ class RekordboxService:
             # Try to get metadata
             audio_file = MutagenFile(file_path, easy=True)
             if not audio_file:
-                logger.warning(f"Cannot read audio file: {file_path}")
+                logger.warning("Cannot read audio file: %s", file_path)
                 return
 
             # Extract metadata
@@ -726,7 +728,7 @@ class RekordboxService:
                 self.track_id_counter += 1
 
         except (HeaderNotFoundError, Exception) as e:
-            logger.warning(f"Cannot process audio file {file_path}: {e}")
+            logger.warning("Cannot process audio file %s: %s", file_path, e)
 
     def _get_metadata_value(self, audio_file: Any, key: str, default: str = "") -> str:
         """Get metadata value from audio file.

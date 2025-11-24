@@ -123,7 +123,7 @@ class PlaylistProcessor:
         # Check if local folder exists
         m4a_folder = self.config.m4a_directory / "Playlists" / playlist.name
         if not m4a_folder.exists():
-            logger.warning(f"Local folder not found for playlist: {playlist.name}")
+            logger.warning("Local folder not found for playlist: %s", playlist.name)
             return
 
         # Get Tidal tracks
@@ -402,7 +402,7 @@ class PlaylistProcessor:
                 file_path.unlink()
                 console.print(f"[red]Deleted:[/red] {file_path.name}")
             except OSError as e:
-                logger.error(f"Failed to delete {file_path}: {e}")
+                logger.error("Failed to delete %s: %s", file_path, e)
                 console.print(f"[red]Error deleting {file_path.name}: {e}[/red]")
 
     def _delete_tracks_auto(self, folder: Path, tracks_to_delete: Set[str]) -> None:
@@ -445,7 +445,7 @@ class PlaylistProcessor:
                                 file_path.unlink()
                                 console.print(f"[red]Deleted:[/red] {file_path.name}")
                             except OSError as e:
-                                logger.error(f"Failed to delete {file_path}: {e}")
+                                logger.error("Failed to delete %s: %s", file_path, e)
                                 console.print(
                                     f"[red]Error deleting {file_path.name}: {e}[/red]"
                                 )
@@ -495,9 +495,9 @@ class PlaylistProcessor:
             if mp3_file.stem not in m4a_stems:
                 try:
                     mp3_file.unlink()
-                    logger.info(f"Deleted MP3: {mp3_file}")
+                    logger.info("Deleted MP3: %s", mp3_file)
                 except OSError as e:
-                    logger.error(f"Failed to delete MP3 {mp3_file}: {e}")
+                    logger.error("Failed to delete MP3 %s: %s", mp3_file, e)
 
 
 class PlaylistSynchronizer:
@@ -634,7 +634,7 @@ class PlaylistSynchronizer:
                     self.playlist_processor.process_playlist(playlist, progress, task)
                     processed += 1
                 except Exception as e:
-                    logger.error(f"Failed to process playlist {playlist.name}: {e}")
+                    logger.error("Failed to process playlist %s: %s", playlist.name, e)
                     console.print(
                         f"[red]✗[/red] Failed to process playlist: {playlist.name}"
                     )

@@ -246,9 +246,11 @@ class DirectoryDiffService:
                             key=key, path=file_path.resolve()
                         )
                     except Exception as e:
-                        logger.error(f"Error computing identity for {file_path}: {e}")
+                        logger.error(
+                            "Error computing identity for %s: %s", file_path, e
+                        )
 
-        logger.debug(f"Scanned {directory}: found {len(identities)} files")
+        logger.debug("Scanned %s: found %d files", directory, len(identities))
         return identities
 
     # @convert convert_directory()

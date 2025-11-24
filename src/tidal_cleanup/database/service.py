@@ -40,7 +40,7 @@ class DatabaseService:
             autocommit=False, autoflush=False, bind=self.engine
         )
 
-        logger.info(f"Database initialized at: {self.db_path}")
+        logger.info("Database initialized at: %s", self.db_path)
 
     def init_db(self) -> None:
         """Initialize database schema (create all tables)."""
@@ -175,7 +175,7 @@ class DatabaseService:
             track.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(track)
-            logger.debug(f"Updated track: {track.id}")
+            logger.debug("Updated track: %s", track.id)
             return track
 
     def create_or_update_track(self, track_data: Dict[str, Any]) -> Track:
@@ -288,7 +288,7 @@ class DatabaseService:
             session.add(playlist)
             session.commit()
             session.refresh(playlist)
-            logger.info(f"Created playlist: {playlist.name} (ID: {playlist.id})")
+            logger.info("Created playlist: %s (ID: %s)", playlist.name, playlist.id)
             return playlist
 
     def update_playlist(
@@ -316,7 +316,7 @@ class DatabaseService:
             playlist.updated_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(playlist)
-            logger.debug(f"Updated playlist: {playlist.id}")
+            logger.debug("Updated playlist: %s", playlist.id)
             return playlist
 
     def create_or_update_playlist(self, playlist_data: Dict[str, Any]) -> Playlist:
@@ -700,7 +700,7 @@ class DatabaseService:
             session.add(snapshot)
             session.commit()
             session.refresh(snapshot)
-            logger.info(f"Created {snapshot_type} snapshot (ID: {snapshot.id})")
+            logger.info("Created %s snapshot (ID: %s)", snapshot_type, snapshot.id)
             return snapshot
 
     def get_latest_snapshot(self, snapshot_type: str) -> Optional[SyncSnapshot]:

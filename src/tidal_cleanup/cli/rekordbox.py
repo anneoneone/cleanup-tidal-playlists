@@ -72,10 +72,10 @@ def sync_playlist(
         _display_sync_results(result)
 
     except FileNotFoundError as e:
-        logger.error(f"❌ {e}")
+        logger.error("❌ %s", e)
         raise click.Abort()
     except Exception as e:
-        logger.error(f"❌ Error syncing playlist: {e}")
+        logger.error("❌ Error syncing playlist: %s", e)
         import traceback
 
         traceback.print_exc()

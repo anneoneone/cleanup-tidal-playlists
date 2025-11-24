@@ -51,7 +51,7 @@ class FileScannerService:
             Dictionary with scan results including matched, unmatched,
             and orphaned files
         """
-        logger.info(f"Scanning directory: {directory}")
+        logger.info("Scanning directory: %s", directory)
 
         if not directory.exists():
             raise ValueError(f"Directory does not exist: {directory}")
@@ -61,11 +61,11 @@ class FileScannerService:
 
         # Find all audio files
         audio_files = self._find_audio_files(directory)
-        logger.info(f"Found {len(audio_files)} audio files")
+        logger.info("Found %d audio files", len(audio_files))
 
         # Get all tracks from database
         db_tracks = self.db_service.get_all_tracks()
-        logger.info(f"Found {len(db_tracks)} tracks in database")
+        logger.info("Found %d tracks in database", len(db_tracks))
 
         # Match files to tracks
         matched = []
@@ -285,7 +285,7 @@ class FileScannerService:
             return metadata
 
         except Exception as e:
-            logger.warning(f"Failed to extract metadata from {file_path}: {e}")
+            logger.warning("Failed to extract metadata from %s: %s", file_path, e)
             return None
 
     def _get_tag_value(self, audio: Any, tag: str) -> Optional[str]:
@@ -326,7 +326,7 @@ class FileScannerService:
                     sha256_hash.update(byte_block)
             return sha256_hash.hexdigest()
         except Exception as e:
-            logger.warning(f"Failed to compute hash for {file_path}: {e}")
+            logger.warning("Failed to compute hash for %s: %s", file_path, e)
             return None
 
     def _update_track_file_info(self, track: Track, file_path: Path) -> None:
@@ -347,10 +347,10 @@ class FileScannerService:
             }
 
             self.db_service.update_track(track.id, update_data)
-            logger.debug(f"Updated track {track.id} with file info: {file_path}")
+            logger.debug("Updated track %s with file info: %s", track.id, file_path)
 
         except Exception as e:
-            logger.error(f"Failed to update track {track.id} file info: {e}")
+            logger.error("Failed to update track %s file info: %s", track.id, e)
 
     def find_missing_files(self) -> List[Track]:
         """Find tracks in database that have no corresponding local file.
@@ -369,7 +369,7 @@ class FileScannerService:
                 # No file path set at all
                 missing.append(track)
 
-        logger.info(f"Found {len(missing)} tracks with missing files")
+        logger.info("Found %d tracks with missing files", len(missing))
         return missing
 
     def find_orphaned_files(self, directory: Path) -> List[Path]:
@@ -392,7 +392,7 @@ class FileScannerService:
         # Find files not in database
         orphaned = [f for f in audio_files if f.resolve() not in known_paths]
 
-        logger.info(f"Found {len(orphaned)} orphaned files")
+        logger.info("Found %d orphaned files", len(orphaned))
         return orphaned
 
     def update_file_hashes(self, directory: Optional[Path] = None) -> int:
@@ -428,7 +428,7 @@ class FileScannerService:
                 self.db_service.update_track(track.id, {"file_hash": file_hash})
                 updated += 1
 
-        logger.info(f"Updated {updated} file hashes")
+        logger.info("Updated %s file hashes", updated)
         return updated
 
     def verify_file_integrity(self) -> Dict[str, List[Track]]:

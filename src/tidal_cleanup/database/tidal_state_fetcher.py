@@ -100,7 +100,7 @@ class TidalStateFetcher:
         # Get last sync timestamp for optimization
         last_sync_time = self.db_service.get_last_sync_timestamp("tidal_sync")
         if last_sync_time:
-            logger.info(f"Last sync was at: {last_sync_time}")
+            logger.info("Last sync was at: %s", last_sync_time)
         else:
             logger.info("No previous sync found - fetching all playlist tracks")
 
@@ -110,7 +110,7 @@ class TidalStateFetcher:
         tidal_playlists = self._fetch_tidal_playlists()
         self._stats.playlists_fetched = len(tidal_playlists)
 
-        logger.info(f"Found {len(tidal_playlists)} playlists in Tidal")
+        logger.info("Found %d playlists in Tidal", len(tidal_playlists))
 
         # Process each playlist (update database even in dry-run for diff)
         updated_playlists: List[Playlist] = []
@@ -131,7 +131,7 @@ class TidalStateFetcher:
                 **self._stats.to_dict(),
             }
             snapshot = self.db_service.create_snapshot("tidal_sync", snapshot_data)
-            logger.info(f"Created sync snapshot: {snapshot.id}")
+            logger.info("Created sync snapshot: %s", snapshot.id)
         else:
             logger.info("Skipping snapshot creation (dry-run mode)")
 
@@ -245,7 +245,9 @@ class TidalStateFetcher:
             f"{self._stats.tracks_updated} updated"
         )
         if self._stats.errors:
-            logger.warning(f"Encountered {len(self._stats.errors)} errors during fetch")
+            logger.warning(
+                "Encountered %d errors during fetch", len(self._stats.errors)
+            )
 
     def _convert_tidal_playlist(self, tidal_playlist: Any) -> Dict[str, Any]:
         """Convert Tidal playlist object to database format.
@@ -318,7 +320,7 @@ class TidalStateFetcher:
         playlist_data["last_seen_in_tidal"] = datetime.now(timezone.utc)
 
         playlist = self.db_service.create_playlist(playlist_data)
-        logger.debug(f"Created playlist: {playlist.name} ({playlist.tidal_id})")
+        logger.debug("Created playlist: %s (%d)", playlist.name, playlist.tidal_id)
 
         return playlist
 
@@ -378,13 +380,15 @@ class TidalStateFetcher:
         # Only update database if the playlist actually changed in Tidal
         if has_changed:
             updated = self.db_service.update_playlist(existing.id, playlist_data)
-            logger.debug(f"Updated playlist: {updated.name} ({updated.tidal_id})")
+            logger.debug("Updated playlist: %s (%d)", updated.name, updated.tidal_id)
             return updated, True
         else:
             # No changes in Tidal, just update last_seen timestamp
             minimal_update = {"last_seen_in_tidal": playlist_data["last_seen_in_tidal"]}
             updated = self.db_service.update_playlist(existing.id, minimal_update)
-            logger.debug(f"Playlist unchanged: {existing.name} ({existing.tidal_id})")
+            logger.debug(
+                "Playlist unchanged: %s (%d)", existing.name, existing.tidal_id
+            )
             return updated, False
 
     def _fetch_playlist_tracks(
@@ -643,7 +647,7 @@ class TidalStateFetcher:
                 )
 
         if marked > 0:
-            logger.info(f"Marked {marked} playlists for removal")
+            logger.info("Marked %s playlists for removal", marked)
 
         return marked
 

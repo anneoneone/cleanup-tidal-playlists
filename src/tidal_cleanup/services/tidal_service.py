@@ -40,7 +40,7 @@ class TidalService:
             if not self._authenticated:
                 self._create_new_session()
         except Exception as e:
-            logger.error(f"Failed to connect to Tidal: {e}")
+            logger.error("Failed to connect to Tidal: %s", e)
             raise TidalConnectionError(f"Cannot connect to Tidal API: {e}")
 
     def _load_existing_session(self) -> None:
@@ -67,10 +67,10 @@ class TidalService:
                 self._remove_invalid_token()
 
         except (AuthenticationError, KeyError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to load existing session: {e}")
+            logger.warning("Failed to load existing session: %s", e)
             self._remove_invalid_token()
         except Exception as e:
-            logger.error(f"Unexpected error loading session: {e}")
+            logger.error("Unexpected error loading session: %s", e)
             self._remove_invalid_token()
 
     def _create_new_session(self) -> None:
@@ -116,10 +116,10 @@ class TidalService:
             with open(self.token_file, "w") as file:
                 json.dump(session_data, file, indent=2)
 
-            logger.info(f"Session saved to {self.token_file}")
+            logger.info("Session saved to %s", self.token_file)
 
         except Exception as e:
-            logger.error(f"Failed to save session: {e}")
+            logger.error("Failed to save session: %s", e)
 
     def _remove_invalid_token(self) -> None:
         """Remove invalid token file."""
@@ -128,7 +128,7 @@ class TidalService:
                 self.token_file.unlink()
                 logger.info("Removed invalid token file")
             except Exception as e:
-                logger.error(f"Failed to remove invalid token file: {e}")
+                logger.error("Failed to remove invalid token file: %s", e)
 
     def get_playlists(self) -> List[Playlist]:
         """Get all user playlists from Tidal with complete metadata.
@@ -192,11 +192,11 @@ class TidalService:
                 )
                 playlists.append(playlist)
 
-            logger.info(f"Retrieved {len(playlists)} playlists from Tidal")
+            logger.info("Retrieved %d playlists from Tidal", len(playlists))
             return playlists
 
         except Exception as e:
-            logger.error(f"Failed to retrieve playlists: {e}")
+            logger.error("Failed to retrieve playlists: %s", e)
             raise TidalConnectionError(f"Cannot retrieve playlists: {e}")
 
     def get_playlist_tracks(self, playlist_id: str) -> List[Track]:
@@ -221,11 +221,15 @@ class TidalService:
 
             tracks = [self._extract_track_metadata(t) for t in tidal_tracks]
 
-            logger.info(f"Retrieved {len(tracks)} tracks from playlist {playlist_id}")
+            logger.info(
+                "Retrieved %d tracks from playlist %d", len(tracks), playlist_id
+            )
             return tracks
 
         except Exception as e:
-            logger.error(f"Failed to retrieve tracks for playlist {playlist_id}: {e}")
+            logger.error(
+                "Failed to retrieve tracks for playlist %d: %s", playlist_id, e
+            )
             raise TidalConnectionError(
                 f"Cannot retrieve tracks for playlist {playlist_id}: {e}"
             )

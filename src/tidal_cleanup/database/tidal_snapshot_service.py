@@ -39,11 +39,11 @@ class TidalSnapshotService:
 
         # Get all playlists from Tidal
         tidal_playlists = self.tidal_service.get_playlists()
-        logger.info(f"Found {len(tidal_playlists)} playlists in Tidal")
+        logger.info("Found %d playlists in Tidal", len(tidal_playlists))
 
         # Get all playlists from database
         db_playlists = self.db_service.get_all_playlists()
-        logger.info(f"Found {len(db_playlists)} playlists in database")
+        logger.info("Found %d playlists in database", len(db_playlists))
 
         # Initialize sync state
         sync_state = SyncState(
@@ -65,12 +65,12 @@ class TidalSnapshotService:
 
         # Compare tracks for each playlist
         for tidal_playlist in tidal_playlists:
-            logger.info(f"Processing playlist: {tidal_playlist.name}")
+            logger.info("Processing playlist: %s", tidal_playlist.name)
 
             # Get playlist from database
             tidal_id = tidal_playlist.tidal_id
             if not tidal_id:
-                logger.warning(f"Playlist {tidal_playlist.name} has no tidal_id")
+                logger.warning("Playlist %s has no tidal_id", tidal_playlist.name)
                 continue
 
             db_playlist = self.db_service.get_playlist_by_tidal_id(tidal_id)
@@ -144,7 +144,7 @@ class TidalSnapshotService:
         track_changes = self._get_track_changes(sync_state)
         applied_counts.update(self._apply_track_changes(track_changes))
 
-        logger.info(f"Applied changes: {applied_counts}")
+        logger.info("Applied changes: %s", applied_counts)
         return applied_counts
 
     def _get_playlist_changes(self, sync_state: SyncState) -> list[Change]:
@@ -197,7 +197,7 @@ class TidalSnapshotService:
                         counts.get(change.change_type.value, 0) + 1
                     )
             except Exception as e:
-                logger.error(f"Failed to apply change {change}: {e}")
+                logger.error("Failed to apply change %s: %s", change, e)
 
         return counts
 
@@ -221,7 +221,7 @@ class TidalSnapshotService:
                         counts.get(change.change_type.value, 0) + 1
                     )
             except Exception as e:
-                logger.error(f"Failed to apply change {change}: {e}")
+                logger.error("Failed to apply change %s: %s", change, e)
 
         return counts
 
@@ -247,7 +247,7 @@ class TidalSnapshotService:
         """Apply PLAYLIST_ADDED change."""
         tidal_id = change.metadata.get("tidal_id")
         if not tidal_id:
-            logger.warning(f"No tidal_id in change metadata: {change}")
+            logger.warning("No tidal_id in change metadata: %s", change)
             return
 
         # Get playlist from Tidal
@@ -257,13 +257,13 @@ class TidalSnapshotService:
         )
 
         if not tidal_playlist:
-            logger.warning(f"Playlist {tidal_id} not found in Tidal")
+            logger.warning("Playlist %d not found in Tidal", tidal_id)
             return
 
         # Create playlist in database with all metadata
         playlist_data = self._playlist_to_dict(tidal_playlist)
         self.db_service.create_or_update_playlist(playlist_data)
-        logger.info(f"Added playlist: {tidal_playlist.name}")
+        logger.info("Added playlist: %s", tidal_playlist.name)
 
         # Add tracks to playlist
         tidal_tracks = self.tidal_service.get_playlist_tracks(tidal_id)
@@ -284,7 +284,7 @@ class TidalSnapshotService:
     def _apply_playlist_removed(self, change: Change) -> None:
         """Apply PLAYLIST_REMOVED change (soft delete)."""
         if not change.entity_id:
-            logger.warning(f"No entity_id for playlist removal: {change}")
+            logger.warning("No entity_id for playlist removal: %s", change)
             return
 
         # Soft delete: mark tracks as not in Tidal
@@ -296,12 +296,12 @@ class TidalSnapshotService:
                 change.entity_id, pt.track_id, in_tidal=False
             )
 
-        logger.info(f"Marked playlist {change.entity_id} as removed from Tidal")
+        logger.info("Marked playlist %d as removed from Tidal", change.entity_id)
 
     def _apply_playlist_renamed(self, change: Change) -> None:
         """Apply PLAYLIST_RENAMED change."""
         if not change.entity_id or not change.new_value:
-            logger.warning(f"Missing data for playlist rename: {change}")
+            logger.warning("Missing data for playlist rename: %s", change)
             return
 
         playlist = self.db_service.get_playlist_by_id(change.entity_id)
@@ -317,18 +317,18 @@ class TidalSnapshotService:
     def _apply_playlist_description_changed(self, change: Change) -> None:
         """Apply PLAYLIST_DESCRIPTION_CHANGED change."""
         if not change.entity_id:
-            logger.warning(f"No entity_id for description change: {change}")
+            logger.warning("No entity_id for description change: %s", change)
             return
 
         self.db_service.update_playlist(
             change.entity_id, {"description": change.new_value}
         )
-        logger.info(f"Updated description for playlist {change.entity_id}")
+        logger.info("Updated description for playlist %d", change.entity_id)
 
     def _apply_track_added_to_playlist(self, change: Change) -> None:
         """Apply TRACK_ADDED_TO_PLAYLIST change."""
         if not change.playlist_id or not change.metadata.get("tidal_id"):
-            logger.warning(f"Missing data for track addition: {change}")
+            logger.warning("Missing data for track addition: %s", change)
             return
 
         tidal_id = change.metadata["tidal_id"]
@@ -365,7 +365,7 @@ class TidalSnapshotService:
     def _apply_track_removed_from_playlist(self, change: Change) -> None:
         """Apply TRACK_REMOVED_FROM_PLAYLIST change (soft delete)."""
         if not change.playlist_id or not change.track_id:
-            logger.warning(f"Missing data for track removal: {change}")
+            logger.warning("Missing data for track removal: %s", change)
             return
 
         # Soft delete: mark as not in Tidal
@@ -380,7 +380,7 @@ class TidalSnapshotService:
     def _apply_track_moved_within_playlist(self, change: Change) -> None:
         """Apply TRACK_MOVED_WITHIN_PLAYLIST change."""
         if not change.playlist_id or not change.track_id or change.new_value is None:
-            logger.warning(f"Missing data for track move: {change}")
+            logger.warning("Missing data for track move: %s", change)
             return
 
         self.db_service.update_track_position(
@@ -394,7 +394,7 @@ class TidalSnapshotService:
     def _apply_track_metadata_changed(self, change: Change) -> None:
         """Apply TRACK_METADATA_CHANGED change."""
         if not change.track_id or not change.metadata.get("changes"):
-            logger.warning(f"Missing data for metadata change: {change}")
+            logger.warning("Missing data for metadata change: %s", change)
             return
 
         metadata_changes = change.metadata["changes"]
