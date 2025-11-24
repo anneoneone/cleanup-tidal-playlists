@@ -51,15 +51,26 @@ class FetchStatistics:
 class TidalStateFetcher:
     """Fetches Tidal playlists and tracks and updates database."""
 
-    def __init__(self, db_service: DatabaseService, tidal_session: Any = None) -> None:
+    def __init__(
+        self,
+        db_service: DatabaseService,
+        tidal_session: Any = None,
+        force: bool = False,
+        dry_run: bool = False,
+    ) -> None:
         """Initialize Tidal state fetcher.
 
         Args:
             db_service: Database service instance
             tidal_session: Authenticated Tidal session (tidalapi.Session)
+            force: If True, skip date comparison optimization and fetch all tracks
+            dry_run: If True, skip creating snapshots but allow database updates
+                    for diff calculation
         """
         self.db_service = db_service
         self.tidal_session = tidal_session
+        self.force = force
+        self.dry_run = dry_run
         self._stats = FetchStatistics()
         self._fetched_playlist_ids: List[str] = []
 
@@ -74,6 +85,10 @@ class TidalStateFetcher:
 
         Raises:
             RuntimeError: If Tidal session not provided
+
+        Note:
+            In dry-run mode, this fetches data from Tidal and updates the database
+            (to enable diff calculation) but skips creating snapshots.
         """
         if not self.tidal_session:
             raise RuntimeError("Tidal session required to fetch playlists")
@@ -97,7 +112,7 @@ class TidalStateFetcher:
 
         logger.info(f"Found {len(tidal_playlists)} playlists in Tidal")
 
-        # Process each playlist
+        # Process each playlist (update database even in dry-run for diff)
         updated_playlists: List[Playlist] = []
         for tidal_playlist in tidal_playlists:
             result = self._process_single_playlist(
@@ -106,15 +121,19 @@ class TidalStateFetcher:
             if result:
                 updated_playlists.append(result)
 
-        # Create snapshot with final statistics
-        snapshot_data = {
-            "status": "completed",
-            "playlists_to_process": len(tidal_playlists),
-            "last_sync_time": last_sync_time.isoformat() if last_sync_time else None,
-            **self._stats.to_dict(),
-        }
-        snapshot = self.db_service.create_snapshot("tidal_sync", snapshot_data)
-        logger.info(f"Created sync snapshot: {snapshot.id}")
+        # Create snapshot with final statistics (skip in dry-run mode)
+        if not self.dry_run:
+            last_sync_iso = last_sync_time.isoformat() if last_sync_time else None
+            snapshot_data = {
+                "status": "completed",
+                "playlists_to_process": len(tidal_playlists),
+                "last_sync_time": last_sync_iso,
+                **self._stats.to_dict(),
+            }
+            snapshot = self.db_service.create_snapshot("tidal_sync", snapshot_data)
+            logger.info(f"Created sync snapshot: {snapshot.id}")
+        else:
+            logger.info("Skipping snapshot creation (dry-run mode)")
 
         # Log summary
         self._log_fetch_summary()
@@ -177,8 +196,9 @@ class TidalStateFetcher:
                 self._stats.playlists_created += 1
 
             # Optimization: Only fetch tracks if playlist changed since last sync
+            # (unless force flag is set)
             should_fetch_tracks = True
-            if last_sync_time and updated.last_updated_tidal:
+            if not self.force and last_sync_time and updated.last_updated_tidal:
                 # Ensure both datetimes are timezone-aware for comparison
                 playlist_updated = updated.last_updated_tidal
                 if (
