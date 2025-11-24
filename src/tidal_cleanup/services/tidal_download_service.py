@@ -315,7 +315,7 @@ class TidalDownloadService:
             event_run.set()
 
             dl = Download(
-                session=self.tidal_dl.session,
+                self.tidal_dl,  # Pass TidalDL object, not session
                 path_base=str(target_path.parent),
                 fn_logger=fn_logger,
                 skip_existing=True,
@@ -324,11 +324,12 @@ class TidalDownloadService:
                 event_run=event_run,
             )
 
-            # Use simple file template (just filename)
-            file_template = target_path.name
+            # Use tidal-dl-ng template with artist and title variables
+            # This ensures we get the original Tidal metadata in the filename
+            file_template = "{artist_name} - {track_title}"
 
-            # Download the track
-            dl.items(
+            # Download the track using item() which returns (success, path)
+            success, downloaded_path = dl.item(
                 media=track,
                 file_template=file_template,
                 video_download=False,
@@ -336,8 +337,18 @@ class TidalDownloadService:
                 quality_audio=quality or self.tidal_dl_settings.data.quality_audio,
             )
 
-            logger.info(f"Successfully downloaded track to {target_path}")
-            return target_path
+            if not success or not downloaded_path:
+                raise TidalDownloadError(f"Download failed for track {track_id}")
+
+            # Convert to Path object
+            actual_path = (
+                Path(downloaded_path)
+                if isinstance(downloaded_path, str)
+                else downloaded_path
+            )
+
+            logger.info(f"Successfully downloaded track to {actual_path}")
+            return actual_path
 
         except TidalDownloadError:
             raise
@@ -372,10 +383,10 @@ class TidalDownloadService:
             event_run = Event()  # For run control
             event_run.set()  # Set to running state
 
-            # Note: Download expects session (tidalapi.Session), not tidal_obj
+            # Note: Download expects TidalDL object (which contains the session)
             # self.tidal_dl is checked above to not be None
             dl = Download(
-                session=self.tidal_dl.session,
+                self.tidal_dl,  # Pass TidalDL object, not session
                 path_base=str(target_dir.parent.parent),  # Base path (m4a directory)
                 fn_logger=fn_logger,
                 skip_existing=True,

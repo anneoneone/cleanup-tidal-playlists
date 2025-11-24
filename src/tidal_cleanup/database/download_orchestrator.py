@@ -100,16 +100,20 @@ class DownloadOrchestrator:
             db_service, auto_resolve=True
         )
 
-    def execute_decisions(self, decisions: SyncDecisions) -> ExecutionResult:
+    def execute_decisions(
+        self, decisions: SyncDecisions, target_format: str = "mp3"
+    ) -> ExecutionResult:
         """Execute sync decisions.
 
         Args:
             decisions: SyncDecisions object with decisions to execute
+            target_format: Target audio format for conversion (e.g., "mp3", "flac")
 
         Returns:
             ExecutionResult with execution statistics
         """
         result = ExecutionResult()
+        self.target_format = target_format  # Store for use in _execute_download
 
         # Detect conflicts between decisions
         conflicts = self.conflict_resolver.detect_decision_conflicts(
@@ -241,12 +245,20 @@ class DownloadOrchestrator:
         """
         if decision.track_id is None:
             result.downloads_failed += 1
-            result.add_error("Cannot download track: track_id is None")
+            error_msg = (
+                f"Cannot download track: track_id is None "
+                f"(reason: {decision.reason})"
+            )
+            result.add_error(error_msg)
             return False
 
         if not decision.target_path:
             result.downloads_failed += 1
-            result.add_error("Cannot download track: target_path is None")
+            error_msg = (
+                f"Cannot download track {decision.track_id}: "
+                f"target_path is None (reason: {decision.reason})"
+            )
+            result.add_error(error_msg)
             return False
 
         return True
@@ -261,7 +273,9 @@ class DownloadOrchestrator:
     def _perform_download(
         self, track: Track, decision: DecisionResult, result: ExecutionResult
     ) -> None:
-        """Perform the actual download using TidalDownloadService."""
+        """Perform the actual download and conversion using TidalDownloadService."""
+        import subprocess  # noqa: S404
+
         try:
             # Type narrowing: target_path is guaranteed to be str here (validated above)
             target_path_str = decision.target_path
@@ -274,17 +288,72 @@ class DownloadOrchestrator:
             download_service = self.download_service
             if download_service is None:  # Defensive check
                 raise ValueError("download_service is None")
-            download_service.download_track(
+
+            # Download track in original format (M4A)
+            # Returns the actual path where file was downloaded
+            actual_downloaded_path = download_service.download_track(
                 track_id=tidal_track_id, target_path=target_path
             )
+
+            # Convert to target format if not already in target format
+            target_format = getattr(self, "target_format", "mp3")
+            target_ext = f".{target_format.lower().replace('.', '')}"
+
+            if actual_downloaded_path.suffix.lower() != target_ext:
+                # Create converted file path in the desired target location
+                converted_path = target_path.with_suffix(target_ext)
+
+                # Ensure target directory exists
+                converted_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # Run ffmpeg conversion
+                cmd = [
+                    "ffmpeg",
+                    "-i",
+                    str(actual_downloaded_path),
+                    "-q:a",
+                    "2",  # Quality setting
+                    "-y",  # Overwrite output file
+                    str(converted_path),
+                ]
+
+                subprocess.run(  # noqa: S603
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True,
+                )
+
+                # Remove original file after successful conversion
+                actual_downloaded_path.unlink()
+
+                # Update target_path to converted file
+                target_path = converted_path
+                logger.info(
+                    f"Downloaded and converted track {decision.track_id} to "
+                    f"{target_format.upper()} at {converted_path}"
+                )
+            else:
+                # If already in target format, move to target location if different
+                if actual_downloaded_path != target_path:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    actual_downloaded_path.rename(target_path)
+                    logger.info(
+                        f"Downloaded track {decision.track_id} at {target_path}"
+                    )
+                else:
+                    target_path = actual_downloaded_path
+                    logger.info(
+                        f"Downloaded track {decision.track_id} at {target_path}"
+                    )
 
             # Update database with success
             self._update_track_after_download(track, target_path)
 
             result.downloads_successful += 1
-            logger.info(f"Successfully downloaded track {decision.track_id}")
 
-        except (TidalDownloadError, ValueError) as e:
+        except (TidalDownloadError, ValueError, subprocess.CalledProcessError) as e:
             self._handle_download_failure(track, decision, result, e)
 
     def _get_tidal_track_id(self, track: Track) -> int:

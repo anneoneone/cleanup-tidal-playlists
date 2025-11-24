@@ -680,11 +680,6 @@ def _fetch_tidal_playlists(
     help="Skip fetching from Tidal (use existing database)",
 )
 @click.option(
-    "--convert",
-    is_flag=True,
-    help="Convert downloaded files after downloading",
-)
-@click.option(
     "--target-format",
     type=str,
     default="mp3",
@@ -702,30 +697,26 @@ def download(
     playlist: Optional[str],
     dry_run: bool,
     skip_fetch: bool,
-    convert: bool,
     target_format: str,
     force: bool,
 ) -> None:
-    """Download tracks from Tidal to M4A directory (database-driven).
+    """Download tracks from Tidal and convert to target format.
 
     This command uses the new database-driven sync system to:
     1. Fetch playlist metadata from Tidal (optional)
     2. Determine which tracks need to be downloaded
     3. Download missing tracks to the M4A directory
-    4. Optionally convert downloaded files to target format
+    4. Convert downloaded files to target format (default: mp3)
 
     Examples:
-        # Download all playlists
+        # Download all playlists and convert to MP3
         tidal-cleanup download
 
-        # Download specific playlist
+        # Download specific playlist and convert to MP3
         tidal-cleanup download -p "My Playlist"
 
-        # Download and convert to MP3
-        tidal-cleanup download --convert
-
         # Download and convert to FLAC
-        tidal-cleanup download --convert --target-format flac
+        tidal-cleanup download --target-format flac
 
         # Force fetch all tracks (ignore last update timestamps)
         tidal-cleanup download --force
@@ -741,6 +732,7 @@ def download(
         DownloadOrchestrator,
         SyncDecisionEngine,
     )
+    from ..database.sync_decision_engine import SyncAction
 
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
@@ -773,17 +765,27 @@ def download(
                 dry_run=dry_run,
             )
 
-        # Step 2: Generate sync decisions
+        # Step 2: Determine target directory based on format
+        target_format_normalized = target_format.lower().replace(".", "")
+        if target_format_normalized == "mp3":
+            target_root = config.mp3_directory
+        else:
+            target_root = config.m4a_directory.parent / target_format_normalized
+
+        # Step 3: Generate sync decisions
         with console.status("[bold green]Analyzing what needs to be downloaded..."):
-            decision_engine = SyncDecisionEngine(
-                db_service, music_root=config.m4a_directory
-            )
+            decision_engine = SyncDecisionEngine(db_service, music_root=target_root)
             decisions = decision_engine.analyze_all_playlists()
 
         # Filter for download decisions only
         download_decisions = [
-            d for d in decisions.decisions if d.action.value == "DOWNLOAD_TRACK"
+            d for d in decisions.decisions if d.action == SyncAction.DOWNLOAD_TRACK
         ]
+
+        logger.info(
+            f"Generated {len(decisions.decisions)} total decisions, "
+            f"{len(download_decisions)} are download decisions"
+        )
 
         # Filter by playlist if specified
         if playlist:
@@ -801,27 +803,27 @@ def download(
             f"[cyan]Found {len(download_decisions)} track(s) to download[/cyan]\n"
         )
 
-        # Step 3: Execute downloads
+        # Step 4: Execute downloads and conversions
         from ..database.sync_decision_engine import SyncDecisions
 
         orchestrator = DownloadOrchestrator(
             db_service=db_service,
-            music_root=config.m4a_directory,
+            music_root=target_root,
             download_service=download_service,
             dry_run=dry_run,
         )
 
         download_only = SyncDecisions(decisions=download_decisions)
 
-        with console.status("[bold green]Downloading tracks..."):
-            result = orchestrator.execute_decisions(download_only)
+        with console.status(
+            f"[bold green]Downloading and converting to {target_format.upper()}..."
+        ):
+            result = orchestrator.execute_decisions(
+                download_only, target_format=target_format
+            )
 
-        # Step 4: Display results
+        # Step 5: Display results
         _display_download_results(result)
-
-        # Step 5: Convert files if requested
-        if convert and not dry_run and result.downloads_successful > 0:
-            _convert_downloaded_files(app, config, target_format, playlist)
 
     except Exception as e:
         logger.exception("Download failed")
