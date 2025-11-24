@@ -333,22 +333,26 @@ class TestExecuteDownload:
         mock_session.merge.return_value = mock_track_obj
         mock_db_service.get_session.return_value.__enter__.return_value = mock_session
 
-        # Mock download service
+        # Mock download service - return mp3 file to avoid conversion
         mock_download_service = MagicMock()
-        mock_download_service.download_track.return_value = (
-            temp_music_root / "track.flac"
-        )
+        downloaded_file = temp_music_root / "track.mp3"
+        # Create the mock downloaded file
+        downloaded_file.parent.mkdir(parents=True, exist_ok=True)
+        downloaded_file.touch()
+        mock_download_service.download_track.return_value = downloaded_file
 
         orchestrator = DownloadOrchestrator(
             db_service=mock_db_service,
             music_root=temp_music_root,
             download_service=mock_download_service,
         )
+        # Set target format to mp3 (same as downloaded format to avoid conversion)
+        orchestrator.target_format = "mp3"
 
         decision = DecisionResult(
             action=SyncAction.DOWNLOAD_TRACK,
             track_id=1,
-            target_path=str(temp_music_root / "track.flac"),
+            target_path=str(temp_music_root / "track.mp3"),
             reason="Test",
             priority=5,
         )
