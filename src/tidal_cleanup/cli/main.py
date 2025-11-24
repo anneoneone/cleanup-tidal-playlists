@@ -744,6 +744,10 @@ def download(
 
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
+
+    # Ensure database schema is initialized
+    db_service.init_db()
+
     download_service = app.download_service
     tidal_service = app.tidal_service
 
