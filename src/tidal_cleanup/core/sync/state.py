@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from .models import Playlist, PlaylistTrack, Track
+from ...database.models import Playlist, PlaylistTrack, Track
 
 
 class ChangeType(str, Enum):

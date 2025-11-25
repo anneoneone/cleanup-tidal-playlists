@@ -17,11 +17,10 @@ from rich.progress import (
 from rich.table import Table
 from thefuzz import process
 
-from tidal_cleanup.models.models import ComparisonResult
-
+from ..core.tidal import TidalConnectionError, TidalService
+from ..models.models import ComparisonResult
 from .file_service import FileService
-from .tidal_service import TidalConnectionError, TidalService
-from .track_comparison_service import TrackComparisonService
+from .track_comparison import TrackComparisonService
 
 console = Console()
 logger = logging.getLogger(__name__)

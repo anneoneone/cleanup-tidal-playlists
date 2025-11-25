@@ -13,18 +13,15 @@ from rich.console import Console
 from rich.table import Table
 
 from ...config import Config
+from ...core.filesystem import FilesystemScanner
+from ...core.sync import DeduplicationLogic, SyncDecisionEngine, SyncOrchestrator
+from ...core.tidal import TidalDownloadService, TidalStateFetcher
 from ...database import (
     ConsoleProgressReporter,
     DatabaseService,
-    DeduplicationLogic,
-    FilesystemScanner,
-    SyncDecisionEngine,
-    SyncOrchestrator,
-    TidalStateFetcher,
     TqdmProgressReporter,
 )
 from ...database.models import Playlist, PlaylistTrack, Track
-from ...services import TidalDownloadService
 from ..display import display_db_sync_result
 
 console = Console()

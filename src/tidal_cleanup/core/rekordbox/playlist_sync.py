@@ -13,7 +13,7 @@ except ImportError:
     db6 = None
 
 from .mytag_manager import MyTagManager
-from .playlist_name_parser import PlaylistMetadata, PlaylistNameParser
+from .playlist_parser import PlaylistMetadata, PlaylistNameParser
 
 logger = logging.getLogger(__name__)
 

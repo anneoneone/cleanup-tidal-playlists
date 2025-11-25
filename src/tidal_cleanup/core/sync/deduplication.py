@@ -11,7 +11,7 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .service import DatabaseService
+from ...database.service import DatabaseService
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ class DeduplicationLogic:
             PrimaryFileDecision with primary playlist and symlink locations
         """
         # Get all PlaylistTrack associations for this track
-        from .models import PlaylistTrack
+        from ...database.models import PlaylistTrack
 
         with self.db_service.get_session() as session:
             from sqlalchemy import select
@@ -121,9 +121,10 @@ class DeduplicationLogic:
         primary = self._choose_primary_playlist(playlists, track_id)
 
         # All other playlists get symlinks
-        symlink_ids: List[int] = [
-            p["id"] for p in playlists if p["id"] != primary["id"]
-        ]
+        symlink_ids: List[int] = []
+        for p in playlists:
+            if p["id"] != primary["id"]:
+                symlink_ids.append(p["id"])  # type: ignore[arg-type]
 
         return PrimaryFileDecision(
             track_id=track_id,
@@ -147,7 +148,7 @@ class DeduplicationLogic:
         for track in tracks:
             try:
                 # Get PlaylistTrack associations for this track
-                from .models import PlaylistTrack
+                from ...database.models import PlaylistTrack
 
                 with self.db_service.get_session() as session:
                     from sqlalchemy import select

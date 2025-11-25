@@ -11,8 +11,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .models import DownloadStatus, Track
-from .service import DatabaseService
+from ...database.models import DownloadStatus, Track
+from ...database.service import DatabaseService
 
 logger = logging.getLogger(__name__)
 

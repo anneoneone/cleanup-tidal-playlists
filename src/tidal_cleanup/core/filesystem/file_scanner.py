@@ -7,11 +7,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import mutagen
 
-from .models import Track
-from .service import DatabaseService
+from ...database.models import Track
+from ...database.service import DatabaseService
 
 # Alias for mutagen.File - mutagen doesn't have type stubs
-MutagenFile = mutagen.File  # type: ignore[attr-defined]
+MutagenFile = mutagen.File
 
 logger = logging.getLogger(__name__)
 

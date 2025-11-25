@@ -1,20 +1,10 @@
-"""Database package for playlist and track synchronization."""
+"""Database package for playlist and track synchronization.
 
-from .conflict_resolver import (
-    Conflict,
-    ConflictResolution,
-    ConflictResolutionResult,
-    ConflictResolver,
-    ConflictType,
-)
-from .deduplication_logic import (
-    DeduplicationLogic,
-    DeduplicationResult,
-    PrimaryFileDecision,
-)
-from .download_orchestrator import DownloadOrchestrator, ExecutionResult
-from .file_scanner_service import FileScannerService
-from .filesystem_scanner import FilesystemScanner
+This package now only contains the pure database layer (service, models, progress
+tracking). Business logic has been moved to core/ modules.
+"""
+
+# Pure database layer
 from .models import (
     DownloadStatus,
     Playlist,
@@ -34,16 +24,12 @@ from .progress_tracker import (
     TqdmProgressReporter,
 )
 from .service import DatabaseService
-from .sync_decision_engine import (
-    DecisionResult,
-    SyncAction,
-    SyncDecisionEngine,
-    SyncDecisions,
-)
-from .sync_orchestrator import SyncOrchestrator, SyncResult
-from .sync_state import Change, ChangeType, SyncState, SyncStateComparator
-from .tidal_snapshot_service import TidalSnapshotService
-from .tidal_state_fetcher import TidalStateFetcher
+
+# Note: Removed re-exports from core modules to avoid circular imports.
+# Import directly from core modules instead:
+# - from tidal_cleanup.core.tidal import TidalService, TidalStateFetcher, etc.
+# - from tidal_cleanup.core.filesystem import FilesystemScanner, etc.
+# - from tidal_cleanup.core.sync import SyncDecisionEngine, etc.
 
 __all__ = [
     # Models
@@ -52,37 +38,8 @@ __all__ = [
     "PlaylistTrack",
     "SyncOperation",
     "SyncSnapshot",
-    # Core services
+    # Database service
     "DatabaseService",
-    "FileScannerService",
-    "FilesystemScanner",
-    # Sync state
-    "Change",
-    "ChangeType",
-    "SyncState",
-    "SyncStateComparator",
-    "TidalSnapshotService",
-    "TidalStateFetcher",
-    # Decision engine
-    "DecisionResult",
-    "SyncAction",
-    "SyncDecisionEngine",
-    "SyncDecisions",
-    # Deduplication
-    "DeduplicationLogic",
-    "DeduplicationResult",
-    "PrimaryFileDecision",
-    # Orchestration
-    "DownloadOrchestrator",
-    "ExecutionResult",
-    "SyncOrchestrator",
-    "SyncResult",
-    # Conflict resolution
-    "Conflict",
-    "ConflictType",
-    "ConflictResolution",
-    "ConflictResolver",
-    "ConflictResolutionResult",
     # Progress tracking
     "ProgressTracker",
     "ProgressPhase",
@@ -90,7 +47,7 @@ __all__ = [
     "ProgressCallback",
     "ConsoleProgressReporter",
     "TqdmProgressReporter",
-    # Status
+    # Status enums
     "DownloadStatus",
     "PlaylistSyncStatus",
     "TrackSyncStatus",

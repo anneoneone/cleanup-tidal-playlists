@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from ...config import Config
-from ...services.rekordbox_service import RekordboxService
+from ...core.rekordbox import RekordboxService
 
 logger = logging.getLogger(__name__)
 console = Console()

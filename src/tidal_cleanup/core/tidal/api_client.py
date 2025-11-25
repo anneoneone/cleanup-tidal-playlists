@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 import tidalapi
 from tidalapi.exceptions import AuthenticationError
 
-from ..database.models import Playlist, Track
+from ...models.models import Playlist, Track
 
 logger = logging.getLogger(__name__)
 

@@ -11,14 +11,14 @@ import click
 from rich.console import Console
 
 from ...config import Config
-from ...database import (
-    DatabaseService,
+from ...core.sync import (
     DownloadOrchestrator,
+    SyncAction,
     SyncDecisionEngine,
-    TidalStateFetcher,
+    SyncDecisions,
 )
-from ...database.sync_decision_engine import SyncAction, SyncDecisions
-from ...services import TidalDownloadService, TidalService
+from ...core.tidal import TidalDownloadService, TidalService, TidalStateFetcher
+from ...database import DatabaseService
 from ..display import display_download_results, filter_decisions_by_playlist
 from .legacy import TidalCleanupApp
 

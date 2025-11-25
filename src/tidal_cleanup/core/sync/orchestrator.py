@@ -14,14 +14,14 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Any, List
 
-from ..config import Config
-from ..services.tidal_download_service import TidalDownloadService
-from .deduplication_logic import DeduplicationLogic, DeduplicationResult
+from ...config import Config
+from ...database.service import DatabaseService
+from ..filesystem.scanner import FilesystemScanner, ScanStatistics
+from ..tidal.download_service import TidalDownloadService
+from ..tidal.state_fetcher import FetchStatistics, TidalStateFetcher
+from .decision_engine import SyncDecisionEngine, SyncDecisions
+from .deduplication import DeduplicationLogic, DeduplicationResult
 from .download_orchestrator import DownloadOrchestrator, ExecutionResult
-from .filesystem_scanner import FilesystemScanner, ScanStatistics
-from .service import DatabaseService
-from .sync_decision_engine import SyncDecisionEngine, SyncDecisions
-from .tidal_state_fetcher import FetchStatistics, TidalStateFetcher
 
 logger = logging.getLogger(__name__)
 

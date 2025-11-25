@@ -1,7 +1,7 @@
 """Rekordbox XML generation and database management service."""
 
 import logging
-import xml.etree.ElementTree as ET  # nosec B405 - XML generation only
+import xml.etree.ElementTree as ET  # noqa: S405
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,7 +17,7 @@ except ImportError:
     PYREKORDBOX_AVAILABLE = False
     Rekordbox6Database = None
 
-from .rekordbox_playlist_sync import RekordboxPlaylistSynchronizer
+from .playlist_sync import RekordboxPlaylistSynchronizer
 
 logger = logging.getLogger(__name__)
 
@@ -364,7 +364,8 @@ class RekordboxService:
         for key, converter in year_keys:
             if key in audio_file:
                 with suppress(ValueError, IndexError):
-                    metadata["ReleaseYear"] = converter(audio_file[key][0])
+                    val = audio_file[key][0]
+                    metadata["ReleaseYear"] = converter(val)  # type: ignore
                     break
 
         # Track number
@@ -408,7 +409,8 @@ class RekordboxService:
         for key, converter in bpm_keys:
             if key in audio_file:
                 with suppress(ValueError, IndexError, TypeError):
-                    metadata["BPM"] = converter(audio_file[key][0])
+                    val = audio_file[key][0]
+                    metadata["BPM"] = converter(val)  # type: ignore
                     break
 
         # Comments - collect all available info including artist/album
@@ -481,7 +483,8 @@ class RekordboxService:
         for key, converter in year_keys:
             if key in audio_file:
                 with suppress(ValueError, IndexError):
-                    metadata["ReleaseYear"] = converter(audio_file[key][0])
+                    val = audio_file[key][0]
+                    metadata["ReleaseYear"] = converter(val)  # type: ignore
                     break
 
         # Track number
@@ -525,7 +528,8 @@ class RekordboxService:
         for key, converter in bpm_keys:
             if key in audio_file:
                 with suppress(ValueError, IndexError, TypeError):
-                    metadata["BPM"] = converter(audio_file[key][0])
+                    val = audio_file[key][0]
+                    metadata["BPM"] = converter(val)  # type: ignore
                     break
 
     def _extract_additional_metadata(
