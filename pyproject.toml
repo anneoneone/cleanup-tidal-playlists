@@ -160,6 +160,18 @@ disallow_any_generics = false
 disallow_subclassing_any = false
 
 [[tool.mypy.overrides]]
+module = [
+    "tidal_cleanup.core.tidal.*",
+    "tidal_cleanup.core.rekordbox.playlist_sync",
+    "tidal_cleanup.core.rekordbox.service",
+    "tidal_cleanup.core.filesystem.file_scanner",
+    "tidal_cleanup.legacy.file_service",
+]
+# Allow untyped calls to third-party libraries without type stubs
+warn_return_any = false
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
 module = ["src.tidal_cleanup.services.*", "tidal_cleanup.services.*"]
 disallow_untyped_calls = false
 # Suppress attr-defined errors for third-party library imports
