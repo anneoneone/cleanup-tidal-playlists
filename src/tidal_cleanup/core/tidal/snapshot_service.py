@@ -3,11 +3,11 @@
 import logging
 from typing import TYPE_CHECKING, Any, Dict
 
-from .service import DatabaseService
-from .sync_state import Change, ChangeType, SyncState, SyncStateComparator
+from ...database.service import DatabaseService
+from ..sync.state import Change, ChangeType, SyncState, SyncStateComparator
 
 if TYPE_CHECKING:
-    from ..services.tidal_service import TidalService
+    from .api_client import TidalService
 
 logger = logging.getLogger(__name__)
 

@@ -13,8 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from tidal_cleanup.database.models import DownloadStatus
-from tidal_cleanup.database.service import DatabaseService
+from ...database.models import DownloadStatus
+from ...database.service import DatabaseService
 
 logger = logging.getLogger(__name__)
 

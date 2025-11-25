@@ -4,13 +4,13 @@ from datetime import datetime
 
 import pytest
 
-from tidal_cleanup.database import (
+from tidal_cleanup.core.sync.state import (
     Change,
     ChangeType,
-    DatabaseService,
     SyncState,
     SyncStateComparator,
 )
+from tidal_cleanup.database import DatabaseService
 
 
 @pytest.fixture

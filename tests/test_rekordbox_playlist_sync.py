@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.tidal_cleanup.services.rekordbox_playlist_sync import (
+from tidal_cleanup.core.rekordbox.playlist_sync import (
     RekordboxPlaylistSynchronizer,
 )
 
@@ -31,12 +31,12 @@ def synchronizer(mock_db, tmp_path):
     emoji_config.write_text("genre:\n  🎷: Jazz\n", encoding="utf-8")
 
     with patch(
-        "src.tidal_cleanup.services.rekordbox_playlist_sync." "PYREKORDBOX_AVAILABLE",
+        "tidal_cleanup.core.rekordbox.playlist_sync." "PYREKORDBOX_AVAILABLE",
         True,
     ), patch(
-        "src.tidal_cleanup.services.rekordbox_playlist_sync.MyTagManager"
+        "tidal_cleanup.core.rekordbox.playlist_sync.MyTagManager"
     ) as mock_mgr_class, patch(
-        "src.tidal_cleanup.services.rekordbox_playlist_sync.PlaylistNameParser"
+        "tidal_cleanup.core.rekordbox.playlist_sync.PlaylistNameParser"
     ) as mock_parser_class:
         mock_mgr_class.return_value = Mock()
         mock_parser_class.return_value = Mock()
@@ -51,8 +51,7 @@ class TestRekordboxPlaylistSynchronizer:
     def test_init_requires_pyrekordbox(self, mock_db, tmp_path):
         """Test initialization fails without pyrekordbox."""
         with patch(
-            "src.tidal_cleanup.services.rekordbox_playlist_sync."
-            "PYREKORDBOX_AVAILABLE",
+            "tidal_cleanup.core.rekordbox.playlist_sync." "PYREKORDBOX_AVAILABLE",
             False,
         ), pytest.raises(RuntimeError, match="pyrekordbox is not available"):
             RekordboxPlaylistSynchronizer(

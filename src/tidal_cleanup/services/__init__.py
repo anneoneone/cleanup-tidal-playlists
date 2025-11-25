@@ -1,12 +1,29 @@
-"""Services for the Tidal cleanup application."""
+"""Services for the Tidal cleanup application.
 
-from .directory_diff_service import DirectoryDiff, DirectoryDiffService, FileIdentity
-from .file_service import FileOperationError, FileService
-from .playlist_synchronizer import DeletionMode, PlaylistSynchronizer
-from .rekordbox_service import RekordboxGenerationError, RekordboxService
-from .tidal_download_service import TidalDownloadError, TidalDownloadService
-from .tidal_service import TidalConnectionError, TidalService
-from .track_comparison_service import TrackComparisonService
+DEPRECATED: This module is kept for backward compatibility only.
+All services have been reorganized:
+- Active services → core.tidal, core.rekordbox
+- Legacy services → legacy module
+"""
+
+# Re-export from new locations for backward compatibility
+from ..core.rekordbox import RekordboxGenerationError, RekordboxService
+from ..core.tidal import (
+    TidalConnectionError,
+    TidalDownloadError,
+    TidalDownloadService,
+    TidalService,
+)
+from ..legacy import (
+    DeletionMode,
+    DirectoryDiff,
+    DirectoryDiffService,
+    FileIdentity,
+    FileOperationError,
+    FileService,
+    PlaylistSynchronizer,
+    TrackComparisonService,
+)
 
 __all__ = [
     "TidalService",

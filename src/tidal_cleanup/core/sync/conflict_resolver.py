@@ -16,8 +16,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .service import DatabaseService
-from .sync_decision_engine import DecisionResult, SyncAction
+from ...database.service import DatabaseService
+from .decision_engine import DecisionResult, SyncAction
 
 logger = logging.getLogger(__name__)
 

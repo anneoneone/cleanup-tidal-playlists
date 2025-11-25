@@ -5,12 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from tidal_cleanup.database import (
-    DatabaseService,
-    DownloadStatus,
-    PlaylistSyncStatus,
-)
-from tidal_cleanup.database.tidal_state_fetcher import TidalStateFetcher
+from tidal_cleanup.core.tidal.state_fetcher import TidalStateFetcher
+from tidal_cleanup.database import DatabaseService, DownloadStatus, PlaylistSyncStatus
 
 
 @pytest.fixture

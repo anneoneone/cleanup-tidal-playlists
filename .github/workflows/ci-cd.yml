@@ -50,7 +50,7 @@ jobs:
         run: flake8 src/ tests/
 
       - name: Run mypy (type checking)
-        run: mypy --package tidal_cleanup --config-file=pyproject.toml
+        run: mypy src/tidal_cleanup
 
       - name: Run bandit (security linting)
         run: bandit -r src/ -f json -o bandit-report.json || true

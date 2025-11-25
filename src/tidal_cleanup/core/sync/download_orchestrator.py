@@ -11,16 +11,20 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Dict, List
 
-from ..services.tidal_download_service import (
+from ...database.models import DownloadStatus, Track
+from ...database.progress_tracker import (
+    ProgressCallback,
+    ProgressPhase,
+    ProgressTracker,
+)
+from ...database.service import DatabaseService
+from ..tidal.download_service import (
     TidalDownloadError,
     TidalDownloadService,
 )
 from .conflict_resolver import ConflictResolver
-from .deduplication_logic import DeduplicationLogic
-from .models import DownloadStatus, Track
-from .progress_tracker import ProgressCallback, ProgressPhase, ProgressTracker
-from .service import DatabaseService
-from .sync_decision_engine import DecisionResult, SyncAction, SyncDecisions
+from .decision_engine import DecisionResult, SyncAction, SyncDecisions
+from .deduplication import DeduplicationLogic
 
 logger = logging.getLogger(__name__)
 
@@ -564,7 +568,7 @@ class DownloadOrchestrator:
             symlink_path: New symlink path or None
             symlink_valid: Whether symlink is valid or None
         """
-        from .models import PlaylistTrack
+        from ...database.models import PlaylistTrack
 
         with self.db_service.get_session() as session:
             pt = session.get(PlaylistTrack, playlist_track_id)
@@ -603,9 +607,9 @@ class DownloadOrchestrator:
             playlists = self.db_service.get_all_playlists()
         else:
             playlists = [
-                self.db_service.get_playlist_by_id(pid)
+                pl
                 for pid in playlist_ids
-                if self.db_service.get_playlist_by_id(pid)
+                if (pl := self.db_service.get_playlist_by_id(pid)) is not None
             ]
 
         created = 0

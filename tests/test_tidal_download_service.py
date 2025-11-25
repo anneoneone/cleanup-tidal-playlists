@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from src.tidal_cleanup.config import Config
-from src.tidal_cleanup.services.tidal_download_service import (
+from tidal_cleanup.config import Config
+from tidal_cleanup.core.tidal.download_service import (
     TidalDownloadError,
     TidalDownloadService,
 )
@@ -48,7 +48,7 @@ class TestTidalDownloadService:
         # The actual values depend on whether config files exist,
         # so we just verify the settings object is properly created
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_connect_with_existing_token(self, mock_tidal_dl, download_service):
         """Test connection with existing valid token."""
         mock_instance = Mock()
@@ -60,7 +60,7 @@ class TestTidalDownloadService:
         assert download_service.is_authenticated()
         mock_instance.login_token.assert_called_once()
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_connect_without_token(self, mock_tidal_dl, download_service):
         """Test connection requiring interactive login."""
         mock_instance = Mock()
@@ -74,7 +74,7 @@ class TestTidalDownloadService:
         mock_instance.login_token.assert_called_once()
         mock_instance.login.assert_called_once()
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_connect_failure(self, mock_tidal_dl, download_service):
         """Test connection failure."""
         mock_instance = Mock()
@@ -92,8 +92,8 @@ class TestTidalDownloadService:
         with pytest.raises(TidalDownloadError, match="Not authenticated"):
             download_service.download_playlist("Test Playlist")
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
-    @patch("src.tidal_cleanup.services.tidal_download_service.Download")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.Download")
     def test_download_playlist_success(
         self, mock_download, mock_tidal_dl, download_service, mock_config
     ):
@@ -137,7 +137,7 @@ class TestTidalDownloadService:
         # Verify items() was called once for the playlist download
         assert mock_dl_instance.items.call_count == 1
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_download_playlist_not_found(self, mock_tidal_dl, download_service):
         """Test download fails when playlist not found."""
         # Setup mocks
@@ -158,8 +158,8 @@ class TestTidalDownloadService:
         with pytest.raises(TidalDownloadError, match="not found"):
             download_service.download_playlist("Test Playlist")
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
-    @patch("src.tidal_cleanup.services.tidal_download_service.Download")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.Download")
     def test_download_all_playlists(
         self, mock_download, mock_tidal_dl, download_service, mock_config
     ):
@@ -201,7 +201,7 @@ class TestTidalDownloadService:
 class TestRetryLogic:
     """Test retry logic for API calls."""
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_retry_api_call_success_first_attempt(
         self, mock_tidal_dl, download_service
     ):
@@ -211,8 +211,8 @@ class TestRetryLogic:
         assert result == "success"
         assert mock_func.call_count == 1
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
-    @patch("src.tidal_cleanup.services.tidal_download_service.time.sleep")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.time.sleep")
     def test_retry_api_call_success_after_retry(
         self, mock_sleep, mock_tidal_dl, download_service
     ):
@@ -230,8 +230,8 @@ class TestRetryLogic:
         assert mock_func.call_count == 3
         assert mock_sleep.call_count == 2  # Slept twice before success
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
-    @patch("src.tidal_cleanup.services.tidal_download_service.time.sleep")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.time.sleep")
     def test_retry_api_call_exhausted_retries(
         self, mock_sleep, mock_tidal_dl, download_service
     ):
@@ -248,7 +248,7 @@ class TestRetryLogic:
         assert mock_func.call_count == 3  # Initial + 2 retries
         assert mock_sleep.call_count == 2
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_retry_api_call_non_retryable_error(self, mock_tidal_dl, download_service):
         """Test non-5xx errors are not retried."""
         mock_response = Mock()
@@ -262,7 +262,7 @@ class TestRetryLogic:
 
         assert mock_func.call_count == 1  # No retries for 4xx
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_retry_api_call_generic_exception(self, mock_tidal_dl, download_service):
         """Test generic exceptions are not retried."""
         mock_func = Mock(side_effect=ValueError("test error"))
@@ -287,7 +287,7 @@ class TestConfigLoading:
     def test_create_settings_returns_none_when_not_installed(self, mock_config):
         """Test settings creation when tidal-dl-ng is not installed."""
         with patch(
-            "src.tidal_cleanup.services.tidal_download_service.TidalDLSettings",
+            "tidal_cleanup.core.tidal.download_service.TidalDLSettings",
             None,
         ):
             service = TidalDownloadService(mock_config)
@@ -298,8 +298,8 @@ class TestConfigLoading:
 class TestDownloadEdgeCases:
     """Test edge cases in download methods."""
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
-    @patch("src.tidal_cleanup.services.tidal_download_service.Download")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.Download")
     def test_download_playlist_with_slash_in_name(
         self, mock_download, mock_tidal_dl, download_service, mock_config
     ):
@@ -328,7 +328,7 @@ class TestDownloadEdgeCases:
         expected_dir = mock_config.m4a_directory / "Playlists" / "2025-11 Tech House"
         assert playlist_dir == expected_dir
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_download_all_playlists_partial_failure(
         self, mock_tidal_dl, download_service, mock_config
     ):
@@ -366,7 +366,7 @@ class TestDownloadEdgeCases:
         # Should have one successful download despite one failure
         assert len(result) == 1
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
     def test_download_all_playlists_not_authenticated(
         self, mock_tidal_dl, download_service
     ):
@@ -374,8 +374,8 @@ class TestDownloadEdgeCases:
         with pytest.raises(TidalDownloadError, match="Not authenticated"):
             download_service.download_all_playlists()
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
-    @patch("src.tidal_cleanup.services.tidal_download_service.Download")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.Download")
     def test_download_playlist_without_creating_directory(
         self, mock_download, mock_tidal_dl, download_service, mock_config
     ):
@@ -410,8 +410,8 @@ class TestDownloadEdgeCases:
         assert playlist_dir == expected_dir
         assert playlist_dir.exists()
 
-    @patch("src.tidal_cleanup.services.tidal_download_service.TidalDL")
-    @patch("src.tidal_cleanup.services.tidal_download_service.Download")
+    @patch("tidal_cleanup.core.tidal.download_service.TidalDL")
+    @patch("tidal_cleanup.core.tidal.download_service.Download")
     def test_download_playlist_tracks_raises_on_error(
         self, mock_download, mock_tidal_dl, download_service, mock_config
     ):
@@ -447,7 +447,7 @@ class TestLoggerAdapter:
         """Test debug logging."""
         import logging
 
-        from src.tidal_cleanup.services.tidal_download_service import _LoggerAdapter
+        from tidal_cleanup.core.tidal.download_service import _LoggerAdapter
 
         mock_logger = Mock(spec=logging.Logger)
         adapter = _LoggerAdapter(mock_logger)
@@ -459,7 +459,7 @@ class TestLoggerAdapter:
         """Test info logging."""
         import logging
 
-        from src.tidal_cleanup.services.tidal_download_service import _LoggerAdapter
+        from tidal_cleanup.core.tidal.download_service import _LoggerAdapter
 
         mock_logger = Mock(spec=logging.Logger)
         adapter = _LoggerAdapter(mock_logger)
@@ -471,7 +471,7 @@ class TestLoggerAdapter:
         """Test warning logging."""
         import logging
 
-        from src.tidal_cleanup.services.tidal_download_service import _LoggerAdapter
+        from tidal_cleanup.core.tidal.download_service import _LoggerAdapter
 
         mock_logger = Mock(spec=logging.Logger)
         adapter = _LoggerAdapter(mock_logger)
@@ -483,7 +483,7 @@ class TestLoggerAdapter:
         """Test error logging."""
         import logging
 
-        from src.tidal_cleanup.services.tidal_download_service import _LoggerAdapter
+        from tidal_cleanup.core.tidal.download_service import _LoggerAdapter
 
         mock_logger = Mock(spec=logging.Logger)
         adapter = _LoggerAdapter(mock_logger)
@@ -495,7 +495,7 @@ class TestLoggerAdapter:
         """Test exception logging."""
         import logging
 
-        from src.tidal_cleanup.services.tidal_download_service import _LoggerAdapter
+        from tidal_cleanup.core.tidal.download_service import _LoggerAdapter
 
         mock_logger = Mock(spec=logging.Logger)
         adapter = _LoggerAdapter(mock_logger)

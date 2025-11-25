@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tidal_cleanup.database.filesystem_scanner import FilesystemScanner
+from tidal_cleanup.core.filesystem.scanner import FilesystemScanner
 from tidal_cleanup.database.models import (
     DownloadStatus,
     Playlist,

@@ -4,9 +4,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.tidal_cleanup.config import Config
-from src.tidal_cleanup.models.models import Playlist, Track
-from src.tidal_cleanup.services.track_comparison_service import TrackComparisonService
+from tidal_cleanup.config import Config
+from tidal_cleanup.legacy.track_comparison import TrackComparisonService
+from tidal_cleanup.models.models import Playlist, Track
 
 
 class TestConfig:
@@ -119,10 +119,10 @@ def mock_tidal_session():
 class TestTidalService:
     """Test Tidal service integration."""
 
-    @patch("src.tidal_cleanup.services.tidal_service.tidalapi.Session")
+    @patch("tidal_cleanup.core.tidal.api_client.tidalapi.Session")
     def test_connection_success(self, mock_session_class, tmp_path):
         """Test successful Tidal connection."""
-        from src.tidal_cleanup.services.tidal_service import TidalService
+        from tidal_cleanup.core.tidal.api_client import TidalService
 
         # Create a temporary token file
         token_file = tmp_path / "token.json"

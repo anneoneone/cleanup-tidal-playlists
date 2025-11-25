@@ -18,7 +18,7 @@ except ImportError:
     TidalDL = None
     Download = None
 
-from ..config import Config
+from ...config import Config
 
 logger = logging.getLogger(__name__)
 

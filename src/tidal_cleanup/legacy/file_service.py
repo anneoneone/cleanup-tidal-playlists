@@ -1,7 +1,7 @@
 """File operations service for audio file management and conversion."""
 
 import logging
-import subprocess  # nosec B404
+import subprocess  # noqa: S404
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -9,7 +9,7 @@ from mutagen import File as MutagenFile
 from mutagen.mp3 import HeaderNotFoundError
 
 from ..models.models import ConversionJob, FileInfo, Track
-from .directory_diff_service import DirectoryDiffService, FileIdentity
+from .directory_diff import DirectoryDiffService, FileIdentity
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +279,7 @@ class FileService:
         """
         cmd = self._build_ffmpeg_command(source_path, target_path, quality)
 
-        subprocess.run(  # nosec B603
+        subprocess.run(  # noqa: S603
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,

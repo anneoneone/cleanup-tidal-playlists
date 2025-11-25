@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from tidal_cleanup.database import DatabaseService, DeduplicationLogic
+from tidal_cleanup.core.sync.deduplication import DeduplicationLogic
+from tidal_cleanup.database import DatabaseService
 
 
 # Helper functions (reuse from other tests)
@@ -328,7 +329,7 @@ class TestDeduplicationResultDataclass:
 
     def test_add_decision_updates_stats(self):
         """Test that adding decisions updates statistics."""
-        from tidal_cleanup.database.deduplication_logic import (
+        from tidal_cleanup.core.sync.deduplication import (
             DeduplicationResult,
             PrimaryFileDecision,
         )
@@ -360,7 +361,7 @@ class TestDeduplicationResultDataclass:
 
     def test_get_summary(self):
         """Test getting summary statistics."""
-        from tidal_cleanup.database.deduplication_logic import DeduplicationResult
+        from tidal_cleanup.core.sync.deduplication import DeduplicationResult
 
         result = DeduplicationResult()
         result.tracks_analyzed = 10

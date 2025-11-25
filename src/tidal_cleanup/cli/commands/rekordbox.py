@@ -1,4 +1,8 @@
-"""Command-line interface for Rekordbox playlist management."""
+"""Rekordbox playlist synchronization command.
+
+This module contains the rekordbox command that syncs MP3 playlist directories with the
+Rekordbox database, managing MyTags based on emoji patterns.
+"""
 
 import logging
 from pathlib import Path
@@ -8,15 +12,14 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from ..config import Config
-from ..services.rekordbox_service import RekordboxService
-from ..utils.logging_config import setup_logging
+from ...config import Config
+from ...core.rekordbox import RekordboxService
 
 logger = logging.getLogger(__name__)
 console = Console()
 
 
-@click.command()
+@click.command("rekordbox")
 @click.argument("playlist_name", type=str)
 @click.option(
     "--emoji-config",
@@ -24,7 +27,7 @@ console = Console()
     help="Path to emoji-to-MyTag mapping config (uses default if not specified)",
 )
 @click.pass_context
-def sync_playlist(
+def rekordbox(
     ctx: click.Context,
     playlist_name: str,
     emoji_config: Optional[Path],
@@ -50,9 +53,6 @@ def sync_playlist(
 
     PLAYLIST_NAME: Exact name of the playlist folder in your MP3 directory
     """
-    # Setup logging
-    setup_logging()
-
     config = Config()
 
     try:
@@ -105,7 +105,3 @@ def _display_sync_results(result: dict[str, Any]) -> None:
 
     console.print(table)
     console.print()
-
-
-if __name__ == "__main__":
-    sync_playlist()

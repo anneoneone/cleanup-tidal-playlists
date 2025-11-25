@@ -5,19 +5,20 @@ from unittest.mock import Mock, patch
 import pytest
 
 from tidal_cleanup.config import Config
-from tidal_cleanup.database import DatabaseService, SyncOrchestrator, SyncResult
-from tidal_cleanup.database.deduplication_logic import (
-    DeduplicationResult,
-    PrimaryFileDecision,
-)
-from tidal_cleanup.database.download_orchestrator import ExecutionResult
-from tidal_cleanup.database.filesystem_scanner import ScanStatistics
-from tidal_cleanup.database.sync_decision_engine import (
+from tidal_cleanup.core.filesystem.scanner import ScanStatistics
+from tidal_cleanup.core.sync.decision_engine import (
     DecisionResult,
     SyncAction,
     SyncDecisions,
 )
-from tidal_cleanup.database.tidal_state_fetcher import FetchStatistics
+from tidal_cleanup.core.sync.deduplication import (
+    DeduplicationResult,
+    PrimaryFileDecision,
+)
+from tidal_cleanup.core.sync.download_orchestrator import ExecutionResult
+from tidal_cleanup.core.sync.orchestrator import SyncOrchestrator, SyncResult
+from tidal_cleanup.core.tidal.state_fetcher import FetchStatistics
+from tidal_cleanup.database import DatabaseService
 
 
 @pytest.fixture

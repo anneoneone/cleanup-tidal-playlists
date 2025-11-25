@@ -7,18 +7,18 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from tidal_cleanup.database.deduplication_logic import DeduplicationLogic
-from tidal_cleanup.database.download_orchestrator import (
+from tidal_cleanup.core.sync.decision_engine import (
+    DecisionResult,
+    SyncAction,
+    SyncDecisions,
+)
+from tidal_cleanup.core.sync.deduplication import DeduplicationLogic
+from tidal_cleanup.core.sync.download_orchestrator import (
     DownloadOrchestrator,
     ExecutionResult,
 )
 from tidal_cleanup.database.models import DownloadStatus, Playlist, PlaylistTrack, Track
 from tidal_cleanup.database.service import DatabaseService
-from tidal_cleanup.database.sync_decision_engine import (
-    DecisionResult,
-    SyncAction,
-    SyncDecisions,
-)
 
 
 @pytest.fixture
@@ -370,7 +370,7 @@ class TestExecuteDownload:
         self, mock_db_service, temp_music_root
     ):
         """Test download execution when TidalDownloadService fails."""
-        from tidal_cleanup.services.tidal_download_service import TidalDownloadError
+        from tidal_cleanup.core.tidal.download_service import TidalDownloadError
 
         track = Track(id=1, tidal_id=123, title="Test Track")
         mock_db_service.get_track_by_id.return_value = track

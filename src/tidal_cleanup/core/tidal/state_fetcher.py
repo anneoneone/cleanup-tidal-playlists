@@ -11,13 +11,13 @@ from dataclasses import field as dataclass_field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from tidal_cleanup.database.models import (
+from ...database.models import (
     DownloadStatus,
     Playlist,
     PlaylistSyncStatus,
     Track,
 )
-from tidal_cleanup.database.service import DatabaseService
+from ...database.service import DatabaseService
 
 logger = logging.getLogger(__name__)
 

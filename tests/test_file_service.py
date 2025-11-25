@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 import pytest
 
+from tidal_cleanup.legacy.directory_diff import FileIdentity
+from tidal_cleanup.legacy.file_service import FileService
 from tidal_cleanup.models.models import ConversionJob
-from tidal_cleanup.services.directory_diff_service import FileIdentity
-from tidal_cleanup.services.file_service import FileService
 
 
 @pytest.fixture
@@ -788,7 +788,7 @@ class TestCreateTrackFromFile:
         )
 
         # Mock the Track constructor to raise an exception
-        with patch("tidal_cleanup.services.file_service.Track") as mock_track:
+        with patch("tidal_cleanup.legacy.file_service.Track") as mock_track:
             mock_track.side_effect = ValueError("Simulated track creation error")
 
             track = file_service.create_track_from_file(file_info)
@@ -3428,7 +3428,7 @@ Stack trace:
 
     def test_convert_audio_validates_paths(self, file_service, temp_dirs):
         """Test that convert_audio validates paths."""
-        from tidal_cleanup.services.file_service import FileOperationError
+        from tidal_cleanup.legacy.file_service import FileOperationError
 
         source_dir, target_dir = temp_dirs
 
@@ -3441,7 +3441,7 @@ Stack trace:
 
     def test_convert_audio_validates_quality(self, file_service, temp_dirs):
         """Test that convert_audio validates quality parameter."""
-        from tidal_cleanup.services.file_service import FileOperationError
+        from tidal_cleanup.legacy.file_service import FileOperationError
 
         source_dir, target_dir = temp_dirs
 

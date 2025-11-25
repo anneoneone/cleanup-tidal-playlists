@@ -5,12 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from tidal_cleanup.database import (
-    DatabaseService,
-    DownloadStatus,
-    SyncAction,
-    SyncDecisionEngine,
-)
+from tidal_cleanup.core.sync.decision_engine import SyncAction, SyncDecisionEngine
+from tidal_cleanup.database import DatabaseService, DownloadStatus
 
 
 # Helper functions
@@ -502,7 +498,7 @@ class TestSyncDecisionsDataclass:
 
     def test_add_decision_updates_statistics(self, db_service, music_root):
         """Test that adding decisions updates statistics correctly."""
-        from tidal_cleanup.database.sync_decision_engine import (
+        from tidal_cleanup.core.sync.decision_engine import (
             DecisionResult,
             SyncDecisions,
         )
@@ -537,7 +533,7 @@ class TestSyncDecisionsDataclass:
 
     def test_get_summary(self):
         """Test getting summary statistics."""
-        from tidal_cleanup.database.sync_decision_engine import (
+        from tidal_cleanup.core.sync.decision_engine import (
             DecisionResult,
             SyncDecisions,
         )

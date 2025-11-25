@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.tidal_cleanup.services.mytag_manager import MyTagManager
+from tidal_cleanup.core.rekordbox.mytag_manager import MyTagManager
 
 
 @pytest.fixture
@@ -22,8 +22,8 @@ def mock_db():
 def mytag_manager(mock_db):
     """Create MyTagManager instance with mocked database."""
     with patch(
-        "src.tidal_cleanup.services.mytag_manager.PYREKORDBOX_AVAILABLE", True
-    ), patch("src.tidal_cleanup.services.mytag_manager.db6") as mock_db6:
+        "tidal_cleanup.core.rekordbox.mytag_manager.PYREKORDBOX_AVAILABLE", True
+    ), patch("tidal_cleanup.core.rekordbox.mytag_manager.db6") as mock_db6:
         # Mock the db6 module
         mock_db6.DjmdMyTag = Mock
         manager = MyTagManager(mock_db)
@@ -36,7 +36,7 @@ class TestMyTagManager:
     def test_init_requires_pyrekordbox(self, mock_db):
         """Test initialization fails without pyrekordbox."""
         with patch(
-            "src.tidal_cleanup.services.mytag_manager.PYREKORDBOX_AVAILABLE", False
+            "tidal_cleanup.core.rekordbox.mytag_manager.PYREKORDBOX_AVAILABLE", False
         ), pytest.raises(RuntimeError, match="pyrekordbox is not available"):
             MyTagManager(mock_db)
 
@@ -76,7 +76,7 @@ class TestMyTagManager:
         mock_db.generate_unused_id = Mock(return_value="group456")
 
         # Mock new group creation
-        with patch("src.tidal_cleanup.services.mytag_manager.db6") as mock_db6:
+        with patch("tidal_cleanup.core.rekordbox.mytag_manager.db6") as mock_db6:
             mock_new_group = Mock()
             mock_new_group.Name = "Party"
             mock_new_group.ID = "group456"
@@ -125,7 +125,7 @@ class TestMyTagManager:
             mock_tag2_query,
         ]
 
-        with patch("src.tidal_cleanup.services.mytag_manager.db6") as mock_db6:
+        with patch("tidal_cleanup.core.rekordbox.mytag_manager.db6") as mock_db6:
             mock_db6.DjmdSongMyTag.ContentID = "ContentID"
             mock_db6.DjmdMyTag.ID = "ID"
 
@@ -193,7 +193,7 @@ class TestMyTagManager:
         mock_db.generate_unused_id = Mock(return_value="tag999")
 
         # Mock new tag
-        with patch("src.tidal_cleanup.services.mytag_manager.db6") as mock_db6:
+        with patch("tidal_cleanup.core.rekordbox.mytag_manager.db6") as mock_db6:
             mock_new_tag = Mock()
             mock_new_tag.Name = "Techno"
             mock_new_tag.ID = "tag999"
@@ -226,7 +226,7 @@ class TestMyTagManager:
         mock_db.generate_unused_id = Mock(side_effect=["rel1", "rel2"])
 
         # Mock relationship creation
-        with patch("src.tidal_cleanup.services.mytag_manager.db6") as mock_db6:
+        with patch("tidal_cleanup.core.rekordbox.mytag_manager.db6") as mock_db6:
             mock_rel = Mock()
             mock_db6.DjmdSongMyTag.return_value = mock_rel
 
@@ -318,7 +318,7 @@ class TestMyTagManager:
             mock_tag2_query,
         ]
 
-        with patch("src.tidal_cleanup.services.mytag_manager.db6") as mock_db6:
+        with patch("tidal_cleanup.core.rekordbox.mytag_manager.db6") as mock_db6:
             mock_db6.DjmdSongMyTag.ContentID = "ContentID"
             mock_db6.DjmdMyTag.ID = "ID"
 

@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from tidal_cleanup.core.filesystem.file_scanner import FileScannerService
 from tidal_cleanup.database import DatabaseService
-from tidal_cleanup.database.file_scanner_service import FileScannerService
 
 
 # Helper functions
@@ -426,7 +426,7 @@ class TestExtractFileMetadata:
         }
         mock_audio.info.length = 180.5
 
-        with patch("tidal_cleanup.database.file_scanner_service.MutagenFile") as mock:
+        with patch("tidal_cleanup.core.filesystem.file_scanner.MutagenFile") as mock:
             mock.return_value = mock_audio
             metadata = scanner._extract_file_metadata(file_path)
 
@@ -441,7 +441,7 @@ class TestExtractFileMetadata:
         """Test when mutagen returns None."""
         file_path = temp_dir / "song.mp3"
 
-        with patch("tidal_cleanup.database.file_scanner_service.MutagenFile") as mock:
+        with patch("tidal_cleanup.core.filesystem.file_scanner.MutagenFile") as mock:
             mock.return_value = None
             metadata = scanner._extract_file_metadata(file_path)
 
@@ -451,7 +451,7 @@ class TestExtractFileMetadata:
         """Test exception handling during metadata extraction."""
         file_path = temp_dir / "song.mp3"
 
-        with patch("tidal_cleanup.database.file_scanner_service.MutagenFile") as mock:
+        with patch("tidal_cleanup.core.filesystem.file_scanner.MutagenFile") as mock:
             mock.side_effect = Exception("Read error")
             metadata = scanner._extract_file_metadata(file_path)
 
