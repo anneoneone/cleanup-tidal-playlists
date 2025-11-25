@@ -8,7 +8,17 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-class ColoredFormatter(logging.Formatter):
+class LocationFormatter(logging.Formatter):
+    """Base formatter that adds a combined location field."""
+
+    def format(self, record: Any) -> str:
+        """Format log record with combined location field."""
+        # Add combined location field
+        record.location = f"{record.filename}:{record.lineno}"
+        return super().format(record)
+
+
+class ColoredFormatter(LocationFormatter):
     """Colored log formatter for console output."""
 
     # Color codes
@@ -26,8 +36,11 @@ class ColoredFormatter(logging.Formatter):
         log_color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
         reset_color = self.COLORS["RESET"]
 
-        # Add color to level name
-        record.levelname = f"{log_color}{record.levelname}{reset_color}"
+        # Store original levelname for padding calculation
+        original_levelname = record.levelname
+
+        # Add color to level name with proper padding applied before colors
+        record.levelname = f"{log_color}{original_levelname:<8}{reset_color}"
 
         return super().format(record)
 
@@ -67,7 +80,7 @@ def setup_logging(
         console_handler.setLevel(numeric_level)
 
         console_formatter = ColoredFormatter(
-            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            fmt=("%(asctime)s - %(location)-30s - " "%(levelname)s - %(message)s"),
             datefmt="%H:%M:%S",
         )
         console_handler.setFormatter(console_formatter)
@@ -84,8 +97,8 @@ def setup_logging(
         )
         file_handler.setLevel(numeric_level)
 
-        file_formatter = logging.Formatter(
-            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        file_formatter = LocationFormatter(
+            fmt=("%(asctime)s - %(location)-30s - " "%(levelname)-8s - %(message)s"),
             datefmt="%Y-%m-%d %H:%M:%S",
         )
         file_handler.setFormatter(file_formatter)
@@ -93,9 +106,9 @@ def setup_logging(
 
     # Log initial message
     logger = logging.getLogger(__name__)
-    logger.info(f"Logging initialized - Level: {log_level}")
+    logger.info("Logging initialized - Level: %s", log_level)
     if log_file:
-        logger.info(f"Log file: {log_file}")
+        logger.info("Log file: %s", log_file)
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -135,7 +148,7 @@ def set_log_level(level: str) -> None:
         handler.setLevel(numeric_level)
 
     logger = logging.getLogger(__name__)
-    logger.info(f"Log level changed to: {level}")
+    logger.info("Log level changed to: %s", level)
 
 
 # Silence noisy third-party loggers

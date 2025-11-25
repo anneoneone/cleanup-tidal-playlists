@@ -125,14 +125,14 @@ class FileService:
                         file_info = self._create_file_info(file_path)
                         audio_files.append(file_info)
                     except Exception as e:
-                        logger.warning(f"Failed to process {file_path}: {e}")
+                        logger.warning("Failed to process %s: %s", file_path, e)
                         continue
 
-            logger.info(f"Found {len(audio_files)} audio files in {directory}")
+            logger.info("Found %d audio files in %s", len(audio_files), directory)
             return audio_files
 
         except Exception as e:
-            logger.error(f"Failed to scan directory {directory}: {e}")
+            logger.error("Failed to scan directory %s: %s", directory, e)
             raise FileOperationError(f"Cannot scan directory: {e}")
 
     def _create_file_info(self, file_path: Path) -> FileInfo:
@@ -163,7 +163,7 @@ class FileService:
                         bitrate = getattr(audio_file.info, "bitrate", None)
                         sample_rate = getattr(audio_file.info, "sample_rate", None)
             except (HeaderNotFoundError, Exception) as e:
-                logger.warning(f"Cannot read metadata for {file_path}: {e}")
+                logger.warning("Cannot read metadata for %s: %s", file_path, e)
 
             return FileInfo(
                 path=file_path,
@@ -177,7 +177,7 @@ class FileService:
             )
 
         except Exception as e:
-            logger.error(f"Failed to create FileInfo for {file_path}: {e}")
+            logger.error("Failed to create FileInfo for %s: %s", file_path, e)
             raise FileOperationError(f"Cannot create FileInfo: {e}")
 
     def get_track_names(self, directory: Path) -> Set[str]:
@@ -193,7 +193,7 @@ class FileService:
             file_infos = self.scan_directory(directory)
             return {info.stem.lower() for info in file_infos}
         except Exception as e:
-            logger.error(f"Failed to get track names from {directory}: {e}")
+            logger.error("Failed to get track names from %s: %s", directory, e)
             return set()
 
     def get_tracks_with_metadata(self, directory: Path) -> List[Track]:
@@ -238,7 +238,7 @@ class FileService:
 
             return tracks
         except Exception as e:
-            logger.error(f"Failed to get tracks with metadata from {directory}: {e}")
+            logger.error("Failed to get tracks with metadata from %s: %s", directory, e)
             return []
 
     def _build_ffmpeg_command(
@@ -299,7 +299,7 @@ class FileService:
         Returns:
             Updated ConversionJob with skipped status
         """
-        logger.warning(f"Skipping conversion of empty file: {source_path}")
+        logger.warning("Skipping conversion of empty file: %s", source_path)
         job.status = "completed"
         job.was_skipped = True
         return job
@@ -318,7 +318,7 @@ class FileService:
             Updated ConversionJob with completed status
         """
         if target_path.exists():
-            logger.info(f"Successfully converted: {source_path}")
+            logger.info("Successfully converted: %s", source_path)
             job.status = "completed"
             self._replace_with_empty_file(source_path)
         else:
@@ -339,10 +339,10 @@ class FileService:
             Updated ConversionJob with failed status
         """
         if isinstance(error, subprocess.CalledProcessError):
-            logger.error(f"ffmpeg conversion failed: {error.stderr}")
+            logger.error("ffmpeg conversion failed: %s", error.stderr)
             job.error_message = f"ffmpeg error: {error.stderr}"
         else:
-            logger.error(f"Conversion failed: {error}")
+            logger.error("Conversion failed: %s", error)
             job.error_message = str(error)
 
         job.status = "failed"
@@ -386,7 +386,7 @@ class FileService:
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            logger.info(f"Converting {source_path} -> {target_path}")
+            logger.info("Converting %s -> %s", source_path, target_path)
             job.status = "processing"
 
             # Run ffmpeg conversion
@@ -407,9 +407,9 @@ class FileService:
         try:
             file_path.unlink()
             file_path.touch()
-            logger.debug(f"Replaced {file_path} with empty file")
+            logger.debug("Replaced %s with empty file", file_path)
         except Exception as e:
-            logger.warning(f"Failed to replace file with empty: {e}")
+            logger.warning("Failed to replace file with empty: %s", e)
 
     def _find_playlist_directories(self, source_dir: Path) -> List[Path]:
         """Find all playlist directories under source directory.
@@ -432,7 +432,7 @@ class FileService:
         playlist_dirs = [d for d in playlists_dir.iterdir() if d.is_dir()]
 
         if not playlist_dirs:
-            logger.warning(f"No playlist directories found in {playlists_dir}")
+            logger.warning("No playlist directories found in %s", playlists_dir)
 
         return playlist_dirs
 
@@ -459,7 +459,7 @@ class FileService:
         target_lower = target_name.lower()
         for playlist_dir in playlist_dirs:
             if playlist_dir.name.lower() == target_lower:
-                logger.info(f"Found exact match for playlist: {playlist_dir.name}")
+                logger.info("Found exact match for playlist: %s", playlist_dir.name)
                 return [playlist_dir]
 
         # Use fuzzy matching to find best match
@@ -562,7 +562,7 @@ class FileService:
 
             try:
                 target_file.unlink()
-                logger.info(f"Deleted orphaned target file: {target_file}")
+                logger.info("Deleted orphaned target file: %s", target_file)
 
                 # Track as a special job type
                 job = ConversionJob(
@@ -576,7 +576,7 @@ class FileService:
                 )
                 jobs.append(job)
             except OSError as e:
-                logger.error(f"Failed to delete {target_file}: {e}")
+                logger.error("Failed to delete %s: %s", target_file, e)
 
         return jobs
 
@@ -645,7 +645,7 @@ class FileService:
         relative_path = playlist_dir.relative_to(source_dir)
         target_playlist_dir = target_dir / relative_path
 
-        logger.debug(f"Processing playlist: {playlist_name}")
+        logger.debug("Processing playlist: %s", playlist_name)
 
         # Use diff service to compare directories
         diff = self.diff_service.compare_by_stem_with_extension_mapping(
@@ -738,7 +738,7 @@ class FileService:
                 playlist_dirs, playlist_filter
             )
             if not playlist_dirs:
-                logger.warning(f"No playlist found matching '{playlist_filter}'")
+                logger.warning("No playlist found matching '%s'", playlist_filter)
                 return playlist_jobs
 
         # Process each playlist directory
@@ -764,7 +764,7 @@ class FileService:
             True if file was deleted, False otherwise
         """
         if not file_path.exists():
-            logger.warning(f"File does not exist: {file_path}")
+            logger.warning("File does not exist: %s", file_path)
             return False
 
         if interactive:
@@ -775,10 +775,10 @@ class FileService:
 
         try:
             file_path.unlink()
-            logger.info(f"Deleted: {file_path}")
+            logger.info("Deleted: %s", file_path)
             return True
         except Exception as e:
-            logger.error(f"Failed to delete {file_path}: {e}")
+            logger.error("Failed to delete %s: %s", file_path, e)
             return False
 
     def create_track_from_file(self, file_info: FileInfo) -> Optional[Track]:
@@ -808,5 +808,5 @@ class FileService:
             )
 
         except Exception as e:
-            logger.warning(f"Failed to create Track from {file_info.path}: {e}")
+            logger.warning("Failed to create Track from %s: %s", file_info.path, e)
             return None

@@ -157,7 +157,7 @@ class TrackComparisonService:
                 return (original_match, result[1])
 
         except Exception as e:
-            logger.warning(f"Fuzzy matching failed for '{target}': {e}")
+            logger.warning("Fuzzy matching failed for '%s': %s", target, e)
 
         return None
 
@@ -187,7 +187,7 @@ class TrackComparisonService:
             if match_result:
                 fuzzy_matches[track] = match_result
 
-        logger.info(f"Found {len(fuzzy_matches)} fuzzy matches")
+        logger.info("Found %d fuzzy matches", len(fuzzy_matches))
         return fuzzy_matches
 
     def compare_playlists(
@@ -240,7 +240,7 @@ class TrackComparisonService:
                     f"(score: {fuzzy_matches[track][1]})"
                 )
 
-        logger.info(f"Marked {len(tracks_to_delete)} tracks for deletion")
+        logger.info("Marked %d tracks for deletion", len(tracks_to_delete))
         return tracks_to_delete
 
     def validate_track_name(self, track_name: str) -> bool:

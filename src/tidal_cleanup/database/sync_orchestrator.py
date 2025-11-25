@@ -216,7 +216,7 @@ class SyncOrchestrator:
             result.add_error("Failed to generate sync decisions")
             return False
 
-        logger.info(f"Generated {len(result.decisions.decisions)} sync decisions")
+        logger.info("Generated %d sync decisions", len(result.decisions.decisions))
         return True
 
     def _execute_decision_execution_step(self, result: SyncResult) -> None:
@@ -241,7 +241,7 @@ class SyncOrchestrator:
     def _log_sync_summary(self, result: SyncResult) -> None:
         """Log the sync operation summary."""
         summary = result.get_summary()
-        logger.info(f"Sync complete: {summary}")
+        logger.info("Sync complete: %s", summary)
 
     def _handle_sync_error(self, result: SyncResult, error: Exception) -> None:
         """Handle sync operation error."""
@@ -267,7 +267,7 @@ class SyncOrchestrator:
                 result.add_error(f"Playlist '{playlist_name}' not found in database")
                 return result
 
-            logger.info(f"Syncing playlist: {playlist_name}")
+            logger.info("Syncing playlist: %s", playlist_name)
 
             # Fetch Tidal state for this playlist
             logger.info("Step 1/5: Fetching playlist from Tidal...")
@@ -294,7 +294,7 @@ class SyncOrchestrator:
             result.execution = self._execute_decisions(result.decisions)
 
             summary = result.get_summary()
-            logger.info(f"Playlist sync complete: {summary}")
+            logger.info("Playlist sync complete: %s", summary)
 
             return result
 
@@ -314,7 +314,7 @@ class SyncOrchestrator:
         if playlist_ids:
             # Fetch specific playlists
             for playlist_id in playlist_ids:
-                logger.info(f"Fetching playlist {playlist_id} from Tidal")
+                logger.info("Fetching playlist %d from Tidal", playlist_id)
                 stats.playlists_fetched += 1
         else:
             # Fetch all playlists

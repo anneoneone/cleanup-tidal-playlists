@@ -47,7 +47,7 @@ class MyTagManager:
         )
 
         if group is None:
-            logger.info(f"Creating MyTag group: {group_name}")
+            logger.info("Creating MyTag group: %s", group_name)
 
             # Get the highest Seq number for root-level groups
             max_seq = (
@@ -93,7 +93,7 @@ class MyTagManager:
         )
 
         if tag is None:
-            logger.info(f"Creating MyTag value: {group_name}/{tag_name}")
+            logger.info("Creating MyTag value: %s/%s", group_name, tag_name)
 
             # Get the highest Seq number for values in this group
             max_seq = (
@@ -138,7 +138,7 @@ class MyTagManager:
             )
 
             if existing_link is None:
-                logger.debug(f"Linking content {content.ID} to MyTag: {tag.Name}")
+                logger.debug("Linking content %s to MyTag: %s", content.ID, tag.Name)
                 song_tag = db6.DjmdSongMyTag(
                     ID=self.db.generate_unused_id(db6.DjmdSongMyTag),
                     MyTagID=tag.ID,
@@ -155,7 +155,7 @@ class MyTagManager:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to link content to tag: {e}")
+            logger.error("Failed to link content to tag: %s", e)
             return False
 
     def unlink_content_from_tag(self, content: Any, tag: Any) -> bool:
@@ -180,7 +180,9 @@ class MyTagManager:
             )
 
             if link:
-                logger.debug(f"Unlinking content {content.ID} from MyTag: {tag.Name}")
+                logger.debug(
+                    "Unlinking content %s from MyTag: %s", content.ID, tag.Name
+                )
                 self.db.delete(link)
                 self.db.flush()
                 return True
@@ -191,7 +193,7 @@ class MyTagManager:
                 return False
 
         except Exception as e:
-            logger.error(f"Failed to unlink content from tag: {e}")
+            logger.error("Failed to unlink content from tag: %s", e)
             return False
 
     def get_content_tags(
@@ -237,7 +239,7 @@ class MyTagManager:
             return tags
 
         except Exception as e:
-            logger.error(f"Failed to get content tags: {e}")
+            logger.error("Failed to get content tags: %s", e)
             return []
 
     def get_content_tag_names(
@@ -273,7 +275,7 @@ class MyTagManager:
             # No genre tags, add NoGenre
             no_genre_tag = self.create_or_get_tag("NoGenre", "Genre")
             self.link_content_to_tag(content, no_genre_tag)
-            logger.info(f"Added NoGenre tag to content {content.ID}")
+            logger.info("Added NoGenre tag to content %s", content.ID)
             return True
 
         return False
@@ -299,7 +301,7 @@ class MyTagManager:
             if no_genre_tags:
                 for tag in no_genre_tags:
                     self.unlink_content_from_tag(content, tag)
-                logger.info(f"Removed NoGenre tag from content {content.ID}")
+                logger.info("Removed NoGenre tag from content %s", content.ID)
                 return True
 
         return False

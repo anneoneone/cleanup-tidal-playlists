@@ -145,7 +145,7 @@ class SyncDecisionEngine:
         # Get playlist
         playlist = self.db_service.get_playlist_by_id(playlist_id)
         if not playlist:
-            logger.warning(f"Playlist {playlist_id} not found")
+            logger.warning("Playlist %d not found", playlist_id)
             return decisions
 
         # Get all playlist-track associations
@@ -154,7 +154,7 @@ class SyncDecisionEngine:
         for pt in playlist_tracks:
             track = pt.track
             if not track:
-                logger.warning(f"Track not found for PlaylistTrack {pt.id}")
+                logger.warning("Track not found for PlaylistTrack %s", pt.id)
                 continue
 
             # Decide action for this track in this playlist
@@ -174,7 +174,7 @@ class SyncDecisionEngine:
         # Get all playlists
         playlists = self.db_service.get_all_playlists()
 
-        logger.info(f"Analyzing {len(playlists)} playlists for sync decisions")
+        logger.info("Analyzing %d playlists for sync decisions", len(playlists))
 
         for playlist in playlists:
             playlist_decisions = self.analyze_playlist_sync(playlist.id)

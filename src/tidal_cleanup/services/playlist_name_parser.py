@@ -65,10 +65,10 @@ class PlaylistNameParser:
             self.emoji_mapping = config.get("emoji_to_mytag_mapping", {})
             self.no_genre_config = config.get("no_genre_tag", {})
 
-            logger.info(f"Loaded emoji mapping with {len(self.emoji_mapping)} groups")
+            logger.info("Loaded emoji mapping with %d groups", len(self.emoji_mapping))
 
         except Exception as e:
-            logger.error(f"Failed to load emoji mapping config: {e}")
+            logger.error("Failed to load emoji mapping config: %s", e)
             raise
 
     def _build_reverse_mapping(self) -> None:

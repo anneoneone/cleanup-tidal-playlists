@@ -205,7 +205,7 @@ class ProgressTracker:
         try:
             self.callback(update)
         except Exception as e:
-            logger.error(f"Error in progress callback: {e}")
+            logger.error("Error in progress callback: %s", e)
 
     def get_summary(self) -> Dict[str, Any]:
         """Get summary of progress tracking.

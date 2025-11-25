@@ -66,11 +66,11 @@ class TidalDownloadService:
 
         if project_config.exists():
             # Use project config (highest priority)
-            logger.debug(f"Loading project config: {project_config}")
+            logger.debug("Loading project config: %s", project_config)
             settings.read(str(project_config))
         elif user_config.exists():
             # Use user config as fallback
-            logger.info(f"Loading user config: {user_config}")
+            logger.info("Loading user config: %s", user_config)
             settings.read(str(user_config))
         else:
             # Use defaults (no config files found)
@@ -154,7 +154,7 @@ class TidalDownloadService:
                 self._authenticated = True
 
         except Exception as e:
-            logger.error(f"Failed to connect to Tidal: {e}")
+            logger.error("Failed to connect to Tidal: %s", e)
             raise TidalDownloadError(f"Cannot connect to Tidal: {e}")
 
     def download_playlist(
@@ -176,7 +176,7 @@ class TidalDownloadService:
             raise TidalDownloadError("Not authenticated with Tidal")
 
         try:
-            logger.info(f"Searching for playlist: {playlist_name}")
+            logger.info("Searching for playlist: %s", playlist_name)
 
             # Get user's playlists with retry logic for transient errors
             user = self.tidal_dl.session.user
@@ -211,9 +211,9 @@ class TidalDownloadService:
                 # Only create the directory when it does not already exist.
                 if not playlist_dir.exists():
                     playlist_dir.mkdir(parents=True, exist_ok=True)
-                    logger.info(f"Created playlist directory: {playlist_dir}")
+                    logger.info("Created playlist directory: %s", playlist_dir)
                 else:
-                    logger.debug(f"Playlist directory already exists: {playlist_dir}")
+                    logger.debug("Playlist directory already exists: %s", playlist_dir)
 
             # Download the playlist using tidal-dl-ng
             self._download_playlist_tracks(target_playlist, playlist_dir)
@@ -223,7 +223,7 @@ class TidalDownloadService:
         except TidalDownloadError:
             raise
         except Exception as e:
-            logger.error(f"Failed to download playlist '{playlist_name}': {e}")
+            logger.error("Failed to download playlist '%s': %s", playlist_name, e)
             raise TidalDownloadError(f"Playlist download failed: {e}")
 
     def download_all_playlists(self) -> List[Path]:
@@ -244,7 +244,7 @@ class TidalDownloadService:
             user = self.tidal_dl.session.user
             playlists = user.playlists()
 
-            logger.info(f"Found {len(playlists)} playlists")
+            logger.info("Found %d playlists", len(playlists))
 
             downloaded_dirs = []
 
@@ -255,7 +255,9 @@ class TidalDownloadService:
                     )
                     downloaded_dirs.append(playlist_dir)
                 except Exception as e:
-                    logger.error(f"Failed to download playlist '{playlist.name}': {e}")
+                    logger.error(
+                        "Failed to download playlist '%s': %s", playlist.name, e
+                    )
                     # Continue with next playlist
                     continue
 
@@ -268,7 +270,7 @@ class TidalDownloadService:
         except TidalDownloadError:
             raise
         except Exception as e:
-            logger.error(f"Failed to download playlists: {e}")
+            logger.error("Failed to download playlists: %s", e)
             raise TidalDownloadError(f"Playlists download failed: {e}")
 
     def download_track(
@@ -291,7 +293,7 @@ class TidalDownloadService:
             raise TidalDownloadError("Not authenticated with Tidal")
 
         try:
-            logger.info(f"Downloading track {track_id} to {target_path}")
+            logger.info("Downloading track %d to %s", track_id, target_path)
 
             # Get track from Tidal API (type narrowing for mypy)
             tidal_dl = self.tidal_dl
@@ -347,13 +349,13 @@ class TidalDownloadService:
                 else downloaded_path
             )
 
-            logger.info(f"Successfully downloaded track to {actual_path}")
+            logger.info("Successfully downloaded track to %s", actual_path)
             return actual_path
 
         except TidalDownloadError:
             raise
         except Exception as e:
-            logger.error(f"Failed to download track {track_id}: {e}")
+            logger.error("Failed to download track %d: %s", track_id, e)
             raise TidalDownloadError(f"Track download failed: {e}")
 
     def _download_playlist_tracks(
@@ -397,7 +399,7 @@ class TidalDownloadService:
 
             # Get tracks count for logging
             tracks = playlist.tracks()
-            logger.info(f"Downloading {len(tracks)} tracks...")
+            logger.info("Downloading %d tracks...", len(tracks))
 
             # Use tidal-dl-ng file template for playlists
             file_template = self.tidal_dl_settings.data.format_playlist
@@ -415,7 +417,7 @@ class TidalDownloadService:
             logger.info("Download complete")
 
         except Exception as e:
-            logger.error(f"Failed to download playlist tracks: {e}")
+            logger.error("Failed to download playlist tracks: %s", e)
             raise TidalDownloadError(f"Track download failed: {e}")
 
     def is_authenticated(self) -> bool:

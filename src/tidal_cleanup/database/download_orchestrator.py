@@ -120,10 +120,10 @@ class DownloadOrchestrator:
             decisions.decisions
         )
         if conflicts:
-            logger.warning(f"Detected {len(conflicts)} decision conflicts")
+            logger.warning("Detected %d decision conflicts", len(conflicts))
             # Resolve conflicts
             resolved = self.conflict_resolver.resolve_decision_conflicts(conflicts)
-            logger.info(f"Resolved to {len(resolved)} decisions")
+            logger.info("Resolved to %d decisions", len(resolved))
 
         # Get prioritized decisions
         prioritized = sorted(
@@ -174,7 +174,7 @@ class DownloadOrchestrator:
             # Nothing to do
             pass
         else:
-            logger.warning(f"Unhandled action type: {decision.action}")
+            logger.warning("Unhandled action type: %s", decision.action)
 
     def _execute_download(
         self, decision: DecisionResult, result: ExecutionResult
@@ -412,7 +412,7 @@ class DownloadOrchestrator:
         target = Path(decision.target_path)
 
         if self.dry_run:
-            logger.info(f"DRY RUN: Would create symlink {source} -> {target}")
+            logger.info("DRY RUN: Would create symlink %s -> %s", source, target)
             result.symlinks_created += 1
             return
 
@@ -427,7 +427,7 @@ class DownloadOrchestrator:
             # Create symlink
             os.symlink(target, source)
             result.symlinks_created += 1
-            logger.info(f"Created symlink {source} -> {target}")
+            logger.info("Created symlink %s -> %s", source, target)
 
             # Update database
             if decision.playlist_track_id:
@@ -458,7 +458,7 @@ class DownloadOrchestrator:
         target = Path(decision.target_path)
 
         if self.dry_run:
-            logger.info(f"DRY RUN: Would update symlink {source} -> {target}")
+            logger.info("DRY RUN: Would update symlink %s -> %s", source, target)
             result.symlinks_updated += 1
             return
 
@@ -470,7 +470,7 @@ class DownloadOrchestrator:
             # Create new symlink
             os.symlink(target, source)
             result.symlinks_updated += 1
-            logger.info(f"Updated symlink {source} -> {target}")
+            logger.info("Updated symlink %s -> %s", source, target)
 
             # Update database
             if decision.playlist_track_id:
@@ -497,7 +497,7 @@ class DownloadOrchestrator:
         source = Path(decision.source_path)
 
         if self.dry_run:
-            logger.info(f"DRY RUN: Would remove symlink {source}")
+            logger.info("DRY RUN: Would remove symlink %s", source)
             result.symlinks_removed += 1
             return
 
@@ -505,13 +505,13 @@ class DownloadOrchestrator:
             if source.is_symlink():
                 source.unlink()
                 result.symlinks_removed += 1
-                logger.info(f"Removed symlink {source}")
+                logger.info("Removed symlink %s", source)
 
                 # Update database
                 if decision.playlist_track_id:
                     self._update_symlink_in_db(decision.playlist_track_id, None, None)
             else:
-                logger.warning(f"Path is not a symlink: {source}")
+                logger.warning("Path is not a symlink: %s", source)
 
         except Exception as e:
             result.add_error(f"Failed to remove symlink {source}: {str(e)}")
@@ -532,7 +532,7 @@ class DownloadOrchestrator:
         source = Path(decision.source_path)
 
         if self.dry_run:
-            logger.info(f"DRY RUN: Would remove file {source}")
+            logger.info("DRY RUN: Would remove file %s", source)
             result.files_removed += 1
             return
 
@@ -540,13 +540,13 @@ class DownloadOrchestrator:
             if source.exists():
                 source.unlink()
                 result.files_removed += 1
-                logger.info(f"Removed file {source}")
+                logger.info("Removed file %s", source)
 
                 # Update database if track
                 if decision.track_id:
                     self._update_track_file_path(decision.track_id, None)
             else:
-                logger.warning(f"File does not exist: {source}")
+                logger.warning("File does not exist: %s", source)
 
         except Exception as e:
             result.add_error(f"Failed to remove file {source}: {str(e)}")
@@ -617,11 +617,11 @@ class DownloadOrchestrator:
 
             if not playlist_dir.exists():
                 if self.dry_run:
-                    logger.info(f"DRY RUN: Would create directory {playlist_dir}")
+                    logger.info("DRY RUN: Would create directory %s", playlist_dir)
                     created += 1
                 else:
                     playlist_dir.mkdir(parents=True, exist_ok=True)
                     created += 1
-                    logger.info(f"Created playlist directory: {playlist_dir}")
+                    logger.info("Created playlist directory: %s", playlist_dir)
 
         return created

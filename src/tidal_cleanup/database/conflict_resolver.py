@@ -203,7 +203,7 @@ class ConflictResolver:
 
         elif conflict.conflict_type == ConflictType.PERMISSION_DENIED:
             # Permission issues - skip
-            logger.warning(f"Permission denied: {conflict.file_path}")
+            logger.warning("Permission denied: %s", conflict.file_path)
             return ConflictResolution.SKIP
 
         elif conflict.conflict_type == ConflictType.CONCURRENT_MODIFICATION:
@@ -336,11 +336,11 @@ class ConflictResolver:
 
                 shutil.copy2(file_path, backup_path)
 
-            logger.info(f"Created backup: {backup_path}")
+            logger.info("Created backup: %s", backup_path)
             return backup_path
 
         except Exception as e:
-            logger.error(f"Failed to create backup of {file_path}: {e}")
+            logger.error("Failed to create backup of %s: %s", file_path, e)
             return None
 
     def apply_resolution(
@@ -377,5 +377,5 @@ class ConflictResolver:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to apply resolution {resolution}: {e}")
+            logger.error("Failed to apply resolution %s: %s", resolution, e)
             return False

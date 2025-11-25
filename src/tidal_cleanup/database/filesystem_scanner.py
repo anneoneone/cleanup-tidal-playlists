@@ -89,11 +89,11 @@ class FilesystemScanner:
         # Reset statistics for new scan
         self._stats = ScanStatistics()
 
-        logger.info(f"Scanning playlists from: {self.playlists_root}")
+        logger.info("Scanning playlists from: %s", self.playlists_root)
 
         # Get all playlist directories
         playlist_dirs = self._find_playlist_directories()
-        logger.info(f"Found {len(playlist_dirs)} playlist directories")
+        logger.info("Found %d playlist directories", len(playlist_dirs))
 
         # Process each playlist directory
         for playlist_dir in playlist_dirs:
@@ -126,7 +126,7 @@ class FilesystemScanner:
         """
         try:
             playlist_name = playlist_dir.name
-            logger.debug(f"Processing playlist directory: {playlist_name}")
+            logger.debug("Processing playlist directory: %s", playlist_name)
 
             # Get or create playlist in database
             playlist = self.db_service.get_playlist_by_name(playlist_name)
@@ -140,7 +140,7 @@ class FilesystemScanner:
 
             # Find all audio files in playlist directory
             files = self._find_audio_files(playlist_dir)
-            logger.debug(f"Found {len(files)} files in {playlist_name}")
+            logger.debug("Found %d files in %s", len(files), playlist_name)
 
             # Process each file
             for file_path in files:
@@ -210,7 +210,7 @@ class FilesystemScanner:
             self._stats.symlinks_valid += 1
         else:
             self._stats.symlinks_broken += 1
-            logger.warning(f"Broken symlink: {symlink_path}")
+            logger.warning("Broken symlink: %s", symlink_path)
 
         # Try to match file to a track
         target = target_path if is_valid else None
@@ -289,7 +289,7 @@ class FilesystemScanner:
                 return False, target_path
 
         except (OSError, RuntimeError) as e:
-            logger.debug(f"Error validating symlink {symlink_path}: {e}")
+            logger.debug("Error validating symlink %s: %s", symlink_path, e)
             return False, None
 
     def _match_file_to_track(
@@ -327,7 +327,7 @@ class FilesystemScanner:
             if track.normalized_name and filename.lower() in track.normalized_name:
                 return track
 
-        logger.debug(f"Could not match file to track: {file_path.name}")
+        logger.debug("Could not match file to track: %s", file_path.name)
         return None
 
     def _log_scan_summary(self) -> None:
@@ -345,7 +345,7 @@ class FilesystemScanner:
         )
 
         if self._stats.errors:
-            logger.warning(f"{len(self._stats.errors)} errors during scan")
+            logger.warning("%d errors during scan", len(self._stats.errors))
 
     def get_scan_statistics(self) -> Dict[str, Any]:
         """Get current scan statistics.

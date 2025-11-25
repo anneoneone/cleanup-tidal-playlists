@@ -85,19 +85,19 @@ class RekordboxPlaylistSynchronizer:
                 all_folder_names.update(metadata.party_tags)
 
             except Exception as e:
-                logger.debug(f"Could not parse playlist '{playlist_dir.name}': {e}")
+                logger.debug("Could not parse playlist '%s': %s", playlist_dir.name, e)
                 continue
 
         # Create all folders
         if all_folder_names:
-            logger.info(f"Creating {len(all_folder_names)} genre/party folders...")
+            logger.info("Creating %d genre/party folders...", len(all_folder_names))
             for folder_name in sorted(all_folder_names):
                 folder = self._get_or_create_folder(folder_name)
                 self._folder_cache[folder_name] = str(folder.ID)
-                logger.info(f"  ✓ Folder '{folder_name}' (ID: {folder.ID})")
+                logger.info("  ✓ Folder '%s' (ID: %s)", folder_name, folder.ID)
 
         self.db.commit()
-        logger.info(f"Pre-created {len(all_folder_names)} folders")
+        logger.info("Pre-created %d folders", len(all_folder_names))
 
     def sync_playlist(self, playlist_name: str) -> Dict[str, Any]:
         """Synchronize a playlist from MP3 folder to Rekordbox database.
@@ -120,7 +120,7 @@ class RekordboxPlaylistSynchronizer:
         Raises:
             PlaylistSyncError: If sync fails
         """
-        logger.info(f"Starting sync for playlist: {playlist_name}")
+        logger.info("Starting sync for playlist: %s", playlist_name)
 
         # Step 1: Validate and get MP3 playlist directory
         mp3_playlist_dir = self._validate_mp3_playlist_dir(playlist_name)
@@ -133,7 +133,7 @@ class RekordboxPlaylistSynchronizer:
 
         # Step 4: Get MP3 tracks
         mp3_tracks = self._scan_mp3_folder(mp3_playlist_dir)
-        logger.info(f"Found {len(mp3_tracks)} tracks in MP3 folder")
+        logger.info("Found %d tracks in MP3 folder", len(mp3_tracks))
 
         # Step 5: Get or create Rekordbox playlist (in appropriate folder)
         rekordbox_playlist = self._get_or_create_playlist(
@@ -142,7 +142,7 @@ class RekordboxPlaylistSynchronizer:
 
         # Step 6: Get current Rekordbox tracks
         rekordbox_tracks = self._get_playlist_tracks(rekordbox_playlist)
-        logger.info(f"Found {len(rekordbox_tracks)} tracks in Rekordbox playlist")
+        logger.info("Found %d tracks in Rekordbox playlist", len(rekordbox_tracks))
 
         # Step 6: Build track identity mappings and determine changes
         mp3_track_identities, rekordbox_track_identities = (
@@ -237,7 +237,7 @@ class RekordboxPlaylistSynchronizer:
                 identity = (title, artist_name)
                 mp3_track_identities[identity] = str(track_path.resolve())
             except Exception as e:
-                logger.warning(f"Could not read metadata from {track_path}: {e}")
+                logger.warning("Could not read metadata from %s: %s", track_path, e)
                 # Fallback to path-based identity
                 identity = (track_path.stem, "Unknown Artist")
                 mp3_track_identities[identity] = str(track_path.resolve())
@@ -275,8 +275,8 @@ class RekordboxPlaylistSynchronizer:
         tracks_to_add = mp3_identities_set - rekordbox_identities_set
         tracks_to_remove = rekordbox_identities_set - mp3_identities_set
 
-        logger.info(f"Tracks to add: {len(tracks_to_add)}")
-        logger.info(f"Tracks to remove: {len(tracks_to_remove)}")
+        logger.info("Tracks to add: %d", len(tracks_to_add))
+        logger.info("Tracks to remove: %d", len(tracks_to_remove))
 
         return tracks_to_add, tracks_to_remove
 
@@ -359,9 +359,9 @@ class RekordboxPlaylistSynchronizer:
 
                 updated_tags_count += 1
 
-        logger.info(f"Updated MyTags for {updated_tags_count} tracks")
+        logger.info("Updated MyTags for %d tracks", updated_tags_count)
         if validation_errors > 0:
-            logger.warning(f"Tag validation errors: {validation_errors}")
+            logger.warning("Tag validation errors: %s", validation_errors)
 
         return updated_tags_count, validation_errors
 
@@ -437,10 +437,10 @@ class RekordboxPlaylistSynchronizer:
         """
         updated_playlist = self._refresh_playlist(playlist)
         if len(updated_playlist.Songs) == 0:
-            logger.info(f"Playlist '{playlist_name}' is empty after sync, deleting...")
+            logger.info("Playlist '%s' is empty after sync, deleting...", playlist_name)
             self.db.delete_playlist(updated_playlist)
             self.db.commit()
-            logger.info(f"Deleted empty playlist: {playlist_name}")
+            logger.info("Deleted empty playlist: %s", playlist_name)
             return True
         return False
 
@@ -524,11 +524,11 @@ class RekordboxPlaylistSynchronizer:
         folder = self.db.get_playlist(Name=folder_name, Attribute=1).first()
 
         if folder:
-            logger.debug(f"Found existing folder: {folder_name}")
+            logger.debug("Found existing folder: %s", folder_name)
             return folder
 
         # Create new folder
-        logger.info(f"Creating new folder: {folder_name}")
+        logger.info("Creating new folder: %s", folder_name)
         folder = self.db.create_playlist_folder(folder_name)
         self.db.flush()
 
@@ -567,7 +567,7 @@ class RekordboxPlaylistSynchronizer:
                 self.db.move_playlist(playlist, parent=parent_folder_id)
                 self.db.flush()
             else:
-                logger.info(f"Found existing playlist: {name}")
+                logger.info("Found existing playlist: %s", name)
             return playlist
 
         # Create new playlist in specified folder
@@ -578,7 +578,7 @@ class RekordboxPlaylistSynchronizer:
             )
             playlist = self.db.create_playlist(name, parent=parent_folder_id)
         else:
-            logger.info(f"Creating new playlist: {name}")
+            logger.info("Creating new playlist: %s", name)
             playlist = self.db.create_playlist(name)
 
         self.db.flush()
@@ -624,14 +624,14 @@ class RekordboxPlaylistSynchronizer:
             True if successful, False otherwise
         """
         try:
-            logger.info(f"Adding track: {track_path.name}")
+            logger.info("Adding track: %s", track_path.name)
 
             # Extract metadata and find or create content
             title, artist_name = self._extract_track_metadata(track_path)
             content = self._get_or_create_content(track_path, title, artist_name)
 
             if not content:
-                logger.error(f"Failed to add track to database: {track_path}")
+                logger.error("Failed to add track to database: %s", track_path)
                 return False
 
             # Add track to playlist if not already present
@@ -641,7 +641,7 @@ class RekordboxPlaylistSynchronizer:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to add track {track_path}: {e}")
+            logger.error("Failed to add track %s: %s", track_path, e)
             return False
 
     def _extract_track_metadata(self, track_path: Path) -> Tuple[str, str]:
@@ -660,7 +660,7 @@ class RekordboxPlaylistSynchronizer:
             title = str(audio.get("TIT2", track_path.stem))
             artist_name = str(audio.get("TPE1", "Unknown Artist"))
         except Exception as e:
-            logger.warning(f"Could not read ID3 tags from {track_path}: {e}")
+            logger.warning("Could not read ID3 tags from %s: %s", track_path, e)
             title = track_path.stem
             artist_name = "Unknown Artist"
 
@@ -687,7 +687,7 @@ class RekordboxPlaylistSynchronizer:
             existing_content = self._find_content_by_metadata(title, artist_name)
 
         if existing_content:
-            logger.debug(f"Track already in database: {existing_content.Title}")
+            logger.debug("Track already in database: %s", existing_content.Title)
             return existing_content
 
         # Add track to database with metadata
@@ -732,10 +732,10 @@ class RekordboxPlaylistSynchronizer:
         )
 
         if track_in_playlist:
-            logger.debug(f"Track already in playlist: {track_path.name}")
+            logger.debug("Track already in playlist: %s", track_path.name)
         else:
             self.db.add_to_playlist(playlist, content)
-            logger.debug(f"Added track to playlist: {track_path.name}")
+            logger.debug("Added track to playlist: %s", track_path.name)
 
     def _add_track_to_database(self, track_path: Path) -> Optional[Any]:
         """Add track to Rekordbox database with metadata.
@@ -758,7 +758,7 @@ class RekordboxPlaylistSynchronizer:
             release_year = int(year_str[:4]) if year_str else None
 
         except Exception as e:
-            logger.warning(f"Could not read ID3 tags from {track_path}: {e}")
+            logger.warning("Could not read ID3 tags from %s: %s", track_path, e)
             title = track_path.stem
             artist_name = "Unknown Artist"
             album_name = "Unknown Album"
@@ -767,13 +767,13 @@ class RekordboxPlaylistSynchronizer:
         # Create or get Artist
         artist = self.db.get_artist(Name=artist_name).first()
         if artist is None:
-            logger.debug(f"Creating artist: {artist_name}")
+            logger.debug("Creating artist: %s", artist_name)
             artist = self.db.add_artist(name=artist_name)
 
         # Create or get Album
         album = self.db.get_album(Name=album_name).first()
         if album is None:
-            logger.debug(f"Creating album: {album_name}")
+            logger.debug("Creating album: %s", album_name)
             album = self.db.add_album(name=album_name)
 
         # Add content with metadata
@@ -785,7 +785,7 @@ class RekordboxPlaylistSynchronizer:
             ReleaseYear=release_year,
         )
 
-        logger.info(f"Added track to database: {title} - {artist_name}")
+        logger.info("Added track to database: %s - %s", title, artist_name)
         return content
 
     def _apply_mytags_to_content(
@@ -831,7 +831,7 @@ class RekordboxPlaylistSynchronizer:
             if content.Artist:
                 artist_name = content.Artist.Name
 
-            logger.info(f"Removing track: {content.Title} - {artist_name}")
+            logger.info("Removing track: %s - %s", content.Title, artist_name)
 
             # Find the song in playlist by content ID
             song = None
@@ -866,7 +866,7 @@ class RekordboxPlaylistSynchronizer:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to remove track {content.Title}: {e}")
+            logger.error("Failed to remove track %s: %s", content.Title, e)
             return False
 
     def _remove_mytags_from_content(

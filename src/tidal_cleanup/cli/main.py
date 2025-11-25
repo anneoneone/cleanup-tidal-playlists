@@ -373,7 +373,7 @@ def _sync_all_playlists(
             _display_sync_result(result, compact=True)
         except Exception as e:
             console.print(f"[red]❌ Error: {e}[/red]")
-            logger.error(f"Failed to sync playlist {playlist_name}: {e}")
+            logger.error("Failed to sync playlist %s: %s", playlist_name, e)
 
     # Display summary
     _display_batch_summary(results)
@@ -446,10 +446,10 @@ def sync(
             _sync_all_playlists(rekordbox_service, playlists_dir, emoji_config)
 
     except FileNotFoundError as e:
-        logger.error(f"❌ {e}")
+        logger.error("❌ %s", e)
         raise click.Abort()
     except Exception as e:
-        logger.error(f"❌ Error syncing: {e}")
+        logger.error("❌ Error syncing: %s", e)
         import traceback
 
         traceback.print_exc()
