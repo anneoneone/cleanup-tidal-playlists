@@ -5,7 +5,7 @@ from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 
-from src.tidal_cleanup.services.rekordbox_service import RekordboxService
+from tidal_cleanup.core.rekordbox.service import RekordboxService
 
 
 @pytest.fixture
@@ -26,9 +26,7 @@ def mock_db():
 @pytest.fixture
 def rekordbox_service(mock_config):
     """Create RekordboxService with mocked config."""
-    with patch(
-        "src.tidal_cleanup.services.rekordbox_service.PYREKORDBOX_AVAILABLE", True
-    ):
+    with patch("tidal_cleanup.core.rekordbox.service.PYREKORDBOX_AVAILABLE", True):
         service = RekordboxService(config=mock_config)
         return service
 
@@ -38,25 +36,21 @@ class TestRekordboxService:
 
     def test_init_without_config(self):
         """Test initialization without config."""
-        with patch(
-            "src.tidal_cleanup.services.rekordbox_service.PYREKORDBOX_AVAILABLE", True
-        ):
+        with patch("tidal_cleanup.core.rekordbox.service.PYREKORDBOX_AVAILABLE", True):
             service = RekordboxService()
             assert service.config is None
             assert service.track_id_counter == 1
 
     def test_init_with_config(self, mock_config):
         """Test initialization with config."""
-        with patch(
-            "src.tidal_cleanup.services.rekordbox_service.PYREKORDBOX_AVAILABLE", True
-        ):
+        with patch("tidal_cleanup.core.rekordbox.service.PYREKORDBOX_AVAILABLE", True):
             service = RekordboxService(config=mock_config)
             assert service.config == mock_config
 
     def test_db_property_creates_connection(self, rekordbox_service):
         """Test database property creates connection lazily."""
         with patch(
-            "src.tidal_cleanup.services.rekordbox_service.Rekordbox6Database"
+            "tidal_cleanup.core.rekordbox.service.Rekordbox6Database"
         ) as mock_db_class:
             mock_db_instance = Mock()
             mock_db_class.return_value = mock_db_instance
@@ -68,9 +62,7 @@ class TestRekordboxService:
 
     def test_db_property_without_pyrekordbox(self, mock_config):
         """Test database property returns None without pyrekordbox."""
-        with patch(
-            "src.tidal_cleanup.services.rekordbox_service.PYREKORDBOX_AVAILABLE", False
-        ):
+        with patch("tidal_cleanup.core.rekordbox.service.PYREKORDBOX_AVAILABLE", False):
             service = RekordboxService(config=mock_config)
             db = service.db
 
@@ -93,8 +85,7 @@ class TestRekordboxService:
         rekordbox_service._db = mock_db
 
         with patch(
-            "src.tidal_cleanup.services.rekordbox_service."
-            "RekordboxPlaylistSynchronizer",
+            "tidal_cleanup.core.rekordbox.service." "RekordboxPlaylistSynchronizer",
             return_value=mock_synchronizer,
         ):
             result = rekordbox_service.sync_playlist_with_mytags(
@@ -131,8 +122,7 @@ class TestRekordboxService:
         rekordbox_service._db = mock_db
 
         with patch(
-            "src.tidal_cleanup.services.rekordbox_service."
-            "RekordboxPlaylistSynchronizer",
+            "tidal_cleanup.core.rekordbox.service." "RekordboxPlaylistSynchronizer",
             return_value=mock_synchronizer,
         ):
             rekordbox_service.ensure_genre_party_folders(emoji_config)

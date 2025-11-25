@@ -5,18 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from src.tidal_cleanup.database.conflict_resolver import (
+from tidal_cleanup.core.sync.conflict_resolver import (
     Conflict,
     ConflictResolution,
     ConflictResolutionResult,
     ConflictResolver,
     ConflictType,
 )
-from src.tidal_cleanup.database.service import DatabaseService
-from src.tidal_cleanup.database.sync_decision_engine import (
-    DecisionResult,
-    SyncAction,
-)
+from tidal_cleanup.core.sync.decision_engine import DecisionResult, SyncAction
+from tidal_cleanup.database.service import DatabaseService
 
 
 @pytest.fixture

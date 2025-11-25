@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tidal_cleanup.services.directory_diff_service import (
+from tidal_cleanup.legacy.directory_diff import (
     DirectoryDiff,
     DirectoryDiffService,
     FileIdentity,

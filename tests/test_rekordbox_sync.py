@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from tidal_cleanup.config import get_config  # noqa: E402
-from tidal_cleanup.services.rekordbox_service import (  # noqa: E402
+from tidal_cleanup.core.rekordbox.service import (  # noqa: E402
     RekordboxService,
 )
 
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 def test_playlist_name_parser():
     """Test the playlist name parser."""
-    from tidal_cleanup.services.playlist_name_parser import PlaylistNameParser
+    from tidal_cleanup.core.rekordbox.playlist_parser import PlaylistNameParser
 
     logger.info("=" * 60)
     logger.info("Testing Playlist Name Parser")
@@ -72,7 +72,7 @@ def test_playlist_name_parser():
 
 def test_mytag_manager():
     """Test the MyTag manager."""
-    from tidal_cleanup.services.mytag_manager import MyTagManager
+    from tidal_cleanup.core.rekordbox.mytag_manager import MyTagManager
 
     logger.info("\n" + "=" * 60)
     logger.info("Testing MyTag Manager")

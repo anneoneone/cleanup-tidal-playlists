@@ -4,11 +4,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from tidal_cleanup.database import (
-    DatabaseService,
-    TidalSnapshotService,
-)
-from tidal_cleanup.database.sync_state import ChangeType
+from tidal_cleanup.core.sync.state import ChangeType
+from tidal_cleanup.core.tidal.snapshot_service import TidalSnapshotService
+from tidal_cleanup.database import DatabaseService
 from tidal_cleanup.models.models import Playlist as TidalPlaylist
 from tidal_cleanup.models.models import Track as TidalTrack
 
@@ -291,7 +289,7 @@ class TestHelperMethods:
 
     def test_get_playlist_changes(self, tidal_snapshot_service):
         """Test filtering playlist changes."""
-        from tidal_cleanup.database.sync_state import Change, SyncState
+        from tidal_cleanup.core.sync.state import Change, SyncState
 
         sync_state = SyncState()
         sync_state.add_change(
@@ -313,7 +311,7 @@ class TestHelperMethods:
 
     def test_get_track_changes(self, tidal_snapshot_service):
         """Test filtering track changes."""
-        from tidal_cleanup.database.sync_state import Change, SyncState
+        from tidal_cleanup.core.sync.state import Change, SyncState
 
         sync_state = SyncState()
         sync_state.add_change(
@@ -360,7 +358,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test error handling in apply_playlist_changes."""
-        from tidal_cleanup.database.sync_state import Change, SyncState
+        from tidal_cleanup.core.sync.state import Change, SyncState
 
         # Create a change that will cause an error
         sync_state = SyncState()
@@ -384,7 +382,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test error handling in apply_track_changes."""
-        from tidal_cleanup.database.sync_state import Change, SyncState
+        from tidal_cleanup.core.sync.state import Change, SyncState
 
         # Create a change that will cause an error
         sync_state = SyncState()
@@ -405,7 +403,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service, temp_db
     ):
         """Test applying PLAYLIST_REMOVED change (soft delete)."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create playlist with tracks in database
         db_playlist = temp_db.create_playlist(
@@ -447,7 +445,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test apply_playlist_removed without entity_id."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create change without entity_id
         change = Change(
@@ -464,7 +462,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service, temp_db
     ):
         """Test applying PLAYLIST_RENAMED change."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create playlist in database
         db_playlist = temp_db.create_playlist(
@@ -495,7 +493,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test apply_playlist_renamed with missing data."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create change without new_value
         change = Change(
@@ -513,7 +511,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service, temp_db
     ):
         """Test applying PLAYLIST_DESCRIPTION_CHANGED change."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create playlist in database
         db_playlist = temp_db.create_playlist(
@@ -544,7 +542,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test apply_playlist_description_changed without entity_id."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create change without entity_id
         change = Change(
@@ -561,7 +559,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service, temp_db
     ):
         """Test applying TRACK_REMOVED_FROM_PLAYLIST change (soft delete)."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create playlist and track in database
         db_playlist = temp_db.create_playlist(
@@ -603,7 +601,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test apply_track_removed_from_playlist with missing data."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create change without required data
         change = Change(
@@ -620,7 +618,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service, temp_db
     ):
         """Test applying TRACK_MOVED_WITHIN_PLAYLIST change."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create playlist and track in database
         db_playlist = temp_db.create_playlist(
@@ -664,7 +662,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test apply_track_moved_within_playlist with missing data."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create change without new_value
         change = Change(
@@ -682,7 +680,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service, temp_db
     ):
         """Test applying TRACK_METADATA_CHANGED change."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create track in database
         db_track = temp_db.create_track(
@@ -719,7 +717,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test apply_track_metadata_changed with missing data."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create change without changes
         change = Change(
@@ -736,7 +734,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service, temp_db
     ):
         """Test adding track that already exists in database."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create playlist and track in database
         db_playlist = temp_db.create_playlist(
@@ -775,7 +773,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service, temp_db
     ):
         """Test adding new track from Tidal."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create playlist in database
         db_playlist = temp_db.create_playlist(
@@ -817,7 +815,7 @@ class TestTidalSnapshotEdgeCases:
         self, tidal_snapshot_service, mock_tidal_service
     ):
         """Test apply_track_added_to_playlist with missing data."""
-        from tidal_cleanup.database.sync_state import Change
+        from tidal_cleanup.core.sync.state import Change
 
         # Create change without required data
         change = Change(
