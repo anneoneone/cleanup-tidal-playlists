@@ -150,7 +150,7 @@ class TidalStateFetcher:
             Exception: If fetch fails
         """
         try:
-            return self.tidal_session.user.playlists()  # type: ignore[no-any-return]
+            return self.tidal_session.user.playlists()
         except Exception as e:
             error_msg = f"Failed to fetch playlists from Tidal: {e}"
             logger.error(error_msg)

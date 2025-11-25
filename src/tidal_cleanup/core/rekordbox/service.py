@@ -365,7 +365,7 @@ class RekordboxService:
             if key in audio_file:
                 with suppress(ValueError, IndexError):
                     val = audio_file[key][0]
-                    metadata["ReleaseYear"] = converter(val)  # type: ignore
+                    metadata["ReleaseYear"] = converter(val)
                     break
 
         # Track number
@@ -410,7 +410,7 @@ class RekordboxService:
             if key in audio_file:
                 with suppress(ValueError, IndexError, TypeError):
                     val = audio_file[key][0]
-                    metadata["BPM"] = converter(val)  # type: ignore
+                    metadata["BPM"] = converter(val)
                     break
 
         # Comments - collect all available info including artist/album
@@ -484,7 +484,7 @@ class RekordboxService:
             if key in audio_file:
                 with suppress(ValueError, IndexError):
                     val = audio_file[key][0]
-                    metadata["ReleaseYear"] = converter(val)  # type: ignore
+                    metadata["ReleaseYear"] = converter(val)
                     break
 
         # Track number
@@ -529,7 +529,7 @@ class RekordboxService:
             if key in audio_file:
                 with suppress(ValueError, IndexError, TypeError):
                     val = audio_file[key][0]
-                    metadata["BPM"] = converter(val)  # type: ignore
+                    metadata["BPM"] = converter(val)
                     break
 
     def _extract_additional_metadata(
