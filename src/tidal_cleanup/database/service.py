@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
 from .models import Base, Playlist, PlaylistTrack, SyncOperation, SyncSnapshot, Track
@@ -57,6 +57,50 @@ class DatabaseService:
             Caller is responsible for closing the session
         """
         return self.SessionLocal()
+
+    def is_initialized(self) -> bool:
+        """Check if the database service is properly initialized.
+
+        This checks:
+        - SessionLocal exists and is callable
+        - Engine exists and is connected
+        - Required tables (tracks, playlists) exist
+
+        Returns:
+            True if fully initialized, False otherwise
+        """
+        try:
+            # Check if SessionLocal exists and is callable
+            if not hasattr(self, "SessionLocal") or not callable(self.SessionLocal):
+                logger.debug("SessionLocal not properly set up")
+                return False
+
+            # Check if engine exists
+            if not hasattr(self, "engine"):
+                logger.debug("Engine not set up")
+                return False
+
+            # Check if required tables exist
+            inspector = inspect(self.engine)
+            has_tracks = inspector.has_table("tracks")
+            has_playlists = inspector.has_table("playlists")
+
+            if not (has_tracks and has_playlists):
+                logger.debug(
+                    "Required tables missing - tracks: %s, playlists: %s",
+                    has_tracks,
+                    has_playlists,
+                )
+                return False
+
+            # Try to create a test session to verify configuration works
+            with self.SessionLocal() as session:
+                session.execute(select(1))
+
+            return True
+        except Exception as e:
+            logger.debug("Database initialization check failed: %s", e)
+            return False
 
     # =========================================================================
     # Track Operations
