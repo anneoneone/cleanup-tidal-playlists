@@ -393,7 +393,7 @@ def sync_command(
         raise click.Abort()
 
 
-@click.command("sync")
+@click.command("legacy_sync")
 @click.option(
     "--playlist",
     "-p",
@@ -405,7 +405,7 @@ def sync_command(
     help="Path to emoji-to-MyTag mapping config (uses default if not specified)",
 )
 @click.pass_obj
-def sync(
+def legacy_sync(
     app: TidalCleanupApp,
     playlist: Optional[str],
     emoji_config: Optional[Path],
@@ -414,7 +414,7 @@ def sync(
     sync_command(app, playlist, emoji_config)
 
 
-@click.command("convert")
+@click.command("legacy_convert")
 @click.option(
     "-p",
     "--playlist",
@@ -423,7 +423,7 @@ def sync(
     help="Convert only the playlist with closest match to the given name",
 )
 @click.pass_obj
-def convert(app: TidalCleanupApp, playlist: Optional[str]) -> None:
+def legacy_convert(app: TidalCleanupApp, playlist: Optional[str]) -> None:
     """Convert audio files from M4A to MP3."""
     app._convert_files(playlist_name=playlist)
 
@@ -435,9 +435,9 @@ def status(app: TidalCleanupApp) -> None:
     app.show_status()
 
 
-@click.command("full")
+@click.command("legacy_full")
 @click.pass_obj
-def full(app: TidalCleanupApp) -> None:
+def legacy_full(app: TidalCleanupApp) -> None:
     """Run full workflow: sync, convert, and generate Rekordbox XML."""
     console.print("[bold green]Running full workflow...[/bold green]")
 

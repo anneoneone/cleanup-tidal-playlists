@@ -2,16 +2,16 @@
 
 from .database import db
 from .download import download
-from .legacy import TidalCleanupApp, convert, full, status, sync
+from .legacy import TidalCleanupApp, legacy_convert, legacy_full, legacy_sync, status
 from .rekordbox import rekordbox
 
 __all__ = [
     "TidalCleanupApp",
-    "sync",
-    "convert",
+    "legacy_sync",
+    "legacy_convert",
     "rekordbox",
     "status",
-    "full",
+    "legacy_full",
     "download",
     "db",
 ]

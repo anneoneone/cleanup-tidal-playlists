@@ -11,13 +11,13 @@ import click
 from ..utils.logging_config import configure_third_party_loggers, setup_logging
 from .commands import (
     TidalCleanupApp,
-    convert,
     db,
     download,
-    full,
+    legacy_convert,
+    legacy_full,
+    legacy_sync,
     rekordbox,
     status,
-    sync,
 )
 
 
@@ -50,11 +50,11 @@ def cli(ctx: Any, log_level: str, log_file: str, no_interactive: bool) -> None:
 
 
 # Register command groups and commands
-cli.add_command(sync)
-cli.add_command(convert)
+cli.add_command(legacy_sync)
+cli.add_command(legacy_convert)
 cli.add_command(rekordbox)
 cli.add_command(status)
-cli.add_command(full)
+cli.add_command(legacy_full)
 cli.add_command(download)
 cli.add_command(db)
 
