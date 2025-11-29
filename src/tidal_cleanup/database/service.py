@@ -421,15 +421,15 @@ class DatabaseService:
                 if position is not None:
                     playlist_track.position = position
                 if in_tidal:
-                    playlist_track.in_tidal = True
+                    playlist_track.in_tidal = bool(True)
                     if not playlist_track.added_to_tidal:
                         playlist_track.added_to_tidal = datetime.now(timezone.utc)
                 if in_local:
-                    playlist_track.in_local = True
+                    playlist_track.in_local = bool(True)
                     if not playlist_track.added_to_local:
                         playlist_track.added_to_local = datetime.now(timezone.utc)
                 if in_rekordbox:
-                    playlist_track.in_rekordbox = True
+                    playlist_track.in_rekordbox = bool(True)
                     if not playlist_track.added_to_rekordbox:
                         playlist_track.added_to_rekordbox = datetime.now(timezone.utc)
                 playlist_track.updated_at = datetime.now(timezone.utc)

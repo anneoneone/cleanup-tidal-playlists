@@ -1,7 +1,9 @@
 """CLI command modules."""
 
 from .database import db
+from .diff import diff_command
 from .download import download
+from .init import check_all_services, init_command
 from .legacy import TidalCleanupApp, legacy_convert, legacy_full, legacy_sync, status
 from .rekordbox import rekordbox
 
@@ -14,4 +16,7 @@ __all__ = [
     "legacy_full",
     "download",
     "db",
+    "init_command",
+    "check_all_services",
+    "diff_command",
 ]

@@ -72,8 +72,49 @@ class FilesystemScanner:
         self.supported_extensions = supported_extensions
         self._stats = ScanStatistics()
 
+    def scan_playlist(self, playlist_name: str) -> Dict[str, Any]:
+        """Scan a single playlist directory and update database.
+
+        Args:
+            playlist_name: Name of the playlist to scan
+
+        Returns:
+            Dictionary with scan statistics
+
+        Raises:
+            RuntimeError: If playlists root directory doesn't exist
+            ValueError: If playlist directory doesn't exist
+        """
+        playlist_dir = self.playlists_root / playlist_name
+
+        if not playlist_dir.exists() or not playlist_dir.is_dir():
+            raise ValueError(f"Playlist directory does not exist: {playlist_dir}")
+
+        logger.info("Scanning playlist: %s", playlist_name)
+        return self._scan_playlists([playlist_dir])
+
     def scan_all_playlists(self) -> Dict[str, Any]:
         """Scan all playlist directories and update database.
+
+        Returns:
+            Dictionary with scan statistics
+
+        Raises:
+            RuntimeError: If playlists root directory doesn't exist
+        """
+        logger.info("Scanning playlists from: %s", self.playlists_root)
+
+        # Get all playlist directories
+        playlist_dirs = self._find_playlist_directories()
+        logger.info("Found %d playlist directories", len(playlist_dirs))
+
+        return self._scan_playlists(playlist_dirs)
+
+    def _scan_playlists(self, playlist_dirs: List[Path]) -> Dict[str, Any]:
+        """Internal method to scan a list of playlist directories.
+
+        Args:
+            playlist_dirs: List of playlist directory paths to scan
 
         Returns:
             Dictionary with scan statistics
@@ -88,12 +129,6 @@ class FilesystemScanner:
 
         # Reset statistics for new scan
         self._stats = ScanStatistics()
-
-        logger.info("Scanning playlists from: %s", self.playlists_root)
-
-        # Get all playlist directories
-        playlist_dirs = self._find_playlist_directories()
-        logger.info("Found %d playlist directories", len(playlist_dirs))
 
         # Process each playlist directory
         for playlist_dir in playlist_dirs:

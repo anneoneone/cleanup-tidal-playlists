@@ -222,7 +222,7 @@ class TidalService:
             tracks = [self._extract_track_metadata(t) for t in tidal_tracks]
 
             logger.info(
-                "Retrieved %d tracks from playlist %d", len(tracks), playlist_id
+                "Retrieved %d tracks from playlist %s", len(tracks), playlist_id
             )
             return tracks
 

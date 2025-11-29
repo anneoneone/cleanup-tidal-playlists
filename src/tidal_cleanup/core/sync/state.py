@@ -263,7 +263,7 @@ class SyncStateComparator:
                         change_type=ChangeType.PLAYLIST_ADDED,
                         entity_type="playlist",
                         new_value=snapshot_pl["name"],
-                        metadata={"tidal_id": tidal_id},
+                        metadata={"tidal_id": tidal_id, "playlist_data": snapshot_pl},
                     )
                 )
             else:

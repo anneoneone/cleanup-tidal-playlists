@@ -134,33 +134,64 @@ def log_exception(logger: logging.Logger, message: str) -> None:
 
 
 def set_log_level(level: str) -> None:
-    """Change the log level for all handlers.
+    """Change the log level for application loggers only.
+
+    Only sets the specified level for tidal_cleanup loggers.
+    Third-party loggers remain at INFO or higher to reduce noise.
 
     Args:
         level: New log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
     numeric_level = getattr(logging, level.upper(), logging.INFO)
 
+    # Set root logger level to the minimum needed
     root_logger = logging.getLogger()
-    root_logger.setLevel(numeric_level)
+    root_logger.setLevel(logging.DEBUG if level.upper() == "DEBUG" else numeric_level)
 
+    # Set all handler levels
     for handler in root_logger.handlers:
         handler.setLevel(numeric_level)
 
+    # Set level only for tidal_cleanup loggers
+    for name in list(logging.root.manager.loggerDict):
+        if name.startswith("tidal_cleanup"):
+            logger = logging.getLogger(name)
+            logger.setLevel(numeric_level)
+
+    # Ensure third-party loggers stay quiet
+    if level.upper() == "DEBUG":
+        configure_third_party_loggers()
+
     logger = logging.getLogger(__name__)
-    logger.info("Log level changed to: %s", level)
+    logger.debug("Log level changed to: %s (tidal_cleanup loggers only)", level)
 
 
 # Silence noisy third-party loggers
 def configure_third_party_loggers() -> None:
     """Configure third-party library loggers to reduce noise."""
-    # Reduce logging from mutagen
+    # Database/SQLAlchemy - silence ALL sqlalchemy loggers
+    logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine.base").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine.cursor").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.dialects").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.orm").setLevel(logging.WARNING)
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+
+    # Mutagen (audio file metadata)
     logging.getLogger("mutagen").setLevel(logging.WARNING)
 
-    # Reduce logging from requests (used by tidalapi)
+    # HTTP/Network libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    # Reduce logging from other common libraries
+    # Other common libraries
     logging.getLogger("PIL").setLevel(logging.WARNING)
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
+
+    # Tidal libraries
+    logging.getLogger("tidalapi").setLevel(logging.WARNING)
+    logging.getLogger("tidal_dl_ng").setLevel(logging.WARNING)
