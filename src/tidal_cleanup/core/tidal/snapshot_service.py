@@ -409,31 +409,12 @@ class TidalSnapshotService:
         self.db_service.create_or_update_playlist(playlist_data)
         logger.info("Added playlist: %s", playlist_data["name"])
 
-        # Fetch tracks from Tidal API with caching
-        logger.debug(f"Fetching {tidal_id} tracks from Tidal")
-        tidal_tracks = self._get_playlist_tracks_cached(tidal_id)
-        logger.debug(f"Retrieved {len(tidal_tracks)} tracks from Tidal")
-
+        # Add all tracks from Tidal to the newly created playlist
         db_playlist = self.db_service.get_playlist_by_tidal_id(tidal_id)
-
         if db_playlist:
-            logger.debug(
-                f"Adding {len(tidal_tracks)} tracks to playlist {db_playlist.id}"
-            )
-            for idx, tidal_track in enumerate(tidal_tracks):
-                track_data = self._track_to_dict(tidal_track)
-                db_track = self.db_service.create_or_update_track(track_data)
-                logger.debug(
-                    f"  Track {idx}: {track_data['artist']} - {track_data['title']} "
-                    f"(tidal_id={track_data['tidal_id']}, db_id={db_track.id})"
-                )
-                self.db_service.add_track_to_playlist(
-                    db_playlist.id, db_track.id, position=idx, in_tidal=True
-                )
-                logger.debug("    Set in_tidal=True for playlist_track")
-
+            self._add_tidal_tracks_to_playlist(tidal_id, db_playlist.id)
             logger.info(
-                f"Added {len(tidal_tracks)} tracks to playlist {playlist_data['name']}"
+                f"Completed adding playlist {playlist_data['name']} with all tracks"
             )
 
     def _handle_playlist_removed(self, change: Change) -> None:
@@ -613,6 +594,38 @@ class TidalSnapshotService:
                     self.db_service.update_track_sync_state(
                         playlist_id, db_track.id, in_tidal=True
                     )
+
+    def _add_tidal_tracks_to_playlist(
+        self, tidal_playlist_id: str, db_playlist_id: int
+    ) -> None:
+        """Add all tracks from Tidal playlist to database playlist.
+
+        This method fetches tracks from Tidal (with caching), creates or updates
+        track records in the database, and adds them to the specified playlist
+        with the correct positions and in_tidal flag set.
+
+        Args:
+            tidal_playlist_id: Tidal playlist ID
+            db_playlist_id: Database playlist ID
+        """
+        # Fetch tracks from Tidal API with caching
+        logger.debug(f"Fetching tracks for playlist {tidal_playlist_id} from Tidal")
+        tidal_tracks = self._get_playlist_tracks_cached(tidal_playlist_id)
+        logger.debug(f"Retrieved {len(tidal_tracks)} tracks from Tidal")
+
+        # Add each track to the playlist
+        logger.debug(f"Adding {len(tidal_tracks)} tracks to playlist {db_playlist_id}")
+        for idx, tidal_track in enumerate(tidal_tracks):
+            track_data = self._track_to_dict(tidal_track)
+            db_track = self.db_service.create_or_update_track(track_data)
+            logger.debug(
+                f"  Track {idx}: {track_data['artist']} - {track_data['title']} "
+                f"(tidal_id={track_data['tidal_id']}, db_id={db_track.id})"
+            )
+            self.db_service.add_track_to_playlist(
+                db_playlist_id, db_track.id, position=idx, in_tidal=True
+            )
+            logger.debug("    Set in_tidal=True for playlist_track")
 
     # =========================================================================
     # Helper Methods
