@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""
-Helper script to identify and report on logging statements that need conversion.
+"""Helper script to identify and report on logging statements that need conversion.
+
 Provides specific line numbers and context for manual review and conversion.
 """
 
