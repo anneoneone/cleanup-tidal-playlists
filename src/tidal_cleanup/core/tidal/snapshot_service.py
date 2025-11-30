@@ -81,14 +81,17 @@ class TidalSnapshotService:
         tidal_playlists = self._fetch_tidal_playlists(playlist_name)
         db_playlists = self._fetch_db_playlists(playlist_name)
 
-        # Initialize sync state and compare playlists
+        # Compare playlists
+        playlist_changes = self._compare_playlists_and_get_changes(
+            tidal_playlists, db_playlists
+        )
+
         sync_state = SyncState(
             tidal_playlists_count=len(tidal_playlists),
             database_playlists_count=len(db_playlists),
         )
-        self._compare_and_add_playlist_changes(
-            tidal_playlists, db_playlists, sync_state
-        )
+        for change in playlist_changes:
+            sync_state.add_change(change)
 
         # Compare tracks for each playlist
         tidal_track_ids = self._process_playlist_tracks(tidal_playlists, sync_state)
@@ -147,26 +150,29 @@ class TidalSnapshotService:
         logger.info("Found %d playlists in database", len(db_playlists))
         return db_playlists
 
-    def _compare_and_add_playlist_changes(
+    def _compare_playlists_and_get_changes(
         self,
         tidal_playlists: List[Any],
         db_playlists: List[Playlist],
-        sync_state: SyncState,
-    ) -> None:
-        """Compare playlists and add changes to sync state.
+    ) -> List[Change]:
+        """Compare playlists and return detected changes.
 
         Args:
             tidal_playlists: List of Tidal playlist objects
             db_playlists: List of database Playlist objects
-            sync_state: SyncState to add changes to
+
+        Returns:
+            List of Change objects representing playlist differences
         """
-        snapshot_playlists = [self._playlist_to_dict(p) for p in tidal_playlists]
+        # Convert Tidal playlist objects to dictionaries for comparison
+        tidal_playlists_dict = [
+            self._playlist_to_dict(playlist) for playlist in tidal_playlists
+        ]
         playlist_changes = self.comparator.compare_playlists(
-            db_playlists, snapshot_playlists
+            db_playlists, tidal_playlists_dict
         )
 
-        for change in playlist_changes:
-            sync_state.add_change(change)
+        return playlist_changes
 
     def _process_playlist_tracks(
         self, tidal_playlists: List[Any], sync_state: SyncState
@@ -194,7 +200,7 @@ class TidalSnapshotService:
             )
 
             if db_playlist:
-                self._process_existing_playlist_tracks(
+                self._compare_and_sync_tracks(
                     tidal_playlist, db_playlist, sync_state, tidal_track_ids
                 )
             else:
@@ -205,7 +211,7 @@ class TidalSnapshotService:
 
         return tidal_track_ids
 
-    def _process_existing_playlist_tracks(
+    def _compare_and_sync_tracks(
         self,
         tidal_playlist: Any,
         db_playlist: Playlist,
@@ -220,40 +226,27 @@ class TidalSnapshotService:
             sync_state: SyncState to add changes to
             tidal_track_ids: Set to collect unique track IDs
         """
-        # Fetch tracks from Tidal
         tidal_tracks = self.tidal_service.get_playlist_tracks(tidal_playlist.tidal_id)
-        logger.info(
-            f"Found {len(tidal_tracks)} tracks in Tidal "
-            f"playlist '{tidal_playlist.name}'"
-        )
-
-        # Collect unique track IDs
         for track in tidal_tracks:
             if track.tidal_id:
                 tidal_track_ids.add(track.tidal_id)
 
-        # Get tracks from database
         db_tracks: List[PlaylistTrack] = (
             self.db_service.get_playlist_track_associations(db_playlist.id)
         )
-        logger.info(
-            f"Found {len(db_tracks)} tracks in database "
-            f"playlist '{db_playlist.name}'"
-        )
 
-        # Compare tracks and add changes
-        snapshot_tracks = [
+        tidal_tracks_dict = [
             self._track_to_snapshot_dict(t, idx) for idx, t in enumerate(tidal_tracks)
         ]
         track_changes = self.comparator.compare_playlist_tracks(
-            db_tracks, snapshot_tracks, db_playlist.id
+            db_tracks, tidal_tracks_dict, db_playlist.id
         )
 
         for change in track_changes:
             sync_state.add_change(change)
 
         # Mark all tracks as in_tidal=True
-        self._mark_tracks_in_tidal(tidal_tracks, db_playlist.id)
+        self._mark_tidal_tracks_in_db(tidal_tracks, db_playlist.id)
 
     def apply_tidal_state_to_db(self, sync_state: SyncState) -> Dict[str, int]:
         """Apply Tidal state changes to database.
@@ -599,7 +592,9 @@ class TidalSnapshotService:
                 f"{list(update_data.keys())}"
             )
 
-    def _mark_tracks_in_tidal(self, tidal_tracks: List[Any], playlist_id: int) -> None:
+    def _mark_tidal_tracks_in_db(
+        self, tidal_tracks: List[Any], playlist_id: int
+    ) -> None:
         """Mark all tracks in a playlist as present in Tidal.
 
         Args:
