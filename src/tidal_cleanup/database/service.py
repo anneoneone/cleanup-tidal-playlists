@@ -658,6 +658,59 @@ class DatabaseService:
             )
             return True
 
+    def clear_playlist_track_flag(
+        self,
+        flag_name: str,
+        playlist_name: Optional[str] = None,
+    ) -> int:
+        """Clear a specific flag for playlist tracks.
+
+        This method sets a boolean flag (in_tidal, in_local, or in_rekordbox)
+        to False for all playlist tracks, or only those in a specific playlist.
+
+        Args:
+            flag_name: Name of flag to clear ('in_tidal', 'in_local',
+                      'in_rekordbox')
+            playlist_name: Optional playlist name to filter by.
+                          If None, clears flag for all playlists.
+
+        Returns:
+            Number of playlist tracks updated
+
+        Raises:
+            ValueError: If flag_name is not valid
+        """
+        valid_flags = {"in_tidal", "in_local", "in_rekordbox"}
+        if flag_name not in valid_flags:
+            raise ValueError(
+                f"Invalid flag name: {flag_name}. Must be one of {valid_flags}"
+            )
+
+        with self.get_session() as session:
+            query = session.query(PlaylistTrack)
+
+            # Filter by playlist if specified
+            if playlist_name:
+                playlist_obj = self.get_playlist_by_name(playlist_name)
+                if playlist_obj:
+                    logger.debug(
+                        f"Clearing {flag_name} flags for playlist '{playlist_name}' "
+                        f"(ID: {playlist_obj.id})"
+                    )
+                    query = query.filter(PlaylistTrack.playlist_id == playlist_obj.id)
+                else:
+                    logger.warning(f"Playlist '{playlist_name}' not found in database")
+                    return 0
+            else:
+                logger.debug(f"Clearing {flag_name} flags for all playlists")
+
+            # Update flag to False (0)
+            reset_count = query.update({flag_name: 0})
+            session.commit()
+            logger.debug(f"Cleared {flag_name} flag for {reset_count} playlist tracks")
+
+            return reset_count
+
     # =========================================================================
     # Sync Operation Management
     # =========================================================================

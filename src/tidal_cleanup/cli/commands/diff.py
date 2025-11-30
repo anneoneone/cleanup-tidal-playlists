@@ -48,26 +48,7 @@ def fetch_tidal_state(
     console.print("[cyan]Fetching from Tidal...[/cyan]")
 
     # Reset in_tidal flags (filtered by playlist if specified)
-    with db_service.get_session() as session:
-        query = session.query(PlaylistTrack)
-        if playlist_name:
-            playlist_obj = (
-                session.query(Playlist).filter(Playlist.name == playlist_name).first()
-            )
-            if playlist_obj:
-                logger.debug(
-                    f"Resetting in_tidal flags for playlist '{playlist_name}' "
-                    f"(ID: {playlist_obj.id})"
-                )
-                query = query.filter(PlaylistTrack.playlist_id == playlist_obj.id)
-            else:
-                logger.debug(f"Playlist '{playlist_name}' not found in database")
-        else:
-            logger.debug("Resetting in_tidal flags for all playlists")
-
-        reset_count = query.update({"in_tidal": 0})
-        session.commit()
-        logger.debug(f"Reset in_tidal flag for {reset_count} playlist tracks")
+    db_service.clear_playlist_track_flag("in_tidal", playlist_name=playlist_name)
 
     # Use TidalSnapshotService to sync Tidal state to database
     logger.debug(f"Starting Tidal sync (playlist_filter: {playlist_name or 'None'})")
@@ -120,26 +101,7 @@ def fetch_local_state(
     console.print("[cyan]Scanning local filesystem...[/cyan]")
 
     # Reset in_local flags (filtered by playlist if specified)
-    with db_service.get_session() as session:
-        query = session.query(PlaylistTrack)
-        if playlist_name:
-            playlist_obj = (
-                session.query(Playlist).filter(Playlist.name == playlist_name).first()
-            )
-            if playlist_obj:
-                logger.debug(
-                    f"Resetting in_local flags for playlist '{playlist_name}' "
-                    f"(ID: {playlist_obj.id})"
-                )
-                query = query.filter(PlaylistTrack.playlist_id == playlist_obj.id)
-            else:
-                logger.debug(f"Playlist '{playlist_name}' not found in database")
-        else:
-            logger.debug("Resetting in_local flags for all playlists")
-
-        reset_count = query.update({"in_local": 0})
-        session.commit()
-        logger.debug(f"Reset in_local flag for {reset_count} playlist tracks")
+    db_service.clear_playlist_track_flag("in_local", playlist_name=playlist_name)
 
     playlists_root = Path(config.mp3_directory) / "Playlists"
 
@@ -211,9 +173,7 @@ def fetch_rekordbox_state(
     console.print("[cyan]Checking Rekordbox database...[/cyan]")
 
     # Reset all in_rekordbox flags to False before checking
-    with db_service.get_session() as session:
-        session.query(PlaylistTrack).update({"in_rekordbox": 0})
-        session.commit()
+    db_service.clear_playlist_track_flag("in_rekordbox")
 
     if rekordbox_service is None:
         console.print("  [yellow]⚠ Rekordbox database not available[/yellow]")
