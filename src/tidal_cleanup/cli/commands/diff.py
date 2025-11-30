@@ -346,6 +346,131 @@ def get_tracks_with_diffs(
     return tracks_with_diffs
 
 
+def get_all_playlist_tracks(
+    db_service: DatabaseService, playlist_name: str
+) -> List[Dict[str, Any]]:
+    """Get all tracks from a specific playlist with their details.
+
+    Args:
+        db_service: Database service
+        playlist_name: Name of the playlist to fetch tracks from
+
+    Returns:
+        List of dictionaries with track info including file paths
+    """
+    from sqlalchemy.orm import joinedload
+
+    with db_service.get_session() as session:
+        # Get the playlist
+        playlist_obj = (
+            session.query(Playlist).filter(Playlist.name == playlist_name).first()
+        )
+
+        if not playlist_obj:
+            return []
+
+        # Get all playlist tracks with their associated track data
+        query = (
+            session.query(PlaylistTrack)
+            .options(joinedload(PlaylistTrack.track))
+            .filter(PlaylistTrack.playlist_id == playlist_obj.id)
+            .order_by(PlaylistTrack.position)
+        )
+
+        all_playlist_tracks = query.all()
+
+    tracks_info = []
+    for pt in all_playlist_tracks:
+        track = pt.track
+        tracks_info.append(
+            {
+                "playlist_track": pt,
+                "track": track,
+                "in_tidal": bool(pt.in_tidal),
+                "in_local": bool(pt.in_local),
+                "in_rekordbox": bool(pt.in_rekordbox),
+                "file_path": track.file_path or "",
+                "position": pt.position,
+            }
+        )
+
+    return tracks_info
+
+
+def display_playlist_table(  # noqa: C901
+    tracks_info: List[Dict[str, Any]], playlist_name: str, exclude_services: Set[str]
+) -> None:
+    """Display all tracks in a playlist with their status and file locations.
+
+    Args:
+        tracks_info: List of track information dictionaries
+        playlist_name: Name of the playlist being displayed
+        exclude_services: Set of excluded service names
+    """
+    if not tracks_info:
+        console.print(
+            f"\n[yellow]No tracks found in playlist '{playlist_name}'[/yellow]\n"
+        )
+        return
+
+    console.print(
+        f"\n[bold cyan]Playlist: {playlist_name} ({len(tracks_info)} tracks)"
+        "[/bold cyan]\n"
+    )
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("#", style="dim", width=4, justify="right")
+    table.add_column("Track", style="cyan", width=40)
+
+    # Add columns for services that aren't excluded
+    if "tidal" not in exclude_services:
+        table.add_column("Tidal", width=8, justify="center")
+    if "local" not in exclude_services:
+        table.add_column("Local", width=8, justify="center")
+    if "rekordbox" not in exclude_services:
+        table.add_column("Rekordbox", width=10, justify="center")
+
+    # Add file path column
+    table.add_column("File Path", style="dim", width=60)
+
+    for track_info in tracks_info:
+        track = track_info["track"]
+        track_name = f"{track.artist} - {track.title}"
+
+        row_data = [str(track_info["position"] or ""), track_name]
+
+        # Add status for each non-excluded service
+        if "tidal" not in exclude_services:
+            tidal_status = "✓" if track_info["in_tidal"] else "✗"
+            tidal_color = "green" if track_info["in_tidal"] else "red"
+            row_data.append(f"[{tidal_color}]{tidal_status}[/{tidal_color}]")
+
+        if "local" not in exclude_services:
+            local_status = "✓" if track_info["in_local"] else "✗"
+            local_color = "green" if track_info["in_local"] else "red"
+            row_data.append(f"[{local_color}]{local_status}[/{local_color}]")
+
+        if "rekordbox" not in exclude_services:
+            rb_status = "✓" if track_info["in_rekordbox"] else "✗"
+            rb_color = "green" if track_info["in_rekordbox"] else "red"
+            row_data.append(f"[{rb_color}]{rb_status}[/{rb_color}]")
+
+        # Add file path (show relative path or "Not found")
+        file_path = track_info["file_path"]
+        if file_path:
+            # Shorten path if too long
+            if len(file_path) > 57:
+                file_path = "..." + file_path[-54:]
+            row_data.append(file_path)
+        else:
+            row_data.append("[red]Not found[/red]")
+
+        table.add_row(*row_data)
+
+    console.print(table)
+    console.print()
+
+
 def display_diff_table(
     tracks_with_diffs: List[Dict[str, Any]], exclude_services: Set[str]
 ) -> None:
@@ -497,18 +622,24 @@ def diff_command(  # noqa: C901
                     raise click.ClickException(f"Playlist '{playlist}' not found")
             console.print(f"[cyan]Filtering by playlist: {playlist}[/cyan]\n")
 
-        # Compute diffs
-        console.print("[cyan]Computing differences...[/cyan]")
-        tracks_with_diffs = get_tracks_with_diffs(
-            db_service, exclude_services, playlist_name=playlist
-        )
-        console.print(
-            f"  [green]✓ Found {len(tracks_with_diffs)} tracks with differences"
-            "[/green]\n"
-        )
-
-        # Display results
-        display_diff_table(tracks_with_diffs, exclude_services)
+        # Display results based on whether playlist filter is used
+        if playlist:
+            # Show all tracks in the playlist with file paths
+            console.print("[cyan]Fetching playlist tracks...[/cyan]")
+            all_tracks = get_all_playlist_tracks(db_service, playlist)
+            console.print(f"  [green]✓ Found {len(all_tracks)} tracks[/green]\n")
+            display_playlist_table(all_tracks, playlist, exclude_services)
+        else:
+            # Show only tracks with differences (original behavior)
+            console.print("[cyan]Computing differences...[/cyan]")
+            tracks_with_diffs = get_tracks_with_diffs(
+                db_service, exclude_services, playlist_name=playlist
+            )
+            console.print(
+                f"  [green]✓ Found {len(tracks_with_diffs)} tracks with differences"
+                "[/green]\n"
+            )
+            display_diff_table(tracks_with_diffs, exclude_services)
 
         # Show summary
         console.print("\n[bold cyan]📊 Summary[/bold cyan]\n")
