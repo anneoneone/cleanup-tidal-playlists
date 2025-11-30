@@ -3,14 +3,17 @@
 ## What We Changed
 
 ### 1. Logging Format Enhancement
+
 Updated `src/tidal_cleanup/utils/logging_config.py` to include filename and function name in all log messages:
 
 **Before:**
+
 ```python
 fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 ```
 
 **After:**
+
 ```python
 fmt="%(asctime)s - %(filename)s:%(funcName)s - %(levelname)s - %(message)s"
 ```
@@ -20,19 +23,23 @@ This applies to both console and file logging handlers.
 ### 2. Logging Best Practices Applied
 
 #### Use %-formatting (Lazy Evaluation)
+
 **❌ Bad (f-strings - evaluates even if not logged):**
+
 ```python
 logger.info(f"Processing {count} items from playlist {name}")
 logger.error(f"Failed to process {item}: {error}")
 ```
 
 **✅ Good (%-formatting - lazy evaluation):**
+
 ```python
 logger.info("Processing %d items from playlist %s", count, name)
 logger.error("Failed to process %s: %s", item, error)
 ```
 
 #### Log Levels
+
 - **DEBUG**: Detailed diagnostic information for troubleshooting
 - **INFO**: Confirmation things are working, general progress/counts
 - **WARNING**: Unexpected but recoverable situations
@@ -40,12 +47,14 @@ logger.error("Failed to process %s: %s", item, error)
 - **CRITICAL**: Very serious errors that may cause application failure
 
 #### Message Structure
+
 - Start with clear action verb or state
 - Include relevant context (what, where, counts)
 - Make messages grep-able
 - Be specific
 
 **Examples:**
+
 ```python
 # Good - actionable, clear context
 logger.info("Tidal fetch complete: %d playlists created, %d updated", created, updated)
@@ -69,6 +78,7 @@ logger.warning("Something wrong")
 Based on grep analysis, the following files have f-string logging that needs conversion:
 
 ### High Priority (Core Services)
+
 - `src/tidal_cleanup/services/file_service.py` (24 instances)
 - `src/tidal_cleanup/services/rekordbox_playlist_sync.py` (43 instances)
 - `src/tidal_cleanup/services/rekordbox_service.py` (16 instances)
@@ -76,6 +86,7 @@ Based on grep analysis, the following files have f-string logging that needs con
 - `src/tidal_cleanup/services/tidal_download_service.py` (13 instances)
 
 ### Medium Priority (Database Layer)
+
 - `src/tidal_cleanup/database/download_orchestrator.py` (19 instances)
 - `src/tidal_cleanup/database/tidal_snapshot_service.py` (15 instances)
 - `src/tidal_cleanup/database/file_scanner_service.py` (8 instances)
@@ -83,6 +94,7 @@ Based on grep analysis, the following files have f-string logging that needs con
 - `src/tidal_cleanup/database/sync_orchestrator.py` (4 instances)
 
 ### Lower Priority
+
 - `src/tidal_cleanup/services/mytag_manager.py` (8 instances)
 - `src/tidal_cleanup/services/playlist_name_parser.py` (2 instances)
 - `src/tidal_cleanup/services/track_comparison_service.py` (3 instances)
@@ -97,6 +109,7 @@ Based on grep analysis, the following files have f-string logging that needs con
 ## Conversion Patterns
 
 ### Pattern 1: Simple variable substitution
+
 ```python
 # Before
 logger.info(f"Processing {count} items")
@@ -105,6 +118,7 @@ logger.info("Processing %d items", count)
 ```
 
 ### Pattern 2: Multiple variables
+
 ```python
 # Before
 logger.error(f"Failed to delete {file_path}: {e}")
@@ -113,6 +127,7 @@ logger.error("Failed to delete %s: %s", file_path, e)
 ```
 
 ### Pattern 3: With repr()
+
 ```python
 # Before
 logger.error(f"Cannot write to home directory, $HOME={homedir}")
@@ -121,6 +136,7 @@ logger.error("Cannot write to home directory, $HOME=%r", homedir)
 ```
 
 ### Pattern 4: Long messages (split for readability)
+
 ```python
 # Before
 logger.info(f"Tidal fetch complete: {created} playlists created, {updated} updated")
