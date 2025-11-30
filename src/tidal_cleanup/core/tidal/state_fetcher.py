@@ -431,7 +431,7 @@ class TidalStateFetcher:
 
                     # Add track to playlist (or update position) and mark as in_tidal
                     self.db_service.add_track_to_playlist(
-                        db_playlist.id, db_track.id, position=position, in_tidal=False
+                        db_playlist.id, db_track.id, position=position, in_tidal=True
                     )
 
                 except Exception as e:
