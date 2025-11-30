@@ -631,10 +631,15 @@ class DatabaseService:
             )
             playlist_track = session.scalar(stmt)
 
+            # Get names for readable logging
+            playlist_name = self.get_playlist_name(playlist_id)
+            track_name = self.get_track_name(track_id)
+
             if not playlist_track:
                 logger.warning(
                     f"PlaylistTrack not found: "
-                    f"playlist={playlist_id}, track={track_id}"
+                    f"playlist={playlist_name}(id={playlist_id}), "
+                    f"track={track_name}(id={track_id})"
                 )
                 return False
 
@@ -647,8 +652,9 @@ class DatabaseService:
 
             session.commit()
             logger.debug(
-                f"Updated track sync state: playlist={playlist_id}, "
-                f"track={track_id}"
+                f"Updated track sync state: playlist='{playlist_name}', "
+                f"track='{track_name}' (in_tidal={in_tidal}, in_local={in_local}, "
+                f"in_rekordbox={in_rekordbox})"
             )
             return True
 
@@ -782,6 +788,30 @@ class DatabaseService:
     # =========================================================================
     # Utility Methods
     # =========================================================================
+
+    def get_playlist_name(self, playlist_id: int) -> str:
+        """Get playlist name by ID for logging/display.
+
+        Args:
+            playlist_id: Playlist database ID
+
+        Returns:
+            Playlist name or formatted ID if not found
+        """
+        playlist = self.get_playlist_by_id(playlist_id)
+        return playlist.name if playlist else f"ID:{playlist_id}"
+
+    def get_track_name(self, track_id: int) -> str:
+        """Get track name by ID for logging/display.
+
+        Args:
+            track_id: Track database ID
+
+        Returns:
+            Formatted track name (Artist - Title) or ID if not found
+        """
+        track = self.get_track_by_id(track_id)
+        return f"{track.artist} - {track.title}" if track else f"ID:{track_id}"
 
     @staticmethod
     def _normalize_track_name(title: str, artist: str) -> str:

@@ -182,10 +182,6 @@ class TidalSnapshotService:
                             self.db_service.update_track_sync_state(
                                 db_playlist.id, db_track.id, in_tidal=True
                             )
-                            logger.debug(
-                                f"  Set in_tidal=True for track {db_track.id} "
-                                f"(tidal_id={track.tidal_id})"
-                            )
             else:
                 # Playlist not in DB yet - will be added via PLAYLIST_ADDED change
                 logger.debug(
