@@ -547,6 +547,33 @@ class DatabaseService:
             )
             return list(session.scalars(stmt).all())
 
+    def get_playlist_tracks_with_tracks(
+        self,
+        playlist_id: Optional[int] = None,
+        order_by_position: bool = False,
+    ) -> List[PlaylistTrack]:
+        """Fetch PlaylistTrack rows with Track eagerly loaded.
+
+        Args:
+            playlist_id: Optional playlist ID to filter by. If None, returns all.
+            order_by_position: Whether to order results by playlist position
+
+        Returns:
+            List of PlaylistTrack objects with track relationship populated
+        """
+        with self.get_session() as session:
+            query = session.query(PlaylistTrack).options(
+                joinedload(PlaylistTrack.track)
+            )
+
+            if playlist_id is not None:
+                query = query.filter(PlaylistTrack.playlist_id == playlist_id)
+
+            if order_by_position:
+                query = query.order_by(PlaylistTrack.position)
+
+            return list(query.all())
+
     def get_track_playlists(self, track_id: int) -> List[Playlist]:
         """Get all playlists containing a track.
 
@@ -568,6 +595,119 @@ class DatabaseService:
                 .where(PlaylistTrack.track_id == track_id)
             )
             return list(session.scalars(stmt).all())
+
+    def mark_tracks_with_file_paths_as_local(
+        self, playlist_id: Optional[int] = None
+    ) -> int:
+        """Mark playlist tracks as local if their Track has a file path.
+
+        Args:
+            playlist_id: Optional playlist ID filter
+
+        Returns:
+            Number of playlist tracks updated
+        """
+        with self.get_session() as session:
+            stmt = select(PlaylistTrack).join(Track).where(Track.file_path.isnot(None))
+
+            if playlist_id is not None:
+                stmt = stmt.where(PlaylistTrack.playlist_id == playlist_id)
+
+            playlist_tracks = session.execute(stmt).scalars().all()
+
+            marked_count = 0
+            for pt in playlist_tracks:
+                if not pt.in_local:
+                    pt.in_local = True
+                    marked_count += 1
+
+            session.commit()
+            logger.debug(
+                f"Marked {marked_count} playlist tracks as in_local"
+                f"{' for playlist ' + str(playlist_id) if playlist_id else ''}"
+            )
+            return marked_count
+
+    def mark_tracks_with_rekordbox_ids(self, playlist_id: Optional[int] = None) -> int:
+        """Mark playlist tracks as present in Rekordbox when content IDs exist.
+
+        Args:
+            playlist_id: Optional playlist ID filter
+
+        Returns:
+            Number of playlist tracks updated
+        """
+        with self.get_session() as session:
+            stmt = (
+                select(PlaylistTrack)
+                .join(Track)
+                .where(Track.rekordbox_content_id.isnot(None))
+            )
+
+            if playlist_id is not None:
+                stmt = stmt.where(PlaylistTrack.playlist_id == playlist_id)
+
+            playlist_tracks = session.execute(stmt).scalars().all()
+
+            marked_count = 0
+            for pt in playlist_tracks:
+                if not pt.in_rekordbox:
+                    pt.in_rekordbox = True
+                    marked_count += 1
+
+            session.commit()
+            logger.debug(
+                f"Marked {marked_count} playlist tracks as in_rekordbox"
+                f"{' for playlist ' + str(playlist_id) if playlist_id else ''}"
+            )
+            return marked_count
+
+    def set_playlist_rekordbox_id(
+        self, playlist_id: int, rekordbox_playlist_id: Optional[str]
+    ) -> bool:
+        """Update the Rekordbox playlist identifier for a playlist."""
+        with self.get_session() as session:
+            playlist = session.get(Playlist, playlist_id)
+            if not playlist:
+                logger.warning(
+                    "Playlist not found while setting Rekordbox ID: %s", playlist_id
+                )
+                return False
+
+            playlist.rekordbox_playlist_id = (
+                str(rekordbox_playlist_id) if rekordbox_playlist_id else None
+            )
+            session.commit()
+            logger.debug(
+                "Playlist %s Rekordbox ID set to %s",
+                playlist_id,
+                playlist.rekordbox_playlist_id,
+            )
+            return True
+
+    def set_track_rekordbox_id(
+        self, track_id: int, rekordbox_content_id: Optional[str]
+    ) -> bool:
+        """Update the Rekordbox content identifier for a track."""
+        with self.get_session() as session:
+            track = session.get(Track, track_id)
+            if not track:
+                logger.warning(
+                    "Track not found while setting Rekordbox content ID: %s",
+                    track_id,
+                )
+                return False
+
+            track.rekordbox_content_id = (
+                str(rekordbox_content_id) if rekordbox_content_id else None
+            )
+            session.commit()
+            logger.debug(
+                "Track %s Rekordbox content ID set to %s",
+                track_id,
+                track.rekordbox_content_id,
+            )
+            return True
 
     def update_track_position(
         self, playlist_id: int, track_id: int, position: int

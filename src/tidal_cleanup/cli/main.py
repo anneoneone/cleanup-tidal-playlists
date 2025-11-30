@@ -20,6 +20,7 @@ from .commands import (
     legacy_sync,
     rekordbox,
     status,
+    sync_rekordbox_command,
 )
 
 
@@ -57,6 +58,7 @@ cli.add_command(diff_command)
 cli.add_command(legacy_sync)
 cli.add_command(legacy_convert)
 cli.add_command(rekordbox)
+cli.add_command(sync_rekordbox_command)
 cli.add_command(status)
 cli.add_command(legacy_full)
 cli.add_command(download)

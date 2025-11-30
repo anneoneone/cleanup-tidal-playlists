@@ -18,7 +18,7 @@ from ...config import Config
 from ...core.filesystem import FilesystemScanner
 from ...core.tidal.snapshot_service import TidalSnapshotService
 from ...database import DatabaseService
-from ...database.models import Playlist, PlaylistTrack, Track
+from ...database.models import PlaylistTrack, Track
 from ...utils.logging_config import set_log_level
 from .init import init
 
@@ -119,33 +119,18 @@ def fetch_local_state(
         logger.debug("Scanning all playlists")
         stats = scanner.scan_all_playlists()
 
-    # Mark all playlist_tracks as in_local=True for tracks found locally
-    # The scanner already updates file_path, so we check that
-    marked_count = 0
-    with db_service.get_session() as session:
-        # Get all playlist tracks where the track has a valid file_path
-        from sqlalchemy import select
-
-        stmt = select(PlaylistTrack).join(Track).where(Track.file_path.isnot(None))
-
-        # Filter by playlist if specified
-        if playlist_name:
-            playlist_obj = (
-                session.query(Playlist).filter(Playlist.name == playlist_name).first()
+    playlist_id: Optional[int] = None
+    if playlist_name:
+        playlist = db_service.get_playlist_by_name(playlist_name)
+        if playlist:
+            playlist_id = playlist.id
+        else:
+            logger.warning(
+                "Playlist '%s' not found in database; marking all playlists instead",
+                playlist_name,
             )
-            if playlist_obj:
-                stmt = stmt.where(PlaylistTrack.playlist_id == playlist_obj.id)
 
-        playlist_tracks = session.execute(stmt).scalars().all()
-
-        # Mark them as in_local
-        for pt in playlist_tracks:
-            if not pt.in_local:
-                pt.in_local = True
-                marked_count += 1
-
-        session.commit()
-        logger.debug(f"Marked {marked_count} playlist tracks as in_local")
+    marked_count = db_service.mark_tracks_with_file_paths_as_local(playlist_id)
 
     console.print(
         f"  [green]✓ Scanned {stats['playlists_scanned']} playlists "
@@ -188,24 +173,7 @@ def fetch_rekordbox_state(
 
         content_count = db.get_content().count()
 
-        # Mark playlist tracks that have rekordbox_content_id as in_rekordbox
-        marked_count = 0
-        with db_service.get_session() as session:
-            from sqlalchemy import select
-
-            stmt = (
-                select(PlaylistTrack)
-                .join(Track)
-                .where(Track.rekordbox_content_id.isnot(None))
-            )
-            playlist_tracks = session.execute(stmt).scalars().all()
-
-            for pt in playlist_tracks:
-                if not pt.in_rekordbox:
-                    pt.in_rekordbox = True
-                    marked_count += 1
-
-            session.commit()
+        marked_count = db_service.mark_tracks_with_rekordbox_ids()
 
         console.print(f"  [green]✓ Found {content_count} tracks in Rekordbox[/green]")
         console.print(
@@ -283,17 +251,19 @@ def get_tracks_with_diffs(
     Returns:
         List of dictionaries with track info and diff status
     """
-    from sqlalchemy.orm import joinedload
+    playlist_id: Optional[int] = None
+    if playlist_name:
+        playlist = db_service.get_playlist_by_name(playlist_name)
+        if playlist is None:
+            logger.warning(
+                "Playlist '%s' not found when computing diffs", playlist_name
+            )
+            return []
+        playlist_id = playlist.id
 
-    with db_service.get_session() as session:
-        # Build query with optional playlist filter
-        query = session.query(PlaylistTrack).options(joinedload(PlaylistTrack.track))
-
-        if playlist_name:
-            # Join with Playlist and filter by name
-            query = query.join(Playlist).filter(Playlist.name == playlist_name)
-
-        all_playlist_tracks = query.all()
+    all_playlist_tracks = db_service.get_playlist_tracks_with_tracks(
+        playlist_id=playlist_id
+    )
 
     tracks_with_diffs = []
 
@@ -318,26 +288,17 @@ def get_all_playlist_tracks(
     Returns:
         List of dictionaries with track info including file paths
     """
-    from sqlalchemy.orm import joinedload
-
-    with db_service.get_session() as session:
-        # Get the playlist
-        playlist_obj = (
-            session.query(Playlist).filter(Playlist.name == playlist_name).first()
+    playlist_obj = db_service.get_playlist_by_name(playlist_name)
+    if not playlist_obj:
+        logger.warning(
+            "Playlist '%s' not found when preparing playlist table", playlist_name
         )
+        return []
 
-        if not playlist_obj:
-            return []
-
-        # Get all playlist tracks with their associated track data
-        query = (
-            session.query(PlaylistTrack)
-            .options(joinedload(PlaylistTrack.track))
-            .filter(PlaylistTrack.playlist_id == playlist_obj.id)
-            .order_by(PlaylistTrack.position)
-        )
-
-        all_playlist_tracks = query.all()
+    all_playlist_tracks = db_service.get_playlist_tracks_with_tracks(
+        playlist_id=playlist_obj.id,
+        order_by_position=True,
+    )
 
     tracks_info = []
     for pt in all_playlist_tracks:
@@ -547,6 +508,9 @@ def diff_command(  # noqa: C901
 
     console.print("\n[bold cyan]🔄 Computing Synchronization Status[/bold cyan]\n")
 
+    exclude_services = {s.lower() for s in exclude}
+    tracks_with_diffs: List[Dict[str, Any]] = []
+
     try:
         config = Config()
 
@@ -554,8 +518,6 @@ def diff_command(  # noqa: C901
         console.print("[cyan]Initializing services...[/cyan]")
         db_service, tidal_service, _download_service, rekordbox_service = init(config)
         console.print("  [green]✓ All services initialized[/green]\n")
-
-        exclude_services = {s.lower() for s in exclude}
 
         # Fetch from services
         console.print("[bold]Fetching from services...[/bold]\n")
@@ -573,13 +535,10 @@ def diff_command(  # noqa: C901
 
         # Validate playlist if specified
         if playlist:
-            with db_service.get_session() as session:
-                playlist_obj = (
-                    session.query(Playlist).filter(Playlist.name == playlist).first()
-                )
-                if not playlist_obj:
-                    console.print(f"\n[red]✗ Playlist '{playlist}' not found[/red]\n")
-                    raise click.ClickException(f"Playlist '{playlist}' not found")
+            playlist_obj = db_service.get_playlist_by_name(playlist)
+            if not playlist_obj:
+                console.print(f"\n[red]✗ Playlist '{playlist}' not found[/red]\n")
+                raise click.ClickException(f"Playlist '{playlist}' not found")
             console.print(f"[cyan]Filtering by playlist: {playlist}[/cyan]\n")
 
         # Display results based on whether playlist filter is used

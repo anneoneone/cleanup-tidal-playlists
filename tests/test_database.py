@@ -131,6 +131,17 @@ class TestDatabaseService:
         assert retrieved_playlist is not None
         assert retrieved_playlist.id == created_playlist.id
 
+    def test_set_playlist_rekordbox_id(self, temp_db):
+        """Test storing Rekordbox playlist identifiers."""
+        playlist = temp_db.create_playlist({"tidal_id": "pl1", "name": "Playlist"})
+
+        updated = temp_db.set_playlist_rekordbox_id(playlist.id, "RB-42")
+        assert updated is True
+
+        refreshed = temp_db.get_playlist_by_id(playlist.id)
+        assert refreshed is not None
+        assert refreshed.rekordbox_playlist_id == "RB-42"
+
     def test_add_track_to_playlist(self, temp_db):
         """Test adding track to playlist."""
         # Create track and playlist
@@ -767,6 +778,23 @@ class TestDatabaseServiceEdgeCases:
         updated = temp_db.update_playlist_sync_status(playlist.id, "in_sync")
         assert updated.sync_status == "in_sync"
         assert updated.last_synced_filesystem is not None
+
+    def test_set_track_rekordbox_id(self, temp_db):
+        """Test storing Rekordbox content identifiers on tracks."""
+        track = temp_db.create_track(
+            {
+                "tidal_id": "t1",
+                "title": "Track",
+                "artist": "Artist",
+            }
+        )
+
+        updated = temp_db.set_track_rekordbox_id(track.id, "CONTENT-9")
+        assert updated is True
+
+        refreshed = temp_db.get_track_by_id(track.id)
+        assert refreshed is not None
+        assert refreshed.rekordbox_content_id == "CONTENT-9"
 
     def test_get_tracks_needing_download(self, temp_db):
         """Test get_tracks_needing_download returns not_downloaded tracks."""

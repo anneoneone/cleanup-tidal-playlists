@@ -145,6 +145,11 @@ class FilesystemScanner:
         Returns:
             List of playlist directory paths
         """
+        if not self.playlists_root.exists():
+            raise RuntimeError(
+                f"Playlists root directory does not exist: {self.playlists_root}"
+            )
+
         playlist_dirs: List[Path] = []
 
         for item in self.playlists_root.iterdir():
@@ -251,20 +256,29 @@ class FilesystemScanner:
         target = target_path if is_valid else None
         track = self._match_file_to_track(symlink_path, target)
 
-        if track:
-            # Update symlink information
-            result = self.db_service.update_symlink_status(
-                playlist.id,
-                track.id,
-                str(symlink_path),
-                is_valid,
+        if not track:
+            return
+
+        if (
+            is_valid
+            and target_path
+            and self._update_track_file_metadata(track.id, target_path)
+        ):
+            self._stats.tracks_updated += 1
+
+        # Update symlink information
+        result = self.db_service.update_symlink_status(
+            playlist.id,
+            track.id,
+            str(symlink_path),
+            is_valid,
+        )
+        if result:
+            self._stats.playlist_tracks_updated += 1
+            logger.debug(
+                f"Updated symlink status for track {track.id} "
+                f"in playlist {playlist.id}"
             )
-            if result:
-                self._stats.playlist_tracks_updated += 1
-                logger.debug(
-                    f"Updated symlink status for track {track.id} "
-                    f"in playlist {playlist.id}"
-                )
 
     def _process_regular_file(self, playlist: Any, file_path: Path) -> None:
         """Process a regular (non-symlink) file.
@@ -279,18 +293,8 @@ class FilesystemScanner:
         track = self._match_file_to_track(file_path, None)
 
         if track:
-            # Update track file information
-            file_stat = file_path.stat()
-
-            update_data = {
-                "file_path": str(file_path.relative_to(self.playlists_root.parent)),
-                "file_size_bytes": file_stat.st_size,
-                "file_last_modified": datetime.fromtimestamp(file_stat.st_mtime),
-                "download_status": DownloadStatus.DOWNLOADED.value,
-            }
-
-            self.db_service.update_track(track.id, update_data)
-            self._stats.tracks_updated += 1
+            if self._update_track_file_metadata(track.id, file_path):
+                self._stats.tracks_updated += 1
 
             # Mark as primary in this playlist
             result = self.db_service.mark_playlist_track_as_primary(
@@ -364,6 +368,45 @@ class FilesystemScanner:
 
         logger.debug("Could not match file to track: %s", file_path.name)
         return None
+
+    def _update_track_file_metadata(self, track_id: int, file_path: Path) -> bool:
+        """Persist filesystem metadata for a track based on a resolved path."""
+        try:
+            file_stat = file_path.stat()
+        except OSError as exc:
+            logger.warning(
+                "Cannot update track %s metadata, file unavailable: %s",
+                track_id,
+                exc,
+            )
+            return False
+
+        update_data = {
+            "file_path": self._to_library_relative_path(file_path),
+            "file_size_bytes": file_stat.st_size,
+            "file_last_modified": datetime.fromtimestamp(file_stat.st_mtime),
+            "download_status": DownloadStatus.DOWNLOADED.value,
+        }
+
+        try:
+            self.db_service.update_track(track_id, update_data)
+            return True
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "Failed to update track %s metadata for %s: %s",
+                track_id,
+                file_path,
+                exc,
+            )
+            return False
+
+    def _to_library_relative_path(self, file_path: Path) -> str:
+        """Return a path relative to the MP3 library root when possible."""
+        library_root = self.playlists_root.parent
+        try:
+            return str(file_path.relative_to(library_root))
+        except ValueError:
+            return str(file_path)
 
     def _log_scan_summary(self) -> None:
         """Log summary of scan operation."""
