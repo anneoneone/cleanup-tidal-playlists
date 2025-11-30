@@ -11,7 +11,7 @@ __all__ = [
     "Track",
     "Playlist",
     "Config",
-    "TidalService",
+    "TidalApiService",
     "FileService",
     "TrackComparisonService",
     "RekordboxService",
@@ -22,7 +22,7 @@ from .models import Playlist, Track
 from .services import (
     FileService,
     RekordboxService,
-    TidalService,
+    TidalApiService,
     TrackComparisonService,
 )
 
@@ -30,7 +30,7 @@ __all__ = [
     "Track",
     "Playlist",
     "Config",
-    "TidalService",
+    "TidalApiService",
     "FileService",
     "TrackComparisonService",
     "RekordboxService",

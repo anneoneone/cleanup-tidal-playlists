@@ -21,9 +21,9 @@ from ...services import (
     PlaylistSynchronizer,
     RekordboxGenerationError,
     RekordboxService,
+    TidalApiService,
     TidalDownloadError,
     TidalDownloadService,
-    TidalService,
     TrackComparisonService,
 )
 from ..display import display_batch_summary, display_sync_result
@@ -47,7 +47,7 @@ class TidalCleanupApp:
                 setattr(self.config, key, value)
 
         # Initialize services
-        self.tidal_service = TidalService(self.config.tidal_token_file)
+        self.tidal_service = TidalApiService(self.config.tidal_token_file)
         self.file_service = FileService(self.config.audio_extensions)
         self.comparison_service = TrackComparisonService(
             self.config.fuzzy_match_threshold

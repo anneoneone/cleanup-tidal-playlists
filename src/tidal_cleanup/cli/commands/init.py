@@ -2,7 +2,7 @@
 
 This module provides simple initialization functions that return service instances:
 - init_db() -> DatabaseService
-- init_tidal_api() -> TidalService
+- init_tidal_api() -> TidalApiService
 - init_tidal_downloader() -> TidalDownloadService
 - init_rekordbox() -> RekordboxService
 - init() -> tuple of all services
@@ -19,7 +19,7 @@ from rich.table import Table
 
 from ...config import Config
 from ...core.rekordbox import RekordboxService
-from ...core.tidal import TidalDownloadService, TidalService
+from ...core.tidal import TidalApiService, TidalDownloadService
 from ...database import DatabaseService
 
 console = Console()
@@ -69,14 +69,14 @@ def init_db(config: Optional[Config] = None) -> DatabaseService:
         raise InitializationError(f"Database initialization failed: {e}")
 
 
-def init_tidal_api(config: Optional[Config] = None) -> TidalService:
-    """Initialize or get TidalService instance.
+def init_tidal_api(config: Optional[Config] = None) -> TidalApiService:
+    """Initialize or get TidalApiService instance.
 
     Args:
         config: Application configuration (creates new if not provided)
 
     Returns:
-        TidalService instance
+        TidalApiService instance
 
     Raises:
         InitializationError: If Tidal API authentication fails
@@ -85,7 +85,7 @@ def init_tidal_api(config: Optional[Config] = None) -> TidalService:
         config = Config()
 
     try:
-        tidal_service = TidalService(config.tidal_token_file)
+        tidal_service = TidalApiService(config.tidal_token_file)
 
         # Authenticate if needed
         if not tidal_service.is_authenticated():
@@ -173,7 +173,7 @@ def init_rekordbox(config: Optional[Config] = None) -> Optional[RekordboxService
 def init(
     config: Optional[Config] = None,
 ) -> Tuple[
-    DatabaseService, TidalService, TidalDownloadService, Optional[RekordboxService]
+    DatabaseService, TidalApiService, TidalDownloadService, Optional[RekordboxService]
 ]:
     """Initialize all services and return instances.
 
@@ -181,8 +181,8 @@ def init(
         config: Application configuration (creates new if not provided)
 
     Returns:
-        Tuple of (DatabaseService, TidalService, TidalDownloadService, RekordboxService)
-        Note: RekordboxService may be None if not available
+        Tuple of (DatabaseService, TidalApiService, TidalDownloadService,
+        RekordboxService). Note: RekordboxService may be None if not available
 
     Raises:
         InitializationError: If any critical service fails to initialize

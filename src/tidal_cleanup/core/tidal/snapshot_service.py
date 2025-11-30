@@ -13,7 +13,7 @@ from ...database.service import DatabaseService
 from ..sync.state import Change, ChangeType, SyncState, SyncStateComparator
 
 if TYPE_CHECKING:
-    from .api_client import TidalService
+    from .api_client import TidalApiService
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +26,11 @@ class TidalSnapshotService:
     2. Apply: Apply detected changes to database with proper locality tracking
     """
 
-    def __init__(self, tidal_service: "TidalService", db_service: DatabaseService):
+    def __init__(self, tidal_service: "TidalApiService", db_service: DatabaseService):
         """Initialize Tidal snapshot service.
 
         Args:
-            tidal_service: TidalService instance for API access
+            tidal_service: TidalApiService instance for API access
             db_service: DatabaseService instance for database operations
         """
         self.tidal_service = tidal_service

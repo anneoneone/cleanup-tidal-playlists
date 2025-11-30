@@ -20,7 +20,7 @@ class TidalConnectionError(Exception):
     pass
 
 
-class TidalService:
+class TidalApiService:
     """Service for interacting with the Tidal API."""
 
     def __init__(self, token_file: Path) -> None:

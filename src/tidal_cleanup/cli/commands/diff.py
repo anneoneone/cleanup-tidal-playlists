@@ -24,7 +24,7 @@ from .init import init
 
 if TYPE_CHECKING:
     from ...core.rekordbox.service import RekordboxService
-    from ...core.tidal.api_client import TidalService
+    from ...core.tidal.api_client import TidalApiService
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 def fetch_tidal_state(
     db_service: DatabaseService,
-    tidal_service: "TidalService",
+    tidal_service: "TidalApiService",
     playlist_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Fetch current state from Tidal API using TidalSnapshotService.

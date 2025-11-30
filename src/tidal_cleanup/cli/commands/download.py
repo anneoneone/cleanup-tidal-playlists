@@ -17,7 +17,7 @@ from ...core.sync import (
     SyncDecisionEngine,
     SyncDecisions,
 )
-from ...core.tidal import TidalDownloadService, TidalService, TidalStateFetcher
+from ...core.tidal import TidalApiService, TidalDownloadService, TidalStateFetcher
 from ...database import DatabaseService
 from ..display import display_download_results, filter_decisions_by_playlist
 from .legacy import TidalCleanupApp
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def fetch_tidal_playlists(
     db_service: DatabaseService,
-    tidal_service: TidalService,
+    tidal_service: TidalApiService,
     download_service: TidalDownloadService,
     force: bool = False,
     dry_run: bool = False,

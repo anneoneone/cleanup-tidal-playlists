@@ -17,7 +17,7 @@ from rich.progress import (
 from rich.table import Table
 from thefuzz import process
 
-from ..core.tidal import TidalConnectionError, TidalService
+from ..core.tidal import TidalApiService, TidalConnectionError
 from ..models.models import ComparisonResult
 from .file_service import FileService
 from .track_comparison import TrackComparisonService
@@ -88,7 +88,7 @@ class PlaylistProcessor:
 
     def __init__(
         self,
-        tidal_service: TidalService,
+        tidal_service: TidalApiService,
         file_service: FileService,
         comparison_service: TrackComparisonService,
         config: Any,
@@ -504,7 +504,7 @@ class PlaylistSynchronizer:
 
     def __init__(
         self,
-        tidal_service: TidalService,
+        tidal_service: TidalApiService,
         file_service: FileService,
         comparison_service: TrackComparisonService,
         config: Any,

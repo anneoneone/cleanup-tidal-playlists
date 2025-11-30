@@ -122,7 +122,7 @@ class TestTidalService:
     @patch("tidal_cleanup.core.tidal.api_client.tidalapi.Session")
     def test_connection_success(self, mock_session_class, tmp_path):
         """Test successful Tidal connection."""
-        from tidal_cleanup.core.tidal.api_client import TidalService
+        from tidal_cleanup.core.tidal.api_client import TidalApiService
 
         # Create a temporary token file
         token_file = tmp_path / "token.json"
@@ -134,7 +134,7 @@ class TestTidalService:
         mock_session.check_login.return_value = True
         mock_session_class.return_value = mock_session
 
-        TidalService(token_file)
+        TidalApiService(token_file)
         # This would test the actual connection logic
         # service.connect()
 
