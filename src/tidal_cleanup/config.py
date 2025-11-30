@@ -89,7 +89,7 @@ class Config:
 
     def _ensure_directories(self) -> None:
         """Ensure required directories exist."""
-        for directory in [self.m4a_directory, self.mp3_directory]:
+        for directory in [self.mp3_directory, self.mp3_directory]:
             directory.mkdir(parents=True, exist_ok=True)
 
         # Ensure output file directory exists

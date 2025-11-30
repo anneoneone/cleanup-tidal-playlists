@@ -123,7 +123,7 @@ def download(
     This command uses the new database-driven sync system to:
     1. Fetch playlist metadata from Tidal (optional)
     2. Determine which tracks need to be downloaded
-    3. Download missing tracks to the M4A directory
+    3. Download missing tracks to the MP3 directory
     4. Convert downloaded files to target format (default: mp3)
 
     Examples:
@@ -181,7 +181,7 @@ def download(
         if target_format_normalized == "mp3":
             target_root = config.mp3_directory
         else:
-            target_root = config.m4a_directory.parent / target_format_normalized
+            target_root = config.mp3_directory.parent / target_format_normalized
 
         # Step 3: Generate sync decisions
         with console.status("[bold green]Analyzing what needs to be downloaded..."):

@@ -246,7 +246,7 @@ def db_scan(verbose: bool) -> None:
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
 
-    playlists_root = Path(config.m4a_directory) / "Playlists"
+    playlists_root = Path(config.mp3_directory) / "Playlists"
 
     console.print(
         f"\n[bold cyan]📂 Scanning filesystem: {playlists_root}[/bold cyan]\n"
@@ -371,7 +371,7 @@ def db_decisions(limit: int, action: str) -> None:
     console.print("\n[bold cyan]📋 Generating sync decisions...[/bold cyan]\n")
 
     try:
-        engine = SyncDecisionEngine(db_service, music_root=config.m4a_directory)
+        engine = SyncDecisionEngine(db_service, music_root=config.mp3_directory)
         decisions = engine.analyze_all_playlists()
 
         # Filter by action if specified
@@ -468,8 +468,8 @@ def db_status() -> None:
         db_table.add_column("Value", style="white")
 
         db_table.add_row("Database Path", str(config.database_path))
-        db_table.add_row("M4A Directory", str(config.m4a_directory))
-        db_table.add_row("Playlists Directory", str(config.m4a_directory / "Playlists"))
+        db_table.add_row("MP3 Directory", str(config.mp3_directory))
+        db_table.add_row("Playlists Directory", str(config.mp3_directory / "Playlists"))
 
         console.print(db_table)
         console.print()

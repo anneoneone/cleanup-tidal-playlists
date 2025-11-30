@@ -126,7 +126,7 @@ def init_tidal_downloader(config: Optional[Config] = None) -> TidalDownloadServi
             logger.info("Authenticating Tidal downloader...")
             download_service.connect()
 
-        logger.debug(f"Tidal downloader ready: {config.m4a_directory}")
+        logger.debug(f"Tidal downloader ready: {config.mp3_directory}")
 
         return download_service
 
@@ -293,7 +293,7 @@ def check_tidal_downloader_connection(config: Config) -> Dict[str, Any]:
             "message": "Tidal downloader ready",
             "details": {
                 "authenticated": True,
-                "download_directory": str(config.m4a_directory),
+                "download_directory": str(config.mp3_directory),
             },
         }
 

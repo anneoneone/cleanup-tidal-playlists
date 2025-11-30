@@ -122,7 +122,7 @@ class SyncOrchestrator:
 
         # Initialize components
         self.tidal_fetcher = TidalStateFetcher(db_service)
-        playlists_root = Path(config.m4a_directory) / "Playlists"
+        playlists_root = Path(config.mp3_directory) / "Playlists"
         self.filesystem_scanner = FilesystemScanner(
             db_service, playlists_root=playlists_root
         )
@@ -130,11 +130,11 @@ class SyncOrchestrator:
             db_service, strategy="first_alphabetically"
         )
         self.decision_engine = SyncDecisionEngine(
-            db_service, music_root=config.m4a_directory
+            db_service, music_root=config.mp3_directory
         )
         self.download_orchestrator = DownloadOrchestrator(
             db_service=db_service,
-            music_root=config.m4a_directory,
+            music_root=config.mp3_directory,
             deduplication_logic=self.dedup_logic,
             download_service=download_service,
             dry_run=dry_run,

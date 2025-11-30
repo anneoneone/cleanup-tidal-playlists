@@ -141,7 +141,7 @@ def fetch_local_state(
         session.commit()
         logger.debug(f"Reset in_local flag for {reset_count} playlist tracks")
 
-    playlists_root = Path(config.m4a_directory) / "Playlists"
+    playlists_root = Path(config.mp3_directory) / "Playlists"
 
     if not playlists_root.exists():
         console.print(f"  [yellow]⚠ Directory not found: {playlists_root}[/yellow]")
