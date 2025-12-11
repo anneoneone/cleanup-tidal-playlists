@@ -329,33 +329,26 @@ def db_scan(verbose: bool) -> None:
     "--strategy",
     type=click.Choice(["first_alphabetically", "most_playlists", "newest_file"]),
     default="first_alphabetically",
-    help="Deduplication strategy to use",
+    help="Legacy strategy flag (retained for backwards compatibility)",
 )
 def db_analyze(strategy: str) -> None:
-    """Analyze deduplication needs.
+    """Analyze playlist overlap and track distribution.
 
-    Determines which files should be primary copies and which should be symlinks.
-    This helps avoid duplicate downloads and saves disk space.
-
-    Strategies:
-        first_alphabetically: Use file from first playlist alphabetically
-        most_playlists: Use file from playlist with most tracks
-        newest_file: Use the newest file found
-
-    Examples:
-        tidal-cleanup db analyze
-        tidal-cleanup db analyze --strategy most_playlists
+    Now that each playlist receives its own copy of a track, the analysis report focuses
+    on identifying which tracks appear in multiple playlists so you can prioritize
+    downloads or storage planning. The `--strategy` option remains for compatibility
+    with previous versions but no longer changes the outcome.
     """
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
 
     console.print(
-        f"\n[bold cyan]🔍 Analyzing deduplication "
-        f"(strategy: {strategy})...[/bold cyan]\n"
+        f"\n[bold cyan]🔍 Analyzing playlist overlap "
+        f"(strategy flag: {strategy})...[/bold cyan]\n"
     )
 
     try:
-        dedup = DeduplicationLogic(db_service, strategy=strategy)
+        dedup = DeduplicationLogic(db_service)
         result = dedup.analyze_all_tracks()
 
         console.print("[green]✓ Analysis complete[/green]\n")
@@ -364,17 +357,45 @@ def db_analyze(strategy: str) -> None:
         table.add_column("Metric", style="cyan")
         table.add_column("Count", style="green", justify="right")
 
-        tracks_analyzed = len(result.decisions)
-        total_symlinks = sum(len(d.symlink_playlist_ids) for d in result.decisions)
-        tracks_needing_symlinks = sum(
-            1 for d in result.decisions if len(d.symlink_playlist_ids) > 0
+        summary = result.get_summary()
+        table.add_row("Tracks Analyzed", str(summary["tracks_analyzed"]))
+        table.add_row(
+            "Tracks In Multiple Playlists",
+            str(summary["tracks_in_multiple_playlists"]),
         )
 
-        table.add_row("Tracks Analyzed", str(tracks_analyzed))
-        table.add_row("Tracks Needing Symlinks", str(tracks_needing_symlinks))
-        table.add_row("Total Symlinks Needed", str(total_symlinks))
-
         console.print(table)
+
+        overlapping = [dist for dist in result.distributions if dist.num_playlists > 1]
+        if overlapping:
+            top_overlaps = sorted(
+                overlapping, key=lambda dist: dist.num_playlists, reverse=True
+            )[:10]
+
+            detail_table = Table(
+                show_header=True,
+                header_style="bold magenta",
+                title="\nTop Overlapping Tracks",
+            )
+            detail_table.add_column("Track", style="cyan")
+            detail_table.add_column("Playlists", style="green", justify="right")
+            detail_table.add_column("Playlist Names", style="yellow")
+
+            for dist in top_overlaps:
+                track = db_service.get_track_by_id(dist.track_id)
+                label = (
+                    f"{track.artist} - {track.title}"
+                    if track
+                    else f"ID {dist.track_id}"
+                )
+                playlist_names = ", ".join(dist.playlist_names)
+                detail_table.add_row(label, str(dist.num_playlists), playlist_names)
+
+            console.print(detail_table)
+        else:
+            console.print(
+                "[green]All tracks currently belong to a single playlist.[/green]"
+            )
 
     except Exception as e:
         logger.exception("Analysis failed")
@@ -392,7 +413,17 @@ def db_analyze(strategy: str) -> None:
 @click.option(
     "--action",
     type=click.Choice(
-        ["DOWNLOAD_TRACK", "CREATE_SYMLINK", "UPDATE_SYMLINK", "REMOVE_FILE", "ALL"]
+        [
+            "DOWNLOAD_TRACK",
+            "UPDATE_METADATA",
+            "VERIFY_FILE",
+            "REMOVE_FILE",
+            "CREATE_PLAYLIST_DIR",
+            "REMOVE_PLAYLIST_DIR",
+            "SYNC_PLAYLIST",
+            "NO_ACTION",
+            "ALL",
+        ]
     ),
     default="ALL",
     help="Filter by action type",
@@ -401,7 +432,7 @@ def db_decisions(limit: int, action: str) -> None:
     """Show sync decisions that would be executed.
 
     Displays what actions the sync system has decided to take, such as
-    downloading tracks, creating symlinks, or removing files.
+    downloading tracks, updating metadata, or removing files.
 
     Examples:
         tidal-cleanup db decisions
@@ -501,7 +532,7 @@ def db_status() -> None:
             playlist_track_count = session.query(PlaylistTrack).count()
             # Count tracks with file paths (files on disk)
             file_count = (
-                session.query(Track).filter(Track.file_path.isnot(None)).count()
+                session.query(Track).filter(Track.file_paths.isnot(None)).count()
             )
 
         # Display database info

@@ -179,7 +179,10 @@ def display_db_sync_result(summary: dict[str, Any], dry_run: bool) -> None:
 
         dedup = summary["deduplication"]
         table.add_row("Tracks Analyzed", str(dedup["tracks_analyzed"]))
-        table.add_row("Symlinks Needed", str(dedup["symlinks_needed"]))
+        table.add_row(
+            "Tracks in Multiple Playlists",
+            str(dedup.get("tracks_in_multiple_playlists", 0)),
+        )
 
         console.print(table)
         console.print()

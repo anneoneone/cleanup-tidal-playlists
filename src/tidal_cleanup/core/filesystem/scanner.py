@@ -69,6 +69,8 @@ class FilesystemScanner:
         """
         self.db_service = db_service
         self.playlists_root = Path(playlists_root)
+        # Library root is typically the parent of the playlists directory (mp3 folder)
+        self.library_root = self.playlists_root.parent
         self.supported_extensions = supported_extensions
         self._stats = ScanStatistics()
 
@@ -296,12 +298,9 @@ class FilesystemScanner:
             if self._update_track_file_metadata(track.id, file_path):
                 self._stats.tracks_updated += 1
 
-            # Mark as primary in this playlist
-            result = self.db_service.mark_playlist_track_as_primary(
-                playlist.id, track.id
-            )
-            if result:
-                self._stats.playlist_tracks_updated += 1
+            # Add this file path to the track's file_paths list
+            relative_path = self._to_library_relative_path(file_path)
+            self.db_service.add_file_path_to_track(track.id, relative_path)
 
     def _validate_symlink(self, symlink_path: Path) -> tuple[bool, Path | None]:
         """Validate a symlink and get its target.
@@ -402,9 +401,8 @@ class FilesystemScanner:
 
     def _to_library_relative_path(self, file_path: Path) -> str:
         """Return a path relative to the MP3 library root when possible."""
-        library_root = self.playlists_root.parent
         try:
-            return str(file_path.relative_to(library_root))
+            return str(file_path.relative_to(self.library_root))
         except ValueError:
             return str(file_path)
 

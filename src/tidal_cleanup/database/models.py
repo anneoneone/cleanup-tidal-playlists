@@ -5,6 +5,7 @@ from enum import Enum
 from typing import List, Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -121,9 +122,9 @@ class Track(Base):
     )
 
     # File information
-    file_path: Mapped[Optional[str]] = mapped_column(
-        String(1000), nullable=True, index=True
-    )  # Primary file location (actual audio data) - relative to MP3 directory
+    file_paths: Mapped[Optional[List[str]]] = mapped_column(
+        JSON, nullable=True
+    )  # Relative file paths for each playlist copy
     file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     file_format: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     file_hash: Mapped[Optional[str]] = mapped_column(

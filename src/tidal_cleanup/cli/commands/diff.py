@@ -303,6 +303,8 @@ def get_all_playlist_tracks(
     tracks_info = []
     for pt in all_playlist_tracks:
         track = pt.track
+        # Get first file path or empty string if no paths
+        file_path = track.file_paths[0] if track.file_paths else ""
         tracks_info.append(
             {
                 "playlist_track": pt,
@@ -310,7 +312,7 @@ def get_all_playlist_tracks(
                 "in_tidal": bool(pt.in_tidal),
                 "in_local": bool(pt.in_local),
                 "in_rekordbox": bool(pt.in_rekordbox),
-                "file_path": track.file_path or "",
+                "file_path": file_path,
                 "position": pt.position,
             }
         )

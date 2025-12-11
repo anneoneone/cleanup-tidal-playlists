@@ -141,7 +141,12 @@ class DatabaseService:
             Track object or None if not found
         """
         with self.get_session() as session:
-            stmt = select(Track).where(Track.file_path == file_path)
+            # Check if the path is in the file_paths JSON array
+            from sqlalchemy import func
+
+            stmt = select(Track).where(
+                func.json_contains(Track.file_paths, func.json_quote(file_path))
+            )
             return session.scalar(stmt)
 
     def find_track_by_metadata(self, title: str, artist: str) -> Optional[Track]:
@@ -222,7 +227,7 @@ class DatabaseService:
             logger.debug("Updated track: %s", track.id)
             return track
 
-    def create_or_update_track(self, track_data: Dict[str, Any]) -> Track:
+    def create_or_update_track(self, track_data: Dict[str, Any]) -> Track:  # noqa: C901
         """Create track if it doesn't exist, otherwise update it.
 
         Args:
@@ -236,14 +241,35 @@ class DatabaseService:
         if tidal_id:
             existing_track = self.get_track_by_tidal_id(tidal_id)
             if existing_track:
-                return self.update_track(existing_track.id, track_data)
+                # If a new file path is provided, add it to the list
+                new_path = track_data.get("file_path")
+                if new_path:
+                    # Remove file_path key; handled separately
+                    track_data_copy = {
+                        k: v for k, v in track_data.items() if k != "file_path"
+                    }
+                    updated_track = self.update_track(
+                        existing_track.id, track_data_copy
+                    )
+                    # Add the new path to file_paths if not already present
+                    self.add_file_path_to_track(updated_track.id, new_path)
+                    return updated_track
+                else:
+                    return self.update_track(existing_track.id, track_data)
 
         # Try to find by file path
         file_path = track_data.get("file_path")
         if file_path:
             existing_track = self.get_track_by_path(file_path)
             if existing_track:
-                return self.update_track(existing_track.id, track_data)
+                # Remove file_path key to avoid conflicts
+                track_data_copy = {
+                    k: v for k, v in track_data.items() if k != "file_path"
+                }
+                updated_track = self.update_track(existing_track.id, track_data_copy)
+                # Ensure the path is in the list
+                self.add_file_path_to_track(updated_track.id, file_path)
+                return updated_track
 
         # Try to find by metadata
         title = track_data.get("title")
@@ -251,10 +277,82 @@ class DatabaseService:
         if title and artist:
             existing_track = self.find_track_by_metadata(title, artist)
             if existing_track:
-                return self.update_track(existing_track.id, track_data)
+                # Remove file_path key if present
+                new_path = track_data.get("file_path")
 
-        # Create new track
+                track_data_copy = {
+                    k: v for k, v in track_data.items() if k != "file_path"
+                }
+                updated_track = self.update_track(existing_track.id, track_data_copy)
+                if new_path:
+                    self.add_file_path_to_track(updated_track.id, new_path)
+                return updated_track
+
+        # Create new track - convert file_path to file_paths list
+        if "file_path" in track_data:
+            file_path = track_data.pop("file_path")
+            if "file_paths" not in track_data:
+                track_data["file_paths"] = [file_path] if file_path else []
         return self.create_track(track_data)
+
+    def add_file_path_to_track(self, track_id: int, file_path: str) -> Track:
+        """Add a file path to track's file_paths list if not already present.
+
+        Args:
+            track_id: Track database ID
+            file_path: File path to add (relative to MP3 directory)
+
+        Returns:
+            Updated Track object
+        """
+        with self.get_session() as session:
+            track = session.get(Track, track_id)
+            if not track:
+                raise ValueError(f"Track not found: {track_id}")
+
+            if file_path == "" or file_path is None:
+                raise ValueError("File path cannot be empty")
+
+            # Initialize file_paths if None
+            if track.file_paths is None:
+                track.file_paths = []
+
+            # Add path if not already present
+            if file_path not in track.file_paths:
+                # Create new list to trigger SQLAlchemy update detection
+                track.file_paths = track.file_paths + [file_path]
+                track.updated_at = datetime.now(timezone.utc)
+                session.commit()
+                logger.debug(f"Added file path {file_path} to track {track_id}")
+
+            session.refresh(track)
+            return track
+
+    def remove_file_path_from_track(self, track_id: int, file_path: str) -> Track:
+        """Remove a file path from track's file_paths list.
+
+        Args:
+            track_id: Track database ID
+            file_path: File path to remove
+
+        Returns:
+            Updated Track object
+        """
+        with self.get_session() as session:
+            track = session.get(Track, track_id)
+            if not track:
+                raise ValueError(f"Track not found: {track_id}")
+
+            # Remove path if present
+            if track.file_paths and file_path in track.file_paths:
+                # Create new list to trigger SQLAlchemy update detection
+                track.file_paths = [p for p in track.file_paths if p != file_path]
+                track.updated_at = datetime.now(timezone.utc)
+                session.commit()
+                logger.debug(f"Removed file path {file_path} from track {track_id}")
+
+            session.refresh(track)
+            return track
 
     def get_all_tracks(self) -> List[Track]:
         """Get all tracks from database.
@@ -599,7 +697,7 @@ class DatabaseService:
     def mark_tracks_with_file_paths_as_local(
         self, playlist_id: Optional[int] = None
     ) -> int:
-        """Mark playlist tracks as local if their Track has a file path.
+        """Mark playlist tracks as local if their Track has file paths.
 
         Args:
             playlist_id: Optional playlist ID filter
@@ -608,7 +706,7 @@ class DatabaseService:
             Number of playlist tracks updated
         """
         with self.get_session() as session:
-            stmt = select(PlaylistTrack).join(Track).where(Track.file_path.isnot(None))
+            stmt = select(PlaylistTrack).join(Track).where(Track.file_paths.isnot(None))
 
             if playlist_id is not None:
                 stmt = stmt.where(PlaylistTrack.playlist_id == playlist_id)

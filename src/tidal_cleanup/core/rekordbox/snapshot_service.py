@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, Optional, Protocol, Sequence, Set
+from typing import Any, Dict, List, Optional, Protocol, Sequence, Set
 
 from ...config import Config
 from ...database import DatabaseService
@@ -358,20 +358,26 @@ class RekordboxSnapshotService:
     def _resolve_track_path(
         self, track: Track, association: Optional[Any]
     ) -> Optional[Path]:
-        primary = self._build_absolute_path(track.file_path)
-        if primary and primary.exists():
-            return primary
+        # Prefer playlist-specific file paths stored in the database.
+        candidate_paths: List[Path] = []
+        for raw_path in track.file_paths or []:
+            candidate = self._build_absolute_path(raw_path)
+            if candidate:
+                candidate_paths.append(candidate)
 
-        fallback = None
-        if association and getattr(association, "symlink_path", None):
-            fallback = self._build_absolute_path(association.symlink_path)
-            resolved_fallback = self._resolve_symlink_path(fallback)
-            if resolved_fallback and resolved_fallback.exists():
-                return resolved_fallback
-            if fallback and fallback.exists():
-                return fallback
+        for candidate in candidate_paths:
+            if candidate.exists():
+                return candidate
 
-        return primary or fallback
+        for candidate in candidate_paths:
+            try:
+                resolved = candidate.resolve()
+                if resolved.exists():
+                    return resolved
+            except OSError:
+                continue
+
+        return candidate_paths[0] if candidate_paths else None
 
     def _build_absolute_path(self, raw_path: Optional[str]) -> Optional[Path]:
         if not raw_path:

@@ -19,7 +19,7 @@ from .decision_engine import (
 from .deduplication import (
     DeduplicationLogic,
     DeduplicationResult,
-    PrimaryFileDecision,
+    TrackDistribution,
 )
 from .download_orchestrator import DownloadOrchestrator, ExecutionResult
 from .orchestrator import SyncOrchestrator, SyncResult, SyncStage
@@ -34,7 +34,7 @@ __all__ = [
     # Deduplication
     "DeduplicationLogic",
     "DeduplicationResult",
-    "PrimaryFileDecision",
+    "TrackDistribution",
     # Orchestration
     "DownloadOrchestrator",
     "ExecutionResult",

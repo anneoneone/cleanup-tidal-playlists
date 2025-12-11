@@ -90,9 +90,9 @@ class SyncResult:
 
         if self.deduplication:
             summary["deduplication"] = {
-                "tracks_analyzed": len(self.deduplication.decisions),
-                "symlinks_needed": sum(
-                    len(d.symlink_playlist_ids) for d in self.deduplication.decisions
+                "tracks_analyzed": len(self.deduplication.distributions),
+                "tracks_in_multiple_playlists": (
+                    self.deduplication.tracks_in_multiple_playlists
                 ),
             }
 
@@ -100,13 +100,9 @@ class SyncResult:
             downloads = [
                 d for d in self.decisions.decisions if d.action.name == "DOWNLOAD_TRACK"
             ]
-            symlinks = [
-                d for d in self.decisions.decisions if "SYMLINK" in d.action.name
-            ]
             summary["decisions"] = {
                 "total": len(self.decisions.decisions),
                 "downloads": len(downloads),
-                "symlinks": len(symlinks),
             }
 
         if self.execution:
@@ -155,9 +151,7 @@ class SyncOrchestrator:
         self.filesystem_scanner = FilesystemScanner(
             db_service, playlists_root=playlists_root
         )
-        self.dedup_logic = DeduplicationLogic(
-            db_service, strategy="first_alphabetically"
-        )
+        self.dedup_logic = DeduplicationLogic(db_service)
         self.decision_engine = SyncDecisionEngine(
             db_service,
             music_root=config.mp3_directory,

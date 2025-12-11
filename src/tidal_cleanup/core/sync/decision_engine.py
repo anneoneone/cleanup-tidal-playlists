@@ -222,7 +222,7 @@ class SyncDecisionEngine:
         if removal_decision:
             return removal_decision
 
-        # Check if track needs to be downloaded
+        # Check if track needs to be downloaded to this playlist
         if track.download_status == DownloadStatus.NOT_DOWNLOADED:
             return self._decide_download_action(playlist, track, playlist_track)
 
@@ -234,16 +234,25 @@ class SyncDecisionEngine:
             decision.priority = 5
             return decision
 
-        # Track is downloaded, check if file exists
-        if not track.file_path or not Path(track.file_path).exists():
+        # Track is downloaded, check if file exists in this playlist's directory
+        expected_path = self._build_track_path(playlist, track)
+
+        if not expected_path.exists():
+            # Need to download to this playlist
             decision = self._decide_download_action(playlist, track, playlist_track)
-            # Update reason and priority for missing file
-            decision.reason = "Track marked as downloaded but file missing"
-            decision.priority = 8
+            decision.reason = "Track needs to be downloaded to this playlist"
+            decision.priority = 6
             return decision
 
-        # Track exists, check playlist-track sync status
-        return self._decide_symlink_action(playlist, track, playlist_track)
+        # Track exists in this playlist directory
+        return DecisionResult(
+            action=SyncAction.NO_ACTION,
+            track_id=track.id,
+            playlist_id=playlist.id,
+            playlist_track_id=playlist_track.id,
+            reason="Track exists in playlist directory",
+            priority=0,
+        )
 
     def _decide_download_action(
         self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
@@ -328,100 +337,6 @@ class SyncDecisionEngine:
             },
         )
 
-    def _decide_symlink_action(
-        self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
-    ) -> DecisionResult:
-        """Decide symlink action for a track in a playlist.
-
-        Args:
-            playlist: Playlist object
-            track: Track object
-            playlist_track: PlaylistTrack association object
-
-        Returns:
-            DecisionResult with symlink-related action
-        """
-        # Check if this playlist should have the primary file
-        if playlist_track.is_primary:
-            # This playlist has the primary file
-            if playlist_track.symlink_path:
-                # Shouldn't have symlink if it's primary
-                return DecisionResult(
-                    action=SyncAction.REMOVE_SYMLINK,
-                    track_id=track.id,
-                    playlist_id=playlist.id,
-                    playlist_track_id=playlist_track.id,
-                    source_path=playlist_track.symlink_path,
-                    reason="Primary file shouldn't have symlink",
-                    priority=3,
-                )
-            else:
-                # All good - primary file, no symlink
-                return DecisionResult(
-                    action=SyncAction.NO_ACTION,
-                    track_id=track.id,
-                    playlist_id=playlist.id,
-                    playlist_track_id=playlist_track.id,
-                    reason="Primary file exists, no symlink needed",
-                    priority=0,
-                )
-
-        # Not primary - should have symlink
-        if not playlist_track.symlink_path:
-            # Need to create symlink
-            return self._decide_create_symlink(playlist, track, playlist_track)
-
-        # Has symlink - check if valid
-        if not playlist_track.symlink_valid:
-            # Symlink is broken
-            return DecisionResult(
-                action=SyncAction.UPDATE_SYMLINK,
-                track_id=track.id,
-                playlist_id=playlist.id,
-                playlist_track_id=playlist_track.id,
-                source_path=playlist_track.symlink_path,
-                target_path=track.file_path,
-                reason="Symlink is broken, needs update",
-                priority=7,
-            )
-
-        # Symlink exists and is valid
-        return DecisionResult(
-            action=SyncAction.NO_ACTION,
-            track_id=track.id,
-            playlist_id=playlist.id,
-            playlist_track_id=playlist_track.id,
-            reason="Symlink exists and is valid",
-            priority=0,
-        )
-
-    def _decide_create_symlink(
-        self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
-    ) -> DecisionResult:
-        """Decide to create a symlink.
-
-        Args:
-            playlist: Playlist object
-            track: Track object
-            playlist_track: PlaylistTrack association object
-
-        Returns:
-            DecisionResult with create symlink action
-        """
-        # Construct symlink path
-        symlink_path = self._build_symlink_path(playlist, track)
-
-        return DecisionResult(
-            action=SyncAction.CREATE_SYMLINK,
-            track_id=track.id,
-            playlist_id=playlist.id,
-            playlist_track_id=playlist_track.id,
-            source_path=str(symlink_path),
-            target_path=track.file_path,
-            reason="Track exists but playlist needs symlink",
-            priority=6,
-        )
-
     def _decide_removal_action(
         self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
     ) -> Optional[DecisionResult]:
@@ -429,54 +344,34 @@ class SyncDecisionEngine:
         if playlist_track.in_tidal:
             return None
 
-        if playlist_track.is_primary:
-            if not track.file_path:
-                return None
-            if self._track_in_active_playlist(track.id):
-                return None
-            file_path = Path(track.file_path)
-            if not file_path.exists():
-                return None
-            return DecisionResult(
-                action=SyncAction.REMOVE_FILE,
-                track_id=track.id,
-                playlist_id=playlist.id,
-                playlist_track_id=playlist_track.id,
-                source_path=str(file_path),
-                reason="Track removed from all playlists",
-                priority=9,
-            )
+        # Check if file exists in this playlist's directory
+        expected_path = self._build_track_path(playlist, track)
+        if not expected_path.exists():
+            return None
 
-        # Non-primary entries should only be symlinks
-        symlink_path = playlist_track.symlink_path or str(
-            self._build_symlink_path(playlist, track)
+        return DecisionResult(
+            action=SyncAction.REMOVE_FILE,
+            track_id=track.id,
+            playlist_id=playlist.id,
+            playlist_track_id=playlist_track.id,
+            source_path=str(expected_path),
+            reason="Track removed from playlist in Tidal",
+            priority=8,
         )
-        candidate = Path(symlink_path)
-        if playlist_track.symlink_path or candidate.exists():
-            return DecisionResult(
-                action=SyncAction.REMOVE_SYMLINK,
-                track_id=track.id,
-                playlist_id=playlist.id,
-                playlist_track_id=playlist_track.id,
-                source_path=str(candidate),
-                reason="Playlist entry removed from Tidal",
-                priority=8,
-            )
 
-        return None
-
-    def _build_symlink_path(self, playlist: Playlist, track: Track) -> Path:
-        """Compute the expected symlink location for a track within a playlist."""
+    def _build_track_path(self, playlist: Playlist, track: Track) -> Path:
+        """Compute the expected file location for a track within a playlist."""
         playlist_dir = self.playlists_root / playlist.name
-        filename: str
-        if track.file_path:
-            filename = Path(track.file_path).name
-        elif track.normalized_name:
-            filename = f"{track.normalized_name}{self.target_extension}"
+
+        # Construct filename using artist - title format (matches tidal-dl-ng)
+        if track.artist and track.title:
+            base_filename = f"{track.artist} - {track.title}"
         elif track.title:
-            filename = f"{track.title}{self.target_extension}"
+            base_filename = track.title
         else:
-            filename = f"track-{track.id}{self.target_extension}"
+            base_filename = f"track-{track.id}"
+
+        filename = f"{base_filename}{self.target_extension}"
         return playlist_dir / filename
 
     def _track_in_active_playlist(self, track_id: int) -> bool:

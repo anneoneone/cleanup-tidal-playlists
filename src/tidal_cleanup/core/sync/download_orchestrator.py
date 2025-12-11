@@ -1,13 +1,13 @@
 """Download orchestrator for executing sync decisions.
 
 This module coordinates the execution of sync decisions from SyncDecisionEngine,
-handling downloads, symlink creation, and file operations.
+handling downloads and file operations for playlist-specific storage.
 """
 
 import logging
-import os
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -37,9 +37,6 @@ class ExecutionResult:
     downloads_attempted: int = 0
     downloads_successful: int = 0
     downloads_failed: int = 0
-    symlinks_created: int = 0
-    symlinks_updated: int = 0
-    symlinks_removed: int = 0
     files_removed: int = 0
     errors: List[str] = dataclass_field(default_factory=list)
 
@@ -55,9 +52,6 @@ class ExecutionResult:
             "downloads_attempted": self.downloads_attempted,
             "downloads_successful": self.downloads_successful,
             "downloads_failed": self.downloads_failed,
-            "symlinks_created": self.symlinks_created,
-            "symlinks_updated": self.symlinks_updated,
-            "symlinks_removed": self.symlinks_removed,
             "files_removed": self.files_removed,
             "errors": len(self.errors),
         }
@@ -66,8 +60,8 @@ class ExecutionResult:
 class DownloadOrchestrator:
     """Orchestrates execution of sync decisions.
 
-    Coordinates downloading tracks, creating symlinks, and managing files based on
-    decisions from SyncDecisionEngine and DeduplicationLogic.
+    Coordinates downloading tracks and managing files based on decisions from
+    SyncDecisionEngine and DeduplicationLogic.
     """
 
     def __init__(
@@ -94,9 +88,8 @@ class DownloadOrchestrator:
         self.db_service = db_service
         self.music_root = Path(music_root)
         self.playlists_root = self.music_root / "Playlists"
-        self.dedup_logic = deduplication_logic or DeduplicationLogic(
-            db_service, strategy="first_alphabetically"
-        )
+        self.library_root = self.music_root
+        self.dedup_logic = deduplication_logic or DeduplicationLogic(db_service)
         self.download_service = download_service
         self.dry_run = dry_run
         self.progress_tracker = ProgressTracker(callback=progress_callback)
@@ -166,12 +159,6 @@ class DownloadOrchestrator:
         """
         if decision.action == SyncAction.DOWNLOAD_TRACK:
             self._execute_download(decision, result)
-        elif decision.action == SyncAction.CREATE_SYMLINK:
-            self._execute_create_symlink(decision, result)
-        elif decision.action == SyncAction.UPDATE_SYMLINK:
-            self._execute_update_symlink(decision, result)
-        elif decision.action == SyncAction.REMOVE_SYMLINK:
-            self._execute_remove_symlink(decision, result)
         elif decision.action == SyncAction.REMOVE_FILE:
             self._execute_remove_file(decision, result)
         elif decision.action == SyncAction.NO_ACTION:
@@ -372,12 +359,34 @@ class DownloadOrchestrator:
         return tidal_track_id
 
     def _update_track_after_download(self, track: Track, target_path: Path) -> None:
-        """Update track in database after successful download."""
-        with self.db_service.get_session() as session:
-            track_obj = session.merge(track)
-            track_obj.download_status = DownloadStatus.DOWNLOADED
-            track_obj.file_path = str(target_path)
-            session.commit()
+        """Update track metadata and relative paths after a download."""
+        relative_path = self._to_library_relative_path(target_path)
+
+        # Collect filesystem metadata when available
+        file_size = None
+        last_modified = None
+        try:
+            stat_result = target_path.stat()
+            file_size = stat_result.st_size
+            last_modified = datetime.fromtimestamp(
+                stat_result.st_mtime, tz=timezone.utc
+            )
+        except OSError:
+            logger.debug("Unable to stat downloaded file: %s", target_path)
+
+        file_format = target_path.suffix.lstrip(".").lower() or None
+
+        self.db_service.add_file_path_to_track(track.id, relative_path)
+        self.db_service.update_track(
+            track.id,
+            {
+                "download_status": DownloadStatus.DOWNLOADED.value,
+                "downloaded_at": datetime.now(timezone.utc),
+                "file_size_bytes": file_size,
+                "file_last_modified": last_modified,
+                "file_format": file_format,
+            },
+        )
 
     def _handle_download_failure(
         self,
@@ -395,130 +404,6 @@ class DownloadOrchestrator:
         """Handle case where no download service is configured."""
         logger.warning("No download service configured, marking as downloading only")
         result.downloads_successful += 1
-
-    def _execute_create_symlink(
-        self, decision: DecisionResult, result: ExecutionResult
-    ) -> None:
-        """Execute create symlink decision.
-
-        Args:
-            decision: Create symlink decision
-            result: ExecutionResult to update
-        """
-        if not decision.source_path or not decision.target_path:
-            result.add_error(
-                f"Missing paths for symlink creation: "
-                f"source={decision.source_path}, target={decision.target_path}"
-            )
-            return
-
-        source = Path(decision.source_path)
-        target = Path(decision.target_path)
-
-        if self.dry_run:
-            logger.info("DRY RUN: Would create symlink %s -> %s", source, target)
-            result.symlinks_created += 1
-            return
-
-        try:
-            # Ensure parent directory exists
-            source.parent.mkdir(parents=True, exist_ok=True)
-
-            # Remove existing file/symlink if it exists
-            if source.exists() or source.is_symlink():
-                source.unlink()
-
-            # Create symlink
-            os.symlink(target, source)
-            result.symlinks_created += 1
-            logger.info("Created symlink %s -> %s", source, target)
-
-            # Update database
-            if decision.playlist_track_id:
-                self._update_symlink_in_db(
-                    decision.playlist_track_id, str(source), True
-                )
-
-        except Exception as e:
-            result.add_error(f"Failed to create symlink {source}: {str(e)}")
-
-    def _execute_update_symlink(
-        self, decision: DecisionResult, result: ExecutionResult
-    ) -> None:
-        """Execute update symlink decision.
-
-        Args:
-            decision: Update symlink decision
-            result: ExecutionResult to update
-        """
-        if not decision.source_path or not decision.target_path:
-            result.add_error(
-                f"Missing paths for symlink update: "
-                f"source={decision.source_path}, target={decision.target_path}"
-            )
-            return
-
-        source = Path(decision.source_path)
-        target = Path(decision.target_path)
-
-        if self.dry_run:
-            logger.info("DRY RUN: Would update symlink %s -> %s", source, target)
-            result.symlinks_updated += 1
-            return
-
-        try:
-            # Remove existing symlink
-            if source.exists() or source.is_symlink():
-                source.unlink()
-
-            # Create new symlink
-            os.symlink(target, source)
-            result.symlinks_updated += 1
-            logger.info("Updated symlink %s -> %s", source, target)
-
-            # Update database
-            if decision.playlist_track_id:
-                self._update_symlink_in_db(
-                    decision.playlist_track_id, str(source), True
-                )
-
-        except Exception as e:
-            result.add_error(f"Failed to update symlink {source}: {str(e)}")
-
-    def _execute_remove_symlink(
-        self, decision: DecisionResult, result: ExecutionResult
-    ) -> None:
-        """Execute remove symlink decision.
-
-        Args:
-            decision: Remove symlink decision
-            result: ExecutionResult to update
-        """
-        if not decision.source_path:
-            result.add_error("Missing source path for symlink removal")
-            return
-
-        source = Path(decision.source_path)
-
-        if self.dry_run:
-            logger.info("DRY RUN: Would remove symlink %s", source)
-            result.symlinks_removed += 1
-            return
-
-        try:
-            if source.is_symlink():
-                source.unlink()
-                result.symlinks_removed += 1
-                logger.info("Removed symlink %s", source)
-
-                # Update database
-                if decision.playlist_track_id:
-                    self._update_symlink_in_db(decision.playlist_track_id, None, None)
-            else:
-                logger.warning("Path is not a symlink: %s", source)
-
-        except Exception as e:
-            result.add_error(f"Failed to remove symlink {source}: {str(e)}")
 
     def _execute_remove_file(
         self, decision: DecisionResult, result: ExecutionResult
@@ -541,57 +426,44 @@ class DownloadOrchestrator:
             return
 
         try:
+            removed = False
             if source.exists():
                 source.unlink()
-                result.files_removed += 1
+                removed = True
                 logger.info("Removed file %s", source)
-
-                # Update database if track
-                if decision.track_id:
-                    self._update_track_file_path(decision.track_id, None)
             else:
                 logger.warning("File does not exist: %s", source)
+
+            if removed:
+                result.files_removed += 1
+                if decision.track_id:
+                    self._remove_track_file_reference(decision.track_id, source)
 
         except Exception as e:
             result.add_error(f"Failed to remove file {source}: {str(e)}")
 
-    def _update_symlink_in_db(
-        self,
-        playlist_track_id: int,
-        symlink_path: str | None,
-        symlink_valid: bool | None,
-    ) -> None:
-        """Update symlink information in database.
+    def _remove_track_file_reference(self, track_id: int, file_path: Path) -> None:
+        """Remove a file reference from a track's file_paths list."""
+        relative_path = self._to_library_relative_path(file_path)
+        try:
+            self.db_service.remove_file_path_from_track(track_id, relative_path)
+            track = self.db_service.get_track_by_id(track_id)
+            if track and (not track.file_paths):
+                self.db_service.update_track(
+                    track_id,
+                    {"download_status": DownloadStatus.NOT_DOWNLOADED.value},
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to update file references for track %s: %s", track_id, exc
+            )
 
-        Args:
-            playlist_track_id: PlaylistTrack ID
-            symlink_path: New symlink path or None
-            symlink_valid: Whether symlink is valid or None
-        """
-        from ...database.models import PlaylistTrack
-
-        with self.db_service.get_session() as session:
-            pt = session.get(PlaylistTrack, playlist_track_id)
-            if pt:
-                pt.symlink_path = symlink_path
-                pt.symlink_valid = symlink_valid
-                session.commit()
-
-    def _update_track_file_path(self, track_id: int, file_path: str | None) -> None:
-        """Update track file path in database.
-
-        Args:
-            track_id: Track ID
-            file_path: New file path or None
-        """
-        track = self.db_service.get_track_by_id(track_id)
-        if track:
-            with self.db_service.get_session() as session:
-                track_obj = session.merge(track)
-                track_obj.file_path = file_path
-                if file_path is None:
-                    track_obj.download_status = DownloadStatus.NOT_DOWNLOADED
-                session.commit()
+    def _to_library_relative_path(self, path: Path) -> str:
+        """Return a path relative to the music library root when possible."""
+        try:
+            return str(path.relative_to(self.library_root))
+        except ValueError:
+            return str(path)
 
     def ensure_playlist_directories(self, playlist_ids: List[int] | None = None) -> int:
         """Ensure playlist directories exist.
