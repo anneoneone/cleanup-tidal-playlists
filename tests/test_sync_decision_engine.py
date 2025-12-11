@@ -52,12 +52,14 @@ def add_track_to_playlist(
     is_primary: bool = False,
     symlink_path: str | None = None,
     symlink_valid: bool | None = None,
+    in_tidal: bool = True,
 ) -> int:
     """Add track to playlist and return PlaylistTrack ID."""
     pt = db_service.add_track_to_playlist(
         playlist_id=playlist_id,
         track_id=track_id,
         position=1,
+        in_tidal=in_tidal,
     )
     pt_id = pt.id
 
@@ -77,6 +79,21 @@ def add_track_to_playlist(
                 session.commit()
 
     return pt_id
+
+
+def update_playlist_track(
+    db_service: DatabaseService, pt_id: int, **fields: object
+) -> None:
+    """Update arbitrary PlaylistTrack fields for testing."""
+
+    with db_service.get_session() as session:
+        from tidal_cleanup.database.models import PlaylistTrack
+
+        pt_obj = session.query(PlaylistTrack).filter_by(id=pt_id).first()
+        if pt_obj:
+            for key, value in fields.items():
+                setattr(pt_obj, key, value)
+            session.commit()
 
 
 @pytest.fixture
@@ -109,7 +126,9 @@ def music_root(temp_dir):
 @pytest.fixture
 def decision_engine(db_service, music_root):
     """Create a SyncDecisionEngine instance."""
-    return SyncDecisionEngine(db_service=db_service, music_root=music_root)
+    return SyncDecisionEngine(
+        db_service=db_service, music_root=music_root, target_format="mp3"
+    )
 
 
 class TestSyncDecisionEngineInit:
@@ -194,6 +213,28 @@ class TestDecideDownloadAction:
         assert decision.action == SyncAction.DOWNLOAD_TRACK
         assert "missing" in decision.reason.lower()
         assert decision.priority == 8  # Higher priority for missing files
+
+    def test_target_format_used_for_download_path(self, db_service, music_root):
+        """Ensure download decisions respect configured target format."""
+
+        track_id = create_test_track(
+            db_service,
+            download_status=DownloadStatus.NOT_DOWNLOADED,
+        )
+        playlist_id = create_test_playlist(db_service, name="FormatPlaylist")
+        add_track_to_playlist(db_service, playlist_id, track_id)
+
+        engine = SyncDecisionEngine(
+            db_service=db_service,
+            music_root=music_root,
+            target_format="flac",
+        )
+
+        decisions = engine.analyze_playlist_sync(playlist_id)
+        assert decisions.decisions
+        decision = decisions.decisions[0]
+        assert decision.target_path is not None
+        assert decision.target_path.endswith(".flac")
 
 
 class TestDecideSymlinkAction:
@@ -347,6 +388,71 @@ class TestDecideSymlinkAction:
         decision = decisions.decisions[0]
         assert decision.action == SyncAction.NO_ACTION
         assert "valid" in decision.reason.lower()
+
+
+class TestRemovalDecisions:
+    """Test removal actions when tracks leave playlists."""
+
+    def test_remove_symlink_when_not_in_tidal(
+        self, decision_engine, db_service, temp_dir, music_root
+    ):
+        """Symlink entries should be removed when playlist entry disappears."""
+
+        file_path = temp_dir / "source.mp3"
+        file_path.write_text("audio data")
+
+        playlist_id = create_test_playlist(db_service, name="RemovedSymlink")
+        track_id = create_test_track(
+            db_service,
+            download_status=DownloadStatus.DOWNLOADED,
+            file_path=str(file_path),
+        )
+
+        playlist_dir = music_root / "Playlists" / "RemovedSymlink"
+        playlist_dir.mkdir(parents=True, exist_ok=True)
+        symlink_path = playlist_dir / file_path.name
+        symlink_path.symlink_to(file_path)
+
+        pt_id = add_track_to_playlist(
+            db_service,
+            playlist_id,
+            track_id,
+            is_primary=False,
+            symlink_path=str(symlink_path),
+        )
+        update_playlist_track(db_service, pt_id, in_tidal=False)
+
+        decisions = decision_engine.analyze_playlist_sync(playlist_id)
+        assert decisions.decisions
+        decision = decisions.decisions[0]
+        assert decision.action == SyncAction.REMOVE_SYMLINK
+        assert decision.source_path == str(symlink_path)
+
+    def test_remove_file_when_track_removed_everywhere(
+        self, decision_engine, db_service, temp_dir
+    ):
+        """Primary files should be deleted when no playlists reference them."""
+
+        file_path = temp_dir / "orphan.mp3"
+        file_path.write_text("audio data")
+
+        track_id = create_test_track(
+            db_service,
+            download_status=DownloadStatus.DOWNLOADED,
+            file_path=str(file_path),
+        )
+        playlist_id = create_test_playlist(db_service, name="RemovedFile")
+        pt_id = add_track_to_playlist(
+            db_service, playlist_id, track_id, is_primary=True
+        )
+
+        update_playlist_track(db_service, pt_id, in_tidal=False)
+
+        decisions = decision_engine.analyze_playlist_sync(playlist_id)
+        assert decisions.decisions
+        decision = decisions.decisions[0]
+        assert decision.action == SyncAction.REMOVE_FILE
+        assert decision.source_path == str(file_path)
 
 
 class TestAnalyzeAllPlaylists:

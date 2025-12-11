@@ -16,7 +16,11 @@ from tidal_cleanup.core.sync.deduplication import (
     PrimaryFileDecision,
 )
 from tidal_cleanup.core.sync.download_orchestrator import ExecutionResult
-from tidal_cleanup.core.sync.orchestrator import SyncOrchestrator, SyncResult
+from tidal_cleanup.core.sync.orchestrator import (
+    SyncOrchestrator,
+    SyncResult,
+    SyncStage,
+)
 from tidal_cleanup.core.tidal.state_fetcher import FetchStatistics
 from tidal_cleanup.database import DatabaseService
 
@@ -35,6 +39,8 @@ def mock_config(tmp_path):
     """Create a mock config."""
     config = Mock(spec=Config)
     config.m4a_directory = str(tmp_path / "music")
+    config.mp3_directory = str(tmp_path / "music_mp3")
+    config.target_audio_format = "mp3"
     return config
 
 
@@ -69,6 +75,8 @@ class TestSyncResult:
         assert result.decisions is None
         assert result.execution is None
         assert result.errors == []
+        assert result.stop_requested is None
+        assert result.stopped_after is None
 
     def test_add_error(self):
         """Test adding errors."""
@@ -195,6 +203,17 @@ class TestSyncResult:
         summary = result.get_summary()
 
         assert "execution" in summary
+
+    def test_get_summary_includes_stage_information(self):
+        """Stage details should appear when provided."""
+        result = SyncResult()
+        result.stop_requested = SyncStage.SCAN
+        result.stopped_after = SyncStage.FETCH
+
+        summary = result.get_summary()
+
+        assert summary["stage"]["requested"] == SyncStage.SCAN.value
+        assert summary["stage"]["completed"] == SyncStage.FETCH.value
 
 
 class TestSyncOrchestratorInit:
@@ -465,6 +484,59 @@ class TestSyncAll:
             assert "Failed to generate sync decisions" in result.errors[0]
             assert result.execution is None
 
+    def test_sync_all_stops_after_requested_stage(self, sync_orchestrator):
+        """sync_all should halt once the requested stage completes."""
+        with (
+            patch.object(
+                sync_orchestrator,
+                "_fetch_tidal_state",
+                return_value=FetchStatistics(),
+            ),
+            patch.object(
+                sync_orchestrator,
+                "_scan_filesystem",
+                return_value=ScanStatistics(),
+            ),
+            patch.object(
+                sync_orchestrator,
+                "_analyze_deduplication",
+                return_value=DeduplicationResult(),
+            ),
+            patch.object(
+                sync_orchestrator,
+                "_generate_decisions",
+                return_value=SyncDecisions(),
+            ),
+            patch.object(
+                sync_orchestrator,
+                "_execute_decisions",
+                return_value=ExecutionResult(),
+            ),
+        ):
+            result = sync_orchestrator.sync_all(
+                fetch_tidal=True,
+                scan_filesystem=True,
+                analyze_deduplication=True,
+                stop_after_stage=SyncStage.SCAN,
+            )
+
+        assert result.stopped_after == SyncStage.SCAN
+
+    def test_stage_stop_honors_skipped_stage(self, sync_orchestrator):
+        """Stage boundary should trigger even if stage work was skipped."""
+        with patch.object(
+            sync_orchestrator, "_scan_filesystem", return_value=ScanStatistics()
+        ) as scan_mock:
+            result = sync_orchestrator.sync_all(
+                fetch_tidal=False,
+                scan_filesystem=True,
+                analyze_deduplication=True,
+                stop_after_stage=SyncStage.FETCH,
+            )
+
+        scan_mock.assert_not_called()
+        assert result.stopped_after == SyncStage.FETCH
+
 
 class TestSyncPlaylist:
     """Test sync_playlist method."""
@@ -721,7 +793,10 @@ class TestHelperMethods:
 
         assert result == mock_result
         execute_mock = sync_orchestrator.download_orchestrator.execute_decisions
-        execute_mock.assert_called_once_with(decisions)
+        execute_mock.assert_called_once_with(
+            decisions,
+            target_format=sync_orchestrator.config.target_audio_format,
+        )
 
     def test_collect_errors(self, sync_orchestrator):
         """Test collecting errors from a step."""

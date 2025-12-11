@@ -62,6 +62,9 @@ class Config:
         # Audio conversion settings
         self.ffmpeg_quality = os.getenv("TIDAL_CLEANUP_FFMPEG_QUALITY", "2")
         self.audio_extensions = (".mp3", ".flac", ".wav", ".aac", ".m4a", ".mp4")
+        self.target_audio_format = (
+            os.getenv("TIDAL_CLEANUP_TARGET_FORMAT", "mp3").lower().replace(".", "")
+        )
 
         # Track matching settings
         self.fuzzy_match_threshold = int(

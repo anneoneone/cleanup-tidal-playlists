@@ -1350,6 +1350,21 @@ class DatabaseService:
 
             return pt
 
+    def track_has_active_playlist(self, track_id: int) -> bool:
+        """Return True if track still belongs to any Tidal playlist."""
+        with self.get_session() as session:
+            from .models import PlaylistTrack
+
+            return (
+                session.query(PlaylistTrack)
+                .filter(
+                    PlaylistTrack.track_id == track_id,
+                    PlaylistTrack.in_tidal.is_(True),
+                )
+                .first()
+                is not None
+            )
+
     def get_sync_statistics(self) -> Dict[str, Any]:
         """Get comprehensive sync statistics.
 

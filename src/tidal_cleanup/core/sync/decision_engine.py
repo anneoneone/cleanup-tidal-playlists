@@ -9,10 +9,13 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from ...database.models import DownloadStatus, Track
+from ...database.models import DownloadStatus, Playlist, PlaylistTrack, Track
 from ...database.service import DatabaseService
+
+if TYPE_CHECKING:  # pragma: no cover - type checking only
+    from .deduplication import DeduplicationLogic
 
 logger = logging.getLogger(__name__)
 
@@ -120,16 +123,29 @@ class SyncDecisionEngine:
     to achieve synchronization.
     """
 
-    def __init__(self, db_service: DatabaseService, music_root: Path | str):
+    def __init__(
+        self,
+        db_service: DatabaseService,
+        music_root: Path | str,
+        target_format: Optional[str] = None,
+        dedup_logic: Optional["DeduplicationLogic"] = None,
+    ):
         """Initialize the decision engine.
 
         Args:
             db_service: Database service instance
             music_root: Root directory for music files (contains Playlists/)
+            target_format: Desired audio format/extension for downloads (default mp3)
+            dedup_logic: Optional deduplication logic instance for future use
         """
         self.db_service = db_service
         self.music_root = Path(music_root)
         self.playlists_root = self.music_root / "Playlists"
+        normalized_format = (target_format or "mp3").lower().replace(".", "")
+        self.target_format = normalized_format
+        self.target_extension = f".{normalized_format}"
+        self.dedup_logic = dedup_logic
+        self._track_active_cache: Dict[int, bool] = {}
 
     def analyze_playlist_sync(self, playlist_id: int) -> SyncDecisions:
         """Analyze sync status for a single playlist.
@@ -190,7 +206,7 @@ class SyncDecisionEngine:
         return decisions
 
     def _decide_playlist_track_action(
-        self, playlist: Any, track: Track, playlist_track: Any
+        self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
     ) -> DecisionResult:
         """Decide what action to take for a track in a playlist.
 
@@ -202,6 +218,10 @@ class SyncDecisionEngine:
         Returns:
             DecisionResult with the action to take
         """
+        removal_decision = self._decide_removal_action(playlist, track, playlist_track)
+        if removal_decision:
+            return removal_decision
+
         # Check if track needs to be downloaded
         if track.download_status == DownloadStatus.NOT_DOWNLOADED:
             return self._decide_download_action(playlist, track, playlist_track)
@@ -226,7 +246,7 @@ class SyncDecisionEngine:
         return self._decide_symlink_action(playlist, track, playlist_track)
 
     def _decide_download_action(
-        self, playlist: Any, track: Track, playlist_track: Any
+        self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
     ) -> DecisionResult:
         """Decide download action for a track.
 
@@ -260,10 +280,7 @@ class SyncDecisionEngine:
         # Use original Tidal metadata, not normalized name
         base_filename = f"{track.artist} - {track.title}"
 
-        # Determine target extension from music_root path
-        # e.g., if music_root is /path/to/mp3, use .mp3
-        target_format = self.music_root.name  # Gets last part of path
-        target_ext = f".{target_format}"
+        target_ext = self.target_extension
 
         filename = f"{base_filename}{target_ext}"
         target_path = playlist_dir / filename
@@ -312,7 +329,7 @@ class SyncDecisionEngine:
         )
 
     def _decide_symlink_action(
-        self, playlist: Any, track: Track, playlist_track: Any
+        self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
     ) -> DecisionResult:
         """Decide symlink action for a track in a playlist.
 
@@ -379,7 +396,7 @@ class SyncDecisionEngine:
         )
 
     def _decide_create_symlink(
-        self, playlist: Any, track: Track, playlist_track: Any
+        self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
     ) -> DecisionResult:
         """Decide to create a symlink.
 
@@ -392,18 +409,7 @@ class SyncDecisionEngine:
             DecisionResult with create symlink action
         """
         # Construct symlink path
-        playlist_dir = self.playlists_root / playlist.name
-        # Use same filename as primary file
-        if track.file_path:
-            filename = Path(track.file_path).name
-        else:
-            filename = (
-                f"{track.normalized_name}.mp3"
-                if track.normalized_name
-                else f"{track.title}.mp3"
-            )
-
-        symlink_path = playlist_dir / filename
+        symlink_path = self._build_symlink_path(playlist, track)
 
         return DecisionResult(
             action=SyncAction.CREATE_SYMLINK,
@@ -415,6 +421,70 @@ class SyncDecisionEngine:
             reason="Track exists but playlist needs symlink",
             priority=6,
         )
+
+    def _decide_removal_action(
+        self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
+    ) -> Optional[DecisionResult]:
+        """Determine if a playlist-track should trigger a removal action."""
+        if playlist_track.in_tidal:
+            return None
+
+        if playlist_track.is_primary:
+            if not track.file_path:
+                return None
+            if self._track_in_active_playlist(track.id):
+                return None
+            file_path = Path(track.file_path)
+            if not file_path.exists():
+                return None
+            return DecisionResult(
+                action=SyncAction.REMOVE_FILE,
+                track_id=track.id,
+                playlist_id=playlist.id,
+                playlist_track_id=playlist_track.id,
+                source_path=str(file_path),
+                reason="Track removed from all playlists",
+                priority=9,
+            )
+
+        # Non-primary entries should only be symlinks
+        symlink_path = playlist_track.symlink_path or str(
+            self._build_symlink_path(playlist, track)
+        )
+        candidate = Path(symlink_path)
+        if playlist_track.symlink_path or candidate.exists():
+            return DecisionResult(
+                action=SyncAction.REMOVE_SYMLINK,
+                track_id=track.id,
+                playlist_id=playlist.id,
+                playlist_track_id=playlist_track.id,
+                source_path=str(candidate),
+                reason="Playlist entry removed from Tidal",
+                priority=8,
+            )
+
+        return None
+
+    def _build_symlink_path(self, playlist: Playlist, track: Track) -> Path:
+        """Compute the expected symlink location for a track within a playlist."""
+        playlist_dir = self.playlists_root / playlist.name
+        filename: str
+        if track.file_path:
+            filename = Path(track.file_path).name
+        elif track.normalized_name:
+            filename = f"{track.normalized_name}{self.target_extension}"
+        elif track.title:
+            filename = f"{track.title}{self.target_extension}"
+        else:
+            filename = f"track-{track.id}{self.target_extension}"
+        return playlist_dir / filename
+
+    def _track_in_active_playlist(self, track_id: int) -> bool:
+        """Check if track still belongs to at least one playlist in Tidal."""
+        if track_id not in self._track_active_cache:
+            active = self.db_service.track_has_active_playlist(track_id)
+            self._track_active_cache[track_id] = active
+        return self._track_active_cache[track_id]
 
     def get_prioritized_decisions(
         self, decisions: SyncDecisions

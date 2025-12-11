@@ -185,7 +185,11 @@ def download(
 
         # Step 3: Generate sync decisions
         with console.status("[bold green]Analyzing what needs to be downloaded..."):
-            decision_engine = SyncDecisionEngine(db_service, music_root=target_root)
+            decision_engine = SyncDecisionEngine(
+                db_service,
+                music_root=target_root,
+                target_format=target_format_normalized,
+            )
             decisions = decision_engine.analyze_all_playlists()
 
         # Filter for download decisions only

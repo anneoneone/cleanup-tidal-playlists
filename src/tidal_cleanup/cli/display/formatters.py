@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from rich.console import Console
 from rich.table import Table
 
+from ...core.sync import SyncStage
 from ...database import DatabaseService
 
 console = Console()
@@ -116,6 +117,29 @@ def display_db_sync_result(summary: dict[str, Any], dry_run: bool) -> None:
         dry_run: Whether this was a dry run
     """
     console.print("\n[bold green]✓ Sync operation completed[/bold green]\n")
+
+    stage_info = summary.get("stage")
+    if stage_info:
+        table = Table(
+            show_header=True,
+            header_style="bold magenta",
+            title="Stage Progress",
+        )
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green", justify="right")
+
+        requested = stage_info.get("requested") or SyncStage.EXECUTION.value
+        completed = stage_info.get("completed") or SyncStage.EXECUTION.value
+        status = (
+            "Reached requested stage" if requested == completed else "Stopped early"
+        )
+
+        table.add_row("Requested Stop", requested.title())
+        table.add_row("Completed Stage", completed.title())
+        table.add_row("Status", status)
+
+        console.print(table)
+        console.print()
 
     if "tidal" in summary:
         table = Table(

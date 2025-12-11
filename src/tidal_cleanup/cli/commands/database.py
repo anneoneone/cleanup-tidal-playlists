@@ -14,8 +14,13 @@ from rich.table import Table
 
 from ...config import Config
 from ...core.filesystem import FilesystemScanner
-from ...core.sync import DeduplicationLogic, SyncDecisionEngine, SyncOrchestrator
-from ...core.tidal import TidalDownloadService, TidalStateFetcher
+from ...core.sync import (
+    DeduplicationLogic,
+    SyncDecisionEngine,
+    SyncOrchestrator,
+    SyncStage,
+)
+from ...core.tidal import TidalApiService, TidalDownloadService, TidalStateFetcher
 from ...database import (
     ConsoleProgressReporter,
     DatabaseService,
@@ -95,6 +100,17 @@ def db() -> None:
     is_flag=True,
     help="Show detailed progress information",
 )
+@click.option(
+    "--stage-until",
+    type=click.Choice([stage.value for stage in SyncStage], case_sensitive=False),
+    default=SyncStage.EXECUTION.value,
+    show_default=True,
+    help=(
+        "Stop after this stage boundary. Useful for staged runs when "
+        "debugging fetch, scan, dedup, decisions, or execution steps."
+        "Available stages: fetch, scan, dedup, decisions, execution"
+    ),
+)
 def db_sync(
     dry_run: bool,
     no_fetch: bool,
@@ -102,6 +118,7 @@ def db_sync(
     no_dedup: bool,
     progress: bool,
     verbose: bool,
+    stage_until: str,
 ) -> None:
     """Execute database-driven sync operation.
 
@@ -127,29 +144,48 @@ def db_sync(
     """
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
-    download_service = TidalDownloadService(config)
 
     # Setup progress tracking (for future use)
     setup_progress_reporter(progress, verbose)
+
+    # Initialize and authenticate Tidal services
+    tidal_session = None
+    download_service = TidalDownloadService(config)
+
+    if not no_fetch:
+        console.print("[cyan]Connecting to Tidal API...[/cyan]")
+        tidal_service = TidalApiService(config.tidal_token_file)
+        tidal_service.connect()
+        tidal_session = tidal_service.session
+        console.print("[green]✓[/green] Connected to Tidal API\n")
+
+    # Authenticate download service (needed for execution stage)
+    console.print("[cyan]Initializing Tidal downloader...[/cyan]")
+    download_service.connect()
+    console.print("[green]✓[/green] Tidal downloader ready\n")
 
     # Create orchestrator
     orchestrator = SyncOrchestrator(
         config=config,
         db_service=db_service,
         download_service=download_service,
+        tidal_session=tidal_session,
         dry_run=dry_run,
     )
 
     # Execute sync
-    console.print("\n[bold cyan]🔄 Starting database-driven sync...[/bold cyan]")
+    console.print("[bold cyan]🔄 Starting database-driven sync...[/bold cyan]")
     if dry_run:
         console.print("[yellow]DRY RUN MODE - No changes will be made[/yellow]\n")
 
     try:
+        stop_stage = SyncStage(stage_until)
+
         result = orchestrator.sync_all(
             fetch_tidal=not no_fetch,
             scan_filesystem=not no_scan,
             analyze_deduplication=not no_dedup,
+            stop_after_stage=stop_stage,
         )
 
         # Display results
@@ -192,7 +228,13 @@ def db_fetch(verbose: bool) -> None:
     console.print("\n[bold cyan]📥 Fetching state from Tidal...[/bold cyan]\n")
 
     try:
-        fetcher = TidalStateFetcher(db_service)
+        # Initialize and authenticate Tidal API
+        console.print("[cyan]Connecting to Tidal API...[/cyan]")
+        tidal_service = TidalApiService(config.tidal_token_file)
+        tidal_service.connect()
+        console.print("[green]✓[/green] Connected to Tidal API\n")
+
+        fetcher = TidalStateFetcher(db_service, tidal_session=tidal_service.session)
         _ = fetcher.fetch_all_playlists()
         stats = fetcher.get_fetch_statistics()
 
