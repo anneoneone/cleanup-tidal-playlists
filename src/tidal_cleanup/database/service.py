@@ -1301,57 +1301,6 @@ class DatabaseService:
                 .all()
             )
 
-    def get_primary_playlist_tracks(self, playlist_id: int) -> List[PlaylistTrack]:
-        """Get playlist tracks where this playlist has the primary file.
-
-        Args:
-            playlist_id: Playlist database ID
-
-        Returns:
-            List of PlaylistTrack objects where is_primary=True
-        """
-        with self.get_session() as session:
-            return (
-                session.query(PlaylistTrack)
-                .filter(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.is_primary.is_(True),
-                )
-                .all()
-            )
-
-    def get_symlink_playlist_tracks(self, playlist_id: int) -> List[PlaylistTrack]:
-        """Get playlist tracks where this playlist has symlinks.
-
-        Args:
-            playlist_id: Playlist database ID
-
-        Returns:
-            List of PlaylistTrack objects where is_primary=False
-        """
-        with self.get_session() as session:
-            return (
-                session.query(PlaylistTrack)
-                .filter(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.is_primary.is_(False),
-                )
-                .all()
-            )
-
-    def get_broken_symlinks(self) -> List[PlaylistTrack]:
-        """Get all playlist tracks with broken symlinks.
-
-        Returns:
-            List of PlaylistTrack objects where symlink_valid=False
-        """
-        with self.get_session() as session:
-            return (
-                session.query(PlaylistTrack)
-                .filter(PlaylistTrack.symlink_valid.is_(False))
-                .all()
-            )
-
     def get_duplicate_tracks(self) -> Dict[int, List[PlaylistTrack]]:
         """Get tracks that appear in multiple playlists.
 
@@ -1373,80 +1322,6 @@ class DatabaseService:
             return {
                 track_id: pts for track_id, pts in track_map.items() if len(pts) > 1
             }
-
-    def mark_playlist_track_as_primary(
-        self, playlist_id: int, track_id: int
-    ) -> PlaylistTrack | None:
-        """Mark a playlist-track relationship as having the primary file.
-
-        This will also mark all other occurrences of this track as non-primary.
-
-        Args:
-            playlist_id: Playlist database ID
-            track_id: Track database ID
-
-        Returns:
-            Updated PlaylistTrack object, or None if not found
-        """
-        with self.get_session() as session:
-            # Mark all occurrences as non-primary
-            session.query(PlaylistTrack).filter(
-                PlaylistTrack.track_id == track_id
-            ).update({"is_primary": False})
-
-            # Mark this one as primary
-            pt = (
-                session.query(PlaylistTrack)
-                .filter(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.track_id == track_id,
-                )
-                .first()
-            )
-
-            if pt:
-                pt.is_primary = True
-                pt.sync_status = "synced"
-                pt.synced_at = datetime.now(timezone.utc)
-                session.commit()
-                session.refresh(pt)
-
-            return pt
-
-    def update_symlink_status(
-        self, playlist_id: int, track_id: int, symlink_path: str, valid: bool
-    ) -> PlaylistTrack | None:
-        """Update symlink information for a playlist-track relationship.
-
-        Args:
-            playlist_id: Playlist database ID
-            track_id: Track database ID
-            symlink_path: Full path to symlink
-            valid: Whether symlink is valid
-
-        Returns:
-            Updated PlaylistTrack object, or None if not found
-        """
-        with self.get_session() as session:
-            pt = (
-                session.query(PlaylistTrack)
-                .filter(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.track_id == track_id,
-                )
-                .first()
-            )
-
-            if pt:
-                pt.symlink_path = symlink_path
-                pt.symlink_valid = valid
-                pt.is_primary = False
-                pt.sync_status = "synced" if valid else "needs_symlink"
-                pt.synced_at = datetime.now(timezone.utc) if valid else None
-                session.commit()
-                session.refresh(pt)
-
-            return pt
 
     def track_has_active_playlist(self, track_id: int) -> bool:
         """Return True if track still belongs to any Tidal playlist."""
@@ -1516,21 +1391,6 @@ class DatabaseService:
 
             # Deduplication statistics
             total_playlist_tracks = session.query(PlaylistTrack).count()
-            primary_files = (
-                session.query(PlaylistTrack)
-                .filter(PlaylistTrack.is_primary.is_(True))
-                .count()
-            )
-            symlinks = (
-                session.query(PlaylistTrack)
-                .filter(PlaylistTrack.is_primary.is_(False))
-                .count()
-            )
-            broken_symlinks = (
-                session.query(PlaylistTrack)
-                .filter(PlaylistTrack.symlink_valid.is_(False))
-                .count()
-            )
 
             return {
                 "tracks": {
@@ -1549,9 +1409,6 @@ class DatabaseService:
                 },
                 "deduplication": {
                     "total_playlist_tracks": total_playlist_tracks,
-                    "primary_files": primary_files,
-                    "symlinks": symlinks,
-                    "broken_symlinks": broken_symlinks,
                 },
                 "database_path": str(self.db_path),
             }

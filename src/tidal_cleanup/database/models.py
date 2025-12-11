@@ -49,7 +49,6 @@ class TrackSyncStatus(str, Enum):
     """PlaylistTrack sync status for unified sync."""
 
     SYNCED = "synced"
-    NEEDS_SYMLINK = "needs_symlink"
     NEEDS_MOVE = "needs_move"
     NEEDS_REMOVAL = "needs_removal"
     UNKNOWN = "unknown"
@@ -310,22 +309,13 @@ class PlaylistTrack(Base):
     in_local: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     in_rekordbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # Deduplication and symlink tracking (unified sync)
-    is_primary: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )  # True if this playlist has the primary file (actual audio data)
-    symlink_path: Mapped[Optional[str]] = mapped_column(
-        String(1000), nullable=True
-    )  # Full path to symlink if is_primary=False
-    symlink_valid: Mapped[Optional[bool]] = mapped_column(
-        Boolean, nullable=True
-    )  # False if symlink exists but target missing/broken
+    # Sync status (unified sync)
     sync_status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         default=TrackSyncStatus.UNKNOWN.value,
         index=True,
-    )  # Enum: synced, needs_symlink, needs_move, needs_removal, unknown
+    )  # Enum: synced, needs_move, needs_removal, unknown
     synced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )  # When this playlist-track relationship was last synced to filesystem

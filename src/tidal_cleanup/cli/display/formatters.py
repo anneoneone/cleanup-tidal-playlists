@@ -197,7 +197,6 @@ def display_db_sync_result(summary: dict[str, Any], dry_run: bool) -> None:
         decisions = summary["decisions"]
         table.add_row("Total Decisions", str(decisions["total"]))
         table.add_row("Downloads", str(decisions["downloads"]))
-        table.add_row("Symlinks", str(decisions["symlinks"]))
 
         console.print(table)
         console.print()
@@ -214,8 +213,6 @@ def display_db_sync_result(summary: dict[str, Any], dry_run: bool) -> None:
         table.add_row("Downloads Attempted", str(execution["downloads_attempted"]))
         table.add_row("Downloads Successful", str(execution["downloads_successful"]))
         table.add_row("Downloads Failed", str(execution["downloads_failed"]))
-        table.add_row("Symlinks Created", str(execution["symlinks_created"]))
-        table.add_row("Symlinks Updated", str(execution["symlinks_updated"]))
 
         console.print(table)
 

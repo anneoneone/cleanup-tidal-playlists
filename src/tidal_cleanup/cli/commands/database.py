@@ -63,7 +63,7 @@ def db() -> None:
     - State tracking across sync operations
     - Conflict detection and resolution
     - Progress tracking with visual feedback
-    - Deduplication logic for symlink management
+    - Deduplication logic for managing track copies across playlists
     """
     pass
 
@@ -125,8 +125,8 @@ def db_sync(
     This command orchestrates a complete sync:
     1. Fetch current state from Tidal API
     2. Scan local filesystem for existing files
-    3. Analyze deduplication needs (symlink planning)
-    4. Generate sync decisions (download, create symlinks, etc.)
+    3. Analyze deduplication needs
+    4. Generate sync decisions (download, create, etc.)
     5. Execute decisions with conflict resolution
 
     Examples:
@@ -306,8 +306,6 @@ def db_scan(verbose: bool) -> None:
 
         table.add_row("Playlists Scanned", str(stats.get("playlists_scanned", 0)))
         table.add_row("Files Found", str(stats.get("files_found", 0)))
-        table.add_row("Symlinks Found", str(stats.get("symlinks_found", 0)))
-        table.add_row("Broken Symlinks", str(stats.get("broken_symlinks", 0)))
         table.add_row("Files Removed", str(stats.get("files_removed", 0)))
 
         console.print(table)

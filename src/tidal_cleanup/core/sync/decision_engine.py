@@ -29,12 +29,6 @@ class SyncAction(str, Enum):
     REMOVE_FILE = "remove_file"  # Remove file no longer in Tidal
     VERIFY_FILE = "verify_file"  # Verify file integrity
 
-    # PlaylistTrack-level actions
-    CREATE_SYMLINK = "create_symlink"  # Create symlink to primary file
-    UPDATE_SYMLINK = "update_symlink"  # Update broken/incorrect symlink
-    REMOVE_SYMLINK = "remove_symlink"  # Remove symlink no longer needed
-    MARK_PRIMARY = "mark_primary"  # Mark this playlist as having primary file
-
     # Playlist-level actions
     CREATE_PLAYLIST_DIR = "create_playlist_dir"  # Create playlist directory
     REMOVE_PLAYLIST_DIR = "remove_playlist_dir"  # Remove empty playlist dir
@@ -78,8 +72,6 @@ class SyncDecisions:
 
     # Statistics
     tracks_to_download: int = 0
-    symlinks_to_create: int = 0
-    symlinks_to_update: int = 0
     files_to_remove: int = 0
     metadata_updates: int = 0
     no_action_needed: int = 0
@@ -91,10 +83,6 @@ class SyncDecisions:
         # Update statistics based on action
         if decision.action == SyncAction.DOWNLOAD_TRACK:
             self.tracks_to_download += 1
-        elif decision.action == SyncAction.CREATE_SYMLINK:
-            self.symlinks_to_create += 1
-        elif decision.action == SyncAction.UPDATE_SYMLINK:
-            self.symlinks_to_update += 1
         elif decision.action == SyncAction.REMOVE_FILE:
             self.files_to_remove += 1
         elif decision.action == SyncAction.UPDATE_METADATA:
@@ -107,8 +95,6 @@ class SyncDecisions:
         return {
             "total_decisions": len(self.decisions),
             "tracks_to_download": self.tracks_to_download,
-            "symlinks_to_create": self.symlinks_to_create,
-            "symlinks_to_update": self.symlinks_to_update,
             "files_to_remove": self.files_to_remove,
             "metadata_updates": self.metadata_updates,
             "no_action_needed": self.no_action_needed,

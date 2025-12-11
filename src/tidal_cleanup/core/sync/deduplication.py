@@ -1,8 +1,8 @@
 """Track distribution analysis for understanding playlist overlap.
 
 This module implements logic to analyze which playlists contain which tracks. Since we
-now download each track to every playlist it appears in (no symlinks), this is mainly
-for reporting and statistics.
+now download each track to every playlist it appears in, this is mainly for reporting
+and statistics.
 """
 
 import logging
@@ -56,8 +56,8 @@ class DeduplicationResult:
 class DeduplicationLogic:
     """Logic for analyzing track distribution across playlists.
 
-    Since we now download tracks to each playlist (no symlinks), this class is mainly
-    for reporting which tracks appear in multiple playlists.
+    Since we now download tracks to each playlist, this class is mainly for reporting
+    which tracks appear in multiple playlists.
     """
 
     def __init__(self, db_service: DatabaseService):

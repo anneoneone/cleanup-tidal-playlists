@@ -388,15 +388,6 @@ class RekordboxSnapshotService:
             candidate = self._mp3_root / candidate
         return candidate
 
-    def _resolve_symlink_path(self, path: Optional[Path]) -> Optional[Path]:
-        if path is None:
-            return None
-
-        try:
-            return path.resolve()
-        except OSError:
-            return path
-
     def _ensure_content(self, track_path: Path) -> Optional[Any]:
         return self.rekordbox_service.get_or_create_content(track_path)
 
