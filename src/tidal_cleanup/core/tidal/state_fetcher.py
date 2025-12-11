@@ -380,14 +380,14 @@ class TidalStateFetcher:
         # Only update database if the playlist actually changed in Tidal
         if has_changed:
             updated = self.db_service.update_playlist(existing.id, playlist_data)
-            logger.debug("Updated playlist: %s (%d)", updated.name, updated.tidal_id)
+            logger.debug("Updated playlist: %s (%s)", updated.name, updated.tidal_id)
             return updated, True
         else:
             # No changes in Tidal, just update last_seen timestamp
             minimal_update = {"last_seen_in_tidal": playlist_data["last_seen_in_tidal"]}
             updated = self.db_service.update_playlist(existing.id, minimal_update)
             logger.debug(
-                "Playlist unchanged: %s (%d)", existing.name, existing.tidal_id
+                "Playlist unchanged: %s (%s)", existing.name, existing.tidal_id
             )
             return updated, False
 

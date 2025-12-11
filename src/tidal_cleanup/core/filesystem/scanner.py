@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ...database.models import DownloadStatus
 from ...database.service import DatabaseService
@@ -174,13 +174,26 @@ class FilesystemScanner:
                 self._stats.playlists_scanned += 1
                 return
 
+            # Preload playlist-track associations to prefer playlist-specific tracks
+            playlist_tracks = self.db_service.get_playlist_track_associations(
+                playlist.id
+            )
+            normalized_playlist_tracks: Dict[str, List[Any]] = {}
+            for playlist_track in playlist_tracks:
+                track = playlist_track.track
+                if not track or not track.normalized_name:
+                    continue
+                normalized_playlist_tracks.setdefault(track.normalized_name, []).append(
+                    track
+                )
+
             # Find all audio files in playlist directory
             files = self._find_audio_files(playlist_dir)
             logger.debug("Found %d files in %s", len(files), playlist_name)
 
             # Process each file
             for file_path in files:
-                self._process_file(playlist, file_path)
+                self._process_file(playlist, file_path, normalized_playlist_tracks)
 
             self._stats.playlists_scanned += 1
 
@@ -208,66 +221,184 @@ class FilesystemScanner:
 
         return sorted(audio_files)
 
-    def _process_file(self, playlist: Any, file_path: Path) -> None:
+    def _process_file(
+        self,
+        playlist: Any,
+        file_path: Path,
+        playlist_tracks_map: Dict[str, List[Any]],
+    ) -> None:
         """Process a single file.
 
         Args:
             playlist: Playlist database object
             file_path: Path to file
+            playlist_tracks_map: Lookup of playlist tracks keyed by normalized name
         """
         try:
             self._stats.files_found += 1
 
+            relative_path = self._to_library_relative_path(file_path)
+
             # Try to match file to a track
-            track = self._match_file_to_track(file_path)
+            track, normalized_key = self._match_file_to_track(
+                file_path, playlist_tracks_map, relative_path
+            )
 
             if track:
                 if self._update_track_file_metadata(track.id, file_path):
                     self._stats.tracks_updated += 1
 
-                # Add this file path to the track's file_paths list
-                relative_path = self._to_library_relative_path(file_path)
-                self.db_service.add_file_path_to_track(track.id, relative_path)
+                # Add this file path to all playlist tracks that reference it
+                targets: List[Any]
+                if normalized_key and playlist_tracks_map:
+                    targets = playlist_tracks_map.get(normalized_key, [])
+                    if not targets:
+                        targets = [track]
+                else:
+                    targets = [track]
+
+                for candidate in targets:
+                    try:
+                        self.db_service.add_file_path_to_track(
+                            candidate.id, relative_path
+                        )
+                    except ValueError:
+                        logger.debug(
+                            "Skipping empty path assignment for track %s", candidate.id
+                        )
 
         except Exception as e:
             error_msg = f"Error processing file '{file_path.name}': {e}"
             logger.error(error_msg)
             self._stats.errors.append(error_msg)
 
-    def _match_file_to_track(self, file_path: Path) -> Any | None:
+    def _match_file_to_track(
+        self,
+        file_path: Path,
+        playlist_tracks_map: Optional[Dict[str, List[Any]]] = None,
+        relative_path: Optional[str] = None,
+    ) -> tuple[Any | None, Optional[str]]:
         """Match a file to a database track.
 
         Uses filename-based matching for now. Future: metadata, ISRC, etc.
 
         Args:
             file_path: Path to file
+            playlist_tracks_map: Optional lookup of playlist tracks by normalized name
+            relative_path: Relative library path for tie-breaking
 
         Returns:
-            Matched Track object or None
+            Tuple of (Track or None, normalized_name used for lookup)
         """
-        # Extract filename without extension
         filename = file_path.stem
 
-        # Try to parse filename as "Artist - Title"
-        if " - " in filename:
-            parts = filename.split(" - ", 1)
-            if len(parts) == 2:
-                artist, title = parts
-                normalized_name = f"{artist.lower().strip()} - {title.lower().strip()}"
+        artist_title = self._split_artist_title(filename)
+        if artist_title:
+            artist, title = artist_title
+            match = self._match_by_artist_title(
+                artist, title, playlist_tracks_map, relative_path
+            )
+            if match:
+                return match
 
-                # Find track by normalized name
-                track = self.db_service.find_track_by_normalized_name(normalized_name)
-                if track:
-                    return track
-
-        # Fallback: search by filename only
-        all_tracks = self.db_service.get_all_tracks()
-        for track in all_tracks:
-            if track.normalized_name and filename.lower() in track.normalized_name:
-                return track
+        fallback_match = self._match_by_filename_keyword(filename)
+        if fallback_match:
+            return fallback_match
 
         logger.debug("Could not match file to track: %s", file_path.name)
+        return None, None
+
+    def _split_artist_title(self, filename: str) -> Optional[tuple[str, str]]:
+        """Split "Artist - Title" filenames when possible."""
+        if " - " not in filename:
+            return None
+        parts = filename.split(" - ", 1)
+        if len(parts) != 2:
+            return None
+        return parts[0], parts[1]
+
+    def _match_by_artist_title(
+        self,
+        artist: str,
+        title: str,
+        playlist_tracks_map: Optional[Dict[str, List[Any]]],
+        relative_path: Optional[str],
+    ) -> Optional[tuple[Any, str]]:
+        """Use normalized name matching based on artist/title."""
+        for artist_variant in self._generate_artist_variations(artist):
+            normalized_name = DatabaseService._normalize_track_name(
+                title, artist_variant
+            )
+            candidate = self._match_in_playlist_map(
+                normalized_name, playlist_tracks_map, relative_path
+            )
+            if candidate:
+                return candidate, normalized_name
+
+            track = self.db_service.find_track_by_normalized_name(normalized_name)
+            if track:
+                return track, normalized_name
         return None
+
+    def _match_in_playlist_map(
+        self,
+        normalized_name: str,
+        playlist_tracks_map: Optional[Dict[str, List[Any]]],
+        relative_path: Optional[str],
+    ) -> Optional[Any]:
+        """Return a playlist-specific match if available."""
+        if not playlist_tracks_map:
+            return None
+        playlist_candidates = playlist_tracks_map.get(normalized_name)
+        if not playlist_candidates:
+            return None
+        if relative_path:
+            for candidate in playlist_candidates:
+                if not candidate.file_paths or (
+                    relative_path not in candidate.file_paths
+                ):
+                    return candidate
+        return playlist_candidates[0]
+
+    def _match_by_filename_keyword(
+        self, filename: str
+    ) -> Optional[tuple[Any, Optional[str]]]:
+        """Fallback matching by checking filename as substring."""
+        filename_lower = filename.lower()
+        for track in self.db_service.get_all_tracks():
+            if track.normalized_name and filename_lower in track.normalized_name:
+                return track, track.normalized_name
+        return None
+
+    def _generate_artist_variations(self, artist_field: str) -> List[str]:
+        """Generate possible artist tokens from a filename artist field."""
+        candidates: List[str] = []
+        normalized = artist_field.strip()
+        if normalized:
+            candidates.append(normalized)
+
+        simple_separators = [",", "&", "+", "/", "|"]
+        token_separators = [" x ", " vs ", " feat", " ft", " featuring", " pres"]
+
+        for sep in simple_separators:
+            if sep in normalized:
+                candidates.append(normalized.split(sep, 1)[0].strip())
+
+        lower_artist = normalized.lower()
+        for token in token_separators:
+            idx = lower_artist.find(token)
+            if idx > 0:
+                candidates.append(normalized[:idx].strip())
+
+        # Deduplicate while preserving order
+        seen = set()
+        unique_candidates: List[str] = []
+        for entry in candidates:
+            if entry and entry.lower() not in seen:
+                unique_candidates.append(entry)
+                seen.add(entry.lower())
+
+        return unique_candidates
 
     def _update_track_file_metadata(self, track_id: int, file_path: Path) -> bool:
         """Persist filesystem metadata for a track based on a resolved path."""

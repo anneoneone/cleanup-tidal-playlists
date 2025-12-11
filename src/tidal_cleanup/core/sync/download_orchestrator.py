@@ -436,8 +436,9 @@ class DownloadOrchestrator:
 
             if removed:
                 result.files_removed += 1
-                if decision.track_id:
-                    self._remove_track_file_reference(decision.track_id, source)
+
+            if decision.track_id:
+                self._remove_track_file_reference(decision.track_id, source)
 
         except Exception as e:
             result.add_error(f"Failed to remove file {source}: {str(e)}")
@@ -449,10 +450,12 @@ class DownloadOrchestrator:
             self.db_service.remove_file_path_from_track(track_id, relative_path)
             track = self.db_service.get_track_by_id(track_id)
             if track and (not track.file_paths):
-                self.db_service.update_track(
-                    track_id,
-                    {"download_status": DownloadStatus.NOT_DOWNLOADED.value},
-                )
+                removed = self.db_service.delete_track_if_unused(track_id)
+                if not removed:
+                    self.db_service.update_track(
+                        track_id,
+                        {"download_status": DownloadStatus.NOT_DOWNLOADED.value},
+                    )
         except Exception as exc:
             logger.warning(
                 "Failed to update file references for track %s: %s", track_id, exc

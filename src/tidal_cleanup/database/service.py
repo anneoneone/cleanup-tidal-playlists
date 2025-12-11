@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
 from .models import Base, Playlist, PlaylistTrack, SyncOperation, SyncSnapshot, Track
@@ -141,13 +141,20 @@ class DatabaseService:
             Track object or None if not found
         """
         with self.get_session() as session:
-            # Check if the path is in the file_paths JSON array
-            from sqlalchemy import func
-
-            stmt = select(Track).where(
-                func.json_contains(Track.file_paths, func.json_quote(file_path))
+            query = text(
+                """
+                SELECT tracks.id
+                FROM tracks, json_each(tracks.file_paths) AS file_entry
+                WHERE file_entry.value = :file_path
+                LIMIT 1
+                """
             )
-            return session.scalar(stmt)
+            track_id = session.execute(
+                query, {"file_path": file_path}
+            ).scalar_one_or_none()
+            if track_id is None:
+                return None
+            return session.get(Track, track_id)
 
     def find_track_by_metadata(self, title: str, artist: str) -> Optional[Track]:
         """Find track by metadata (title and artist).
@@ -353,6 +360,30 @@ class DatabaseService:
 
             session.refresh(track)
             return track
+
+    def delete_track_if_unused(self, track_id: int) -> bool:
+        """Delete a track if it has no file paths or playlist references."""
+        with self.get_session() as session:
+            track = session.get(Track, track_id)
+            if not track:
+                return False
+
+            if track.file_paths:
+                return False
+
+            has_playlist = (
+                session.query(PlaylistTrack)
+                .filter(PlaylistTrack.track_id == track_id)
+                .first()
+                is not None
+            )
+            if has_playlist:
+                return False
+
+            session.delete(track)
+            session.commit()
+            logger.info("Deleted orphan track %s", track_id)
+            return True
 
     def get_all_tracks(self) -> List[Track]:
         """Get all tracks from database.

@@ -7,6 +7,7 @@ tracking, conflict resolution, and deduplication.
 import logging
 from collections import Counter
 from pathlib import Path
+from typing import Dict, List
 
 import click
 from rich.console import Console
@@ -15,8 +16,11 @@ from rich.table import Table
 from ...config import Config
 from ...core.filesystem import FilesystemScanner
 from ...core.sync import (
+    DecisionResult,
     DeduplicationLogic,
+    SyncAction,
     SyncDecisionEngine,
+    SyncDecisions,
     SyncOrchestrator,
     SyncStage,
 )
@@ -426,7 +430,12 @@ def db_analyze(strategy: str) -> None:
     default="ALL",
     help="Filter by action type",
 )
-def db_decisions(limit: int, action: str) -> None:
+@click.option(
+    "--hide-no-action",
+    is_flag=True,
+    help="Suppress NO_ACTION rows to focus on actionable decisions",
+)
+def db_decisions(limit: int, action: str, hide_no_action: bool) -> None:
     """Show sync decisions that would be executed.
 
     Displays what actions the sync system has decided to take, such as
@@ -444,40 +453,17 @@ def db_decisions(limit: int, action: str) -> None:
     try:
         engine = SyncDecisionEngine(db_service, music_root=config.mp3_directory)
         decisions = engine.analyze_all_playlists()
+        playlist_lookup = {
+            playlist.id: playlist.name for playlist in db_service.get_all_playlists()
+        }
 
-        # Filter by action if specified
-        filtered_decisions = decisions.decisions
-        if action != "ALL":
-            filtered_decisions = [
-                d for d in decisions.decisions if d.action.name == action
-            ]
+        filtered_decisions = _apply_decision_filters(decisions, action, hide_no_action)
 
-        console.print(
-            f"[green]✓ Generated {len(decisions.decisions)} decisions[/green]"
+        _print_decision_generation_summary(
+            len(decisions.decisions), len(filtered_decisions), action
         )
-        if action != "ALL":
-            console.print(
-                f"[cyan]Showing {len(filtered_decisions)} "
-                f"decisions of type {action}[/cyan]\n"
-            )
-        else:
-            console.print()
 
-        # Display decisions
-        table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("Action", style="cyan", no_wrap=True)
-        table.add_column("Track ID", style="white")
-        table.add_column("Details", style="yellow")
-
-        for decision in filtered_decisions[:limit]:
-            track_id = str(decision.track_id) if decision.track_id else "N/A"
-
-            details = decision.reason or ""
-            if decision.target_path:
-                details = str(decision.target_path)
-
-            table.add_row(decision.action.value, track_id, details)
-
+        table = _build_decisions_table(filtered_decisions, playlist_lookup, limit)
         console.print(table)
 
         if len(filtered_decisions) > limit:
@@ -486,22 +472,88 @@ def db_decisions(limit: int, action: str) -> None:
             )
 
         # Summary by action type
-        summary_table = Table(
-            show_header=True, header_style="bold magenta", title="\nSummary by Action"
-        )
-        summary_table.add_column("Action", style="cyan")
-        summary_table.add_column("Count", style="green", justify="right")
-
-        action_counts = Counter(d.action.name for d in decisions.decisions)
-        for action_name, count in sorted(action_counts.items()):
-            summary_table.add_row(action_name, str(count))
-
+        summary_table = _build_action_summary_table(decisions)
         console.print(summary_table)
 
     except Exception as e:
         logger.exception("Decision generation failed")
         console.print(f"\n[red]✗ Failed to generate decisions: {e}[/red]")
         raise click.ClickException(str(e))
+
+
+def _apply_decision_filters(
+    decisions: SyncDecisions, action: str, hide_no_action: bool
+) -> List[DecisionResult]:
+    filtered: List[DecisionResult] = decisions.decisions
+    if hide_no_action:
+        filtered = [d for d in filtered if d.action != SyncAction.NO_ACTION]
+    if action != "ALL":
+        filtered = [d for d in filtered if d.action.name == action]
+    return filtered
+
+
+def _print_decision_generation_summary(
+    total_decisions: int, filtered_count: int, action: str
+) -> None:
+    console.print(f"[green]✓ Generated {total_decisions} decisions[/green]")
+    if action != "ALL":
+        console.print(
+            f"[cyan]Showing {filtered_count} decisions of type {action}[/cyan]\n"
+        )
+    else:
+        console.print()
+
+
+def _build_decisions_table(
+    filtered_decisions: List[DecisionResult],
+    playlist_lookup: Dict[int, str],
+    limit: int,
+) -> Table:
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Action", style="cyan", no_wrap=True)
+    table.add_column("Track ID", style="white")
+    table.add_column("Playlist", style="magenta")
+    table.add_column("Filename", style="green")
+    table.add_column("Details", style="yellow")
+
+    for decision in filtered_decisions[:limit]:
+        track_id = str(decision.track_id) if decision.track_id else "N/A"
+        playlist_name = (
+            playlist_lookup.get(decision.playlist_id, "-")
+            if decision.playlist_id is not None
+            else "-"
+        )
+
+        file_path = decision.target_path or decision.source_path
+        filename = Path(file_path).name if file_path else "-"
+
+        details = decision.reason or ""
+        if file_path:
+            details = f"{details} ({file_path})" if details else str(file_path)
+
+        table.add_row(
+            decision.action.value,
+            track_id,
+            playlist_name,
+            filename,
+            details,
+        )
+
+    return table
+
+
+def _build_action_summary_table(decisions: SyncDecisions) -> Table:
+    summary_table = Table(
+        show_header=True, header_style="bold magenta", title="\nSummary by Action"
+    )
+    summary_table.add_column("Action", style="cyan")
+    summary_table.add_column("Count", style="green", justify="right")
+
+    action_counts = Counter(d.action.name for d in decisions.decisions)
+    for action_name, count in sorted(action_counts.items()):
+        summary_table.add_row(action_name, str(count))
+
+    return summary_table
 
 
 @db.command(name="status")
