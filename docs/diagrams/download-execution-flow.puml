@@ -1,0 +1,74 @@
+@startuml download-execution-flow
+title Download Orchestrator - Decision Execution
+
+participant DownloadOrchestrator as Orch
+participant DatabaseService as DB
+participant TidalDownloadService as Download
+participant "File System" as FS
+
+-> Orch: execute_decisions(decisions)
+activate Orch
+
+Orch -> Orch: Filter decisions by action type
+
+== Process Downloads ==
+loop For each DOWNLOAD_TRACK decision
+    Orch -> Orch: _execute_download(decision)
+    activate Orch
+
+    Orch -> DB: get_track_by_id(track_id)
+    DB --> Orch: track
+
+    Orch -> FS: Create playlist directory
+
+    alt dry_run == True
+        Orch -> Orch: Log would download
+    else Execute download
+        Orch -> Download: download_track(\n  tidal_id, target_path,\n  audio_format)
+        activate Download
+        Download -> "tidal-dl-ng": Download
+        "tidal-dl-ng" --> Download: file
+        Download --> Orch: download_path
+        deactivate Download
+
+        Orch -> DB: add_file_path_to_track(\n  track_id, file_path)
+        Orch -> DB: update_track(\n  download_status=DOWNLOADED)
+    end
+
+    deactivate Orch
+end
+
+== Process Removals ==
+loop For each REMOVE_FILE decision
+    Orch -> Orch: _execute_removal(decision)
+    activate Orch
+
+    Orch -> DB: get_track_by_id(track_id)
+    DB --> Orch: track
+
+    Orch -> Orch: Verify file should be removed
+    note right: Check not needed by\nother playlists
+
+    alt dry_run == True
+        Orch -> Orch: Log would remove
+    else Execute removal
+        Orch -> FS: Delete file
+        Orch -> DB: remove_file_path_from_track(\n  track_id, file_path)
+
+        alt Track has no more file_paths
+            Orch -> DB: update_track(\n  download_status=NOT_DOWNLOADED)
+        end
+    end
+
+    deactivate Orch
+end
+
+== Process Metadata Updates ==
+loop For each UPDATE_METADATA decision
+    Orch -> DB: update_track(track_id, metadata)
+end
+
+<-- Orch: ExecutionResult\n(downloads, removals, errors)
+deactivate Orch
+
+@enduml

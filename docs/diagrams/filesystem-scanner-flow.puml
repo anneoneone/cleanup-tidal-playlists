@@ -1,0 +1,81 @@
+@startuml filesystem-scanner-flow
+title Filesystem Scanner - Local File Discovery
+
+participant FilesystemScanner as Scanner
+participant DatabaseService as DB
+participant "File System" as FS
+
+-> Scanner: scan_all_playlists()
+activate Scanner
+
+Scanner -> FS: List directories in\nPlaylists/
+FS --> Scanner: playlist_dirs[]
+
+loop For each playlist_dir
+    Scanner -> Scanner: scan_playlist(playlist_name)
+    activate Scanner
+
+    Scanner -> DB: get_playlist_by_name(name)
+    DB --> Scanner: playlist?
+
+    alt Playlist not in DB
+        Scanner -> Scanner: Log warning, skip
+    else Playlist exists
+        Scanner -> FS: List audio files in playlist_dir
+        FS --> Scanner: files[]
+
+        Scanner -> DB: get_playlist_track_associations(\n  playlist_id)
+        DB --> Scanner: existing_tracks[]
+
+        Scanner -> Scanner: Build track lookup by file_path
+
+        loop For each file
+            Scanner -> Scanner: Get relative path
+
+            alt File already tracked
+                Scanner -> Scanner: Mark as seen
+            else New file
+                Scanner -> Scanner: _match_file_to_track(file)
+                activate Scanner
+
+                Scanner -> Scanner: Extract artist/title\nfrom filename
+                note right: Parse "Artist - Title.mp3"
+
+                Scanner -> DB: find_track_by_normalized_name(\n  "artist - title")
+                DB --> Scanner: track?
+
+                alt Track found by name
+                    Scanner -> DB: add_file_path_to_track(\n  track_id, file_path)
+                else Track not found
+                    Scanner -> Scanner: Try fuzzy matching
+                    Scanner -> DB: get_all_tracks()
+                    Scanner -> Scanner: Compute similarity scores
+
+                    alt Best match found
+                        Scanner -> DB: add_file_path_to_track(\n  track_id, file_path)
+                    else No match
+                        Scanner -> Scanner: Log orphan file
+                    end
+                end
+
+                deactivate Scanner
+            end
+        end
+
+        Scanner -> DB: Mark tracks with file_paths\nas in_local=True
+
+        Scanner -> Scanner: Identify removed files
+        loop For each previously tracked file
+            alt File no longer exists
+                Scanner -> DB: remove_file_path_from_track(\n  track_id, file_path)
+            end
+        end
+    end
+
+    deactivate Scanner
+end
+
+<-- Scanner: ScanStatistics\n(playlists_scanned, files_found)
+deactivate Scanner
+
+@enduml

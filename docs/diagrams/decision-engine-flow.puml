@@ -1,0 +1,76 @@
+@startuml decision-engine-flow
+title Sync Decision Engine - Decision Generation
+
+participant SyncDecisionEngine as Engine
+participant DatabaseService as DB
+participant DeduplicationLogic as Dedup
+
+-> Engine: analyze_playlist_sync(playlist_id)
+activate Engine
+
+Engine -> DB: get_playlist_by_id(playlist_id)
+DB --> Engine: playlist
+
+Engine -> DB: get_playlist_track_associations(playlist_id)
+DB --> Engine: playlist_tracks[]
+
+Engine -> Engine: _collect_active_playlist_paths()
+note right: Build map of files\nstill referenced by\nactive Tidal tracks
+
+loop For each playlist_track
+    Engine -> Engine: _decide_playlist_track_action(\n  playlist, track, playlist_track,\n  active_playlist_paths)
+    activate Engine
+
+    Engine -> Engine: _find_existing_track_file()
+    note right: Check if file exists\nin playlist directory
+
+    alt playlist_track.in_tidal == False
+        Engine -> Engine: _decide_removal_action()
+        activate Engine
+        alt File exists && not used by other active tracks
+            Engine -> Engine: Create REMOVE_FILE decision
+            note right: Priority: 8\nReason: Track removed\nfrom Tidal
+        else File shared with active track
+            Engine -> Engine: Skip removal
+            note right: File still needed
+        end
+        deactivate Engine
+    else File exists locally
+        Engine -> Engine: Create NO_ACTION decision
+        note right: Track synced
+    else Track NOT_DOWNLOADED
+        Engine -> Engine: _decide_download_action()
+        activate Engine
+        Engine -> Engine: _build_track_path()
+        Engine -> Engine: _find_matching_playlist_file()
+        alt File already exists
+            Engine -> Engine: Create NO_ACTION decision
+        else File missing
+            Engine -> Engine: Create DOWNLOAD_TRACK decision
+            note right: Priority: 10\nTarget: playlist/Artist - Title.mp3
+        end
+        deactivate Engine
+    end
+
+    deactivate Engine
+end
+
+Engine -> Engine: _identify_orphan_file_decisions()
+activate Engine
+note right: Find files on disk that\naren't in any playlist_tracks
+Engine -> Engine: _list_audio_files(playlist_dir)
+loop For each file
+    alt File not in active_playlist_paths\n&& not already marked for removal
+        Engine -> Engine: _find_track_for_path(file)
+        alt No matching playlist_track
+            Engine -> Engine: Create REMOVE_FILE decision
+            note right: Priority: 7\nReason: Orphan file
+        end
+    end
+end
+deactivate Engine
+
+<-- Engine: SyncDecisions
+deactivate Engine
+
+@enduml
