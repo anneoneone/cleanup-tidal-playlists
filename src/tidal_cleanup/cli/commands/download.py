@@ -223,7 +223,7 @@ def download(
         orchestrator = DownloadOrchestrator(
             db_service=db_service,
             music_root=target_root,
-            download_service=download_service,
+            tidal_download_service=download_service,
             dry_run=dry_run,
         )
 

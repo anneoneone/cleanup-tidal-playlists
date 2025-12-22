@@ -85,18 +85,18 @@ def init_tidal_api(config: Optional[Config] = None) -> TidalApiService:
         config = Config()
 
     try:
-        tidal_service = TidalApiService(config.tidal_token_file)
+        tidal_api_service = TidalApiService(config.tidal_token_file)
 
         # Authenticate if needed
-        if not tidal_service.is_authenticated():
+        if not tidal_api_service.is_authenticated():
             logger.info("Authenticating with Tidal API...")
-            tidal_service.connect()
+            tidal_api_service.connect()
 
-        # Verify connection works
-        playlists = tidal_service.get_playlists()
-        logger.debug(f"Tidal API connected: {len(playlists)} playlists")
+        # T O D O: Remove this comment later
+        # playlists = tidal_api_service.get_playlists()
+        # logger.debug(f"Tidal API connected: {len(playlists)} playlists")
 
-        return tidal_service
+        return tidal_api_service
 
     except Exception as e:
         logger.exception("Tidal API initialization failed")

@@ -19,7 +19,6 @@ from ...services import (
     DeletionMode,
     FileService,
     PlaylistSynchronizer,
-    RekordboxGenerationError,
     RekordboxService,
     TidalApiService,
     TidalDownloadError,
@@ -128,76 +127,32 @@ class TidalCleanupApp:
     def _convert_files(self, playlist_name: Optional[str] = None) -> None:
         """Convert M4A files to MP3.
 
+        DEPRECATED: This method is no longer supported.
+        Use 'tidal-cleanup download' with --target-format instead.
+
         Args:
             playlist_name: Optional playlist name to convert. If provided,
                           only the closest matching playlist will be converted.
         """
-        if playlist_name:
-            console.print(
-                f"[bold blue]Converting playlist: {playlist_name}...[/bold blue]"
-            )
-        else:
-            console.print("[bold blue]Converting audio files...[/bold blue]")
-
-        playlist_jobs = self.file_service.convert_directory(
-            self.config.m4a_directory,
-            self.config.mp3_directory,
-            target_format=".mp3",
-            quality=self.config.ffmpeg_quality,
-            playlist_filter=playlist_name,
+        console.print(
+            "[yellow]⚠ This command is deprecated. "
+            "Use 'tidal-cleanup download --target-format mp3' instead.[/yellow]"
         )
-
-        if not playlist_jobs:
-            if playlist_name:
-                console.print(
-                    f"[yellow]No playlist found matching '{playlist_name}'[/yellow]"
-                )
-            else:
-                console.print("[yellow]No playlists found to convert[/yellow]")
-            return
-
-        self.show_result_table(playlist_jobs)
 
     def generate_rekordbox_xml(self) -> bool:
         """Generate Rekordbox XML file.
 
+        DEPRECATED: This method is no longer supported.
+        Use 'tidal-cleanup rekordbox sync' instead.
+
         Returns:
             True if successful, False otherwise
         """
-        try:
-            console.print("[bold blue]Generating Rekordbox XML...[/bold blue]")
-
-            if not self.rekordbox_service.validate_input_folder(
-                self.config.rekordbox_input_folder
-            ):
-                console.print(
-                    "[red]✗[/red] Invalid input folder for Rekordbox generation"
-                )
-                return False
-
-            track_count = self.rekordbox_service.get_track_count_estimate(
-                self.config.rekordbox_input_folder
-            )
-
-            with console.status(f"[bold green]Processing ~{track_count} tracks..."):
-                self.rekordbox_service.generate_xml(
-                    self.config.rekordbox_input_folder,
-                    self.config.rekordbox_output_file,
-                )
-
-            console.print(
-                f"[green]✓[/green] Rekordbox XML generated: "
-                f"{self.config.rekordbox_output_file}"
-            )
-            return True
-
-        except RekordboxGenerationError as e:
-            console.print(f"[red]✗[/red] Rekordbox generation failed: {e}")
-            return False
-        except Exception as e:
-            logger.exception("Rekordbox XML generation failed")
-            console.print(f"[red]✗[/red] Rekordbox generation failed: {e}")
-            return False
+        console.print(
+            "[yellow]⚠ This command is deprecated. "
+            "Use 'tidal-cleanup rekordbox sync' instead.[/yellow]"
+        )
+        return False
 
     def show_result_table(self, playlist_jobs: dict[str, List[ConversionJob]]) -> None:
         """Show result of playlist conversion."""
@@ -279,13 +234,10 @@ class TidalCleanupApp:
         table.add_column("Setting", style="cyan", no_wrap=True)
         table.add_column("Value", style="magenta")
 
-        table.add_row("M4A Directory", str(self.config.m4a_directory))
         table.add_row("MP3 Directory", str(self.config.mp3_directory))
         table.add_row("Token File", str(self.config.tidal_token_file))
-        table.add_row("Rekordbox Input", str(self.config.rekordbox_input_folder))
-        table.add_row("Rekordbox Output", str(self.config.rekordbox_output_file))
         table.add_row("Fuzzy Threshold", str(self.config.fuzzy_match_threshold))
-        table.add_row("Interactive Mode", str(self.config.interactive_mode))
+        table.add_row("Database Path", str(self.config.database_path))
 
         console.print(table)
 

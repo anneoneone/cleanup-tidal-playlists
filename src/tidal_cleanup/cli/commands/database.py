@@ -154,25 +154,25 @@ def db_sync(
 
     # Initialize and authenticate Tidal services
     tidal_session = None
-    download_service = TidalDownloadService(config)
+    tidal_download_service = TidalDownloadService(config)
 
     if not no_fetch:
         console.print("[cyan]Connecting to Tidal API...[/cyan]")
-        tidal_service = TidalApiService(config.tidal_token_file)
-        tidal_service.connect()
-        tidal_session = tidal_service.session
+        tidal_api_service = TidalApiService(config.tidal_token_file)
+        tidal_api_service.connect()
+        tidal_session = tidal_api_service.session
         console.print("[green]✓[/green] Connected to Tidal API\n")
 
     # Authenticate download service (needed for execution stage)
     console.print("[cyan]Initializing Tidal downloader...[/cyan]")
-    download_service.connect()
+    tidal_download_service.connect()
     console.print("[green]✓[/green] Tidal downloader ready\n")
 
     # Create orchestrator
     orchestrator = SyncOrchestrator(
         config=config,
         db_service=db_service,
-        download_service=download_service,
+        tidal_download_service=tidal_download_service,
         tidal_session=tidal_session,
         dry_run=dry_run,
     )

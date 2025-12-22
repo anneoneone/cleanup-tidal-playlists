@@ -69,7 +69,7 @@ class DownloadOrchestrator:
         db_service: DatabaseService,
         music_root: Path | str,
         deduplication_logic: DeduplicationLogic | None = None,
-        download_service: TidalDownloadService | None = None,
+        tidal_download_service: TidalDownloadService | None = None,
         dry_run: bool = False,
         progress_callback: ProgressCallback | None = None,
         conflict_resolver: ConflictResolver | None = None,
@@ -80,7 +80,7 @@ class DownloadOrchestrator:
             db_service: Database service instance
             music_root: Root directory for music files (contains Playlists/)
             deduplication_logic: Logic for determining primary file locations
-            download_service: Tidal download service for downloading tracks
+            tidal_download_service: Tidal download service for downloading tracks
             dry_run: If True, don't actually make changes, just log what would happen
             progress_callback: Optional callback for progress updates
             conflict_resolver: Optional conflict resolver (default: auto-resolve)
@@ -90,7 +90,7 @@ class DownloadOrchestrator:
         self.playlists_root = self.music_root / "Playlists"
         self.library_root = self.music_root
         self.dedup_logic = deduplication_logic or DeduplicationLogic(db_service)
-        self.download_service = download_service
+        self.tidal_download_service = tidal_download_service
         self.dry_run = dry_run
         self.progress_tracker = ProgressTracker(callback=progress_callback)
         self.conflict_resolver = conflict_resolver or ConflictResolver(
@@ -207,7 +207,7 @@ class DownloadOrchestrator:
             )
 
             # Download the track using TidalDownloadService if available
-            if self.download_service:
+            if self.tidal_download_service:
                 self._perform_download(track, decision, result)
             else:
                 self._handle_no_download_service(result)
@@ -275,14 +275,14 @@ class DownloadOrchestrator:
             target_path = Path(target_path_str)
             tidal_track_id = self._get_tidal_track_id(track)
 
-            # Type narrowing: download_service guaranteed to exist
-            download_service = self.download_service
-            if download_service is None:  # Defensive check
-                raise ValueError("download_service is None")
+            # Type narrowing: tidal_download_service guaranteed to exist
+            tidal_download_service = self.tidal_download_service
+            if tidal_download_service is None:  # Defensive check
+                raise ValueError("tidal_download_service is None")
 
             # Download track in original format (M4A)
             # Returns the actual path where file was downloaded
-            actual_downloaded_path = download_service.download_track(
+            actual_downloaded_path = tidal_download_service.download_track(
                 track_id=tidal_track_id, target_path=target_path
             )
 

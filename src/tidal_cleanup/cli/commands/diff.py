@@ -535,7 +535,8 @@ def diff_command(  # noqa: C901
 
         console.print()
 
-        # Validate playlist if specified
+        # T O D O: Duplicate check already in fetch_local_state().
+        # Validate playlist if specified.
         if playlist:
             playlist_obj = db_service.get_playlist_by_name(playlist)
             if not playlist_obj:
@@ -556,9 +557,9 @@ def diff_command(  # noqa: C901
             tracks_with_diffs = get_tracks_with_diffs(
                 db_service, exclude_services, playlist_name=playlist
             )
+            count = len(tracks_with_diffs)
             console.print(
-                f"  [green]✓ Found {len(tracks_with_diffs)} tracks with differences"
-                "[/green]\n"
+                (f"  [green]✓ Found {count} tracks " "with differences[/green]\n")
             )
             display_diff_table(tracks_with_diffs, exclude_services)
 

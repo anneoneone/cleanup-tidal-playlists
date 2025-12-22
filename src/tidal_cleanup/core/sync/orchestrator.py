@@ -126,7 +126,7 @@ class SyncOrchestrator:
         self,
         config: Config,
         db_service: DatabaseService,
-        download_service: TidalDownloadService | None = None,
+        tidal_download_service: TidalDownloadService | None = None,
         tidal_session: Any | None = None,
         dry_run: bool = False,
     ):
@@ -135,13 +135,13 @@ class SyncOrchestrator:
         Args:
             config: Application configuration
             db_service: Database service instance
-            download_service: Optional Tidal download service
+            tidal_download_service: Optional Tidal download service
             tidal_session: Optional authenticated Tidal session
             dry_run: If True, don't make actual changes
         """
         self.config = config
         self.db_service = db_service
-        self.download_service = download_service
+        self.tidal_download_service = tidal_download_service
         self.tidal_session = tidal_session
         self.dry_run = dry_run
 
@@ -162,7 +162,7 @@ class SyncOrchestrator:
             db_service=db_service,
             music_root=config.mp3_directory,
             deduplication_logic=self.dedup_logic,
-            download_service=download_service,
+            tidal_download_service=tidal_download_service,
             dry_run=dry_run,
         )
 

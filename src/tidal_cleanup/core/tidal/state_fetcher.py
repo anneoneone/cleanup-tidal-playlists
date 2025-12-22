@@ -199,7 +199,7 @@ class TidalStateFetcher:
             # (unless force flag is set)
             should_fetch_tracks = True
             if not self.force and last_sync_time and updated.last_updated_tidal:
-                # Ensure both datetimes are timezone-aware for comparison
+                # Ensure both datetimes are timezone-aware for comparison.
                 playlist_updated = updated.last_updated_tidal
                 if (
                     hasattr(playlist_updated, "tzinfo")
@@ -331,6 +331,8 @@ class TidalStateFetcher:
         mark_needs_sync: bool,
     ) -> tuple[Playlist, bool]:
         """Update existing playlist in database.
+
+        Compares timestamps and updates fields, marking sync status as needed.
 
         Args:
             existing: Existing Playlist object
