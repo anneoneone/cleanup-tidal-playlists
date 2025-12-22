@@ -1,0 +1,32 @@
+@startuml db-sync-phase3-dedup
+' Code refs:
+' orchestrator.py: _execute_deduplication_step(), analyze_deduplication()
+' deduplication.py: DeduplicationLogic
+
+title Phase 3 — Analyze Deduplication
+
+participant SyncOrchestrator as Orch
+participant DeduplicationLogic as Dedup
+participant DatabaseService as DB
+
+Orch -> Dedup: analyze_all_tracks()
+activate Dedup
+
+Dedup -> DB: Get all tracks and their playlist distributions
+DB --> Dedup: tracks[]
+
+loop For each track
+  Dedup -> DB: Get playlists for track
+  DB --> Dedup: playlist_ids[]
+  alt Appears in multiple playlists
+    Dedup -> Dedup: Build distribution summary (count, names)
+  else Single playlist
+    Dedup -> Dedup: No dedup action needed
+  end
+end
+
+Dedup --> Orch: DeduplicationResult (decisions, summary)
+
+deactivate Dedup
+
+@enduml

@@ -1,0 +1,52 @@
+@startuml db-sync-phase4-decisions
+' Code refs:
+' orchestrator.py: _execute_decision_generation_step(), analyze_playlist_sync()
+' decision_engine.py: analyze_playlist_sync(), removal + orphan logic
+
+title Phase 4 — Generate Decisions
+
+participant SyncOrchestrator as Orch
+participant SyncDecisionEngine as Engine
+participant DatabaseService as DB
+participant "File System" as FS
+
+Orch -> Engine: analyze_all_playlists()
+activate Engine
+
+Engine -> DB: get_all_playlists()
+DB --> Engine: playlists[]
+
+loop For each playlist
+  Engine -> DB: get_playlist_track_associations(playlist_id)
+  DB --> Engine: playlist_tracks[]
+  Engine -> Engine: _collect_active_playlist_paths()
+
+  loop For each playlist_track
+    Engine -> Engine: _find_existing_track_file(playlist, track)
+    alt Track removed from Tidal (in_tidal=False) and file exists
+      Engine -> Engine: Decision: REMOVE_FILE (priority=8)
+    else File exists in target location
+      Engine -> Engine: Decision: NO_ACTION
+    else Track needs to be downloaded to this playlist
+      Engine -> Engine: Decision: DOWNLOAD_TRACK (priority=10)
+    end
+  end
+
+  Engine -> Engine: _identify_orphan_file_decisions()
+  Engine -> FS: _list_audio_files(playlist_dir)
+  FS --> Engine: files[]
+  loop For each file
+    alt File not in active_playlist_paths and not already marked for removal
+      Engine -> Engine: _find_track_for_path(file)
+      alt No playlist_track for matched track
+        Engine -> Engine: Decision: REMOVE_FILE (priority=7)
+      end
+    end
+  end
+end
+
+Engine --> Orch: SyncDecisions
+
+deactivate Engine
+
+@enduml

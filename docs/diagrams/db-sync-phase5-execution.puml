@@ -1,0 +1,44 @@
+@startuml db-sync-phase5-execution
+' Code refs:
+' orchestrator.py: _execute_decision_execution_step(), execute_decisions()
+' download_orchestrator.py: execution of actions
+
+title Phase 5 — Execute Decisions
+
+participant SyncOrchestrator as Orch
+participant DownloadOrchestrator as Exec
+participant DatabaseService as DB
+participant "tidal-dl-ng" as TidalDL
+participant "File System" as FS
+
+Orch -> Exec: execute_decisions(decisions, target_format)
+activate Exec
+
+loop For each decision
+  alt DOWNLOAD_TRACK
+    Exec -> FS: Ensure playlist directory
+    Exec -> DB: get_track_by_id(track_id)
+    DB --> Exec: track
+    Exec -> TidalDL: Download tidal_id → target_path (format)
+    TidalDL --> Exec: file path
+    Exec -> DB: add_file_path_to_track(track_id, rel_path)
+    Exec -> DB: update_track(download_status=DOWNLOADED)
+  else REMOVE_FILE
+    Exec -> DB: get_track_by_id(track_id)
+    DB --> Exec: track
+    Exec -> Exec: Verify file not reused by active tracks
+    Exec -> FS: Delete file
+    Exec -> DB: remove_file_path_from_track(track_id, rel_path)
+    alt Track has no remaining file_paths
+      Exec -> DB: update_track(download_status=NOT_DOWNLOADED)
+    end
+  else UPDATE_METADATA
+    Exec -> DB: update_track(track_id, metadata)
+  end
+end
+
+Exec --> Orch: ExecutionResult (counts, errors)
+
+deactivate Exec
+
+@enduml

@@ -1,0 +1,254 @@
+@startuml diff-command-flow
+title tidal-cleanup diff - Comprehensive Flow
+
+actor User
+participant "CLI\n(diff)" as CLI
+participant "init()" as Init
+participant DatabaseService as DB
+participant TidalSnapshotService as Snapshot
+participant SyncStateComparator as Comparator
+participant "Tidal API" as TidalAPI
+participant FilesystemScanner as Scanner
+participant "File System" as FS
+participant RekordboxService as RB
+participant "Display" as Display
+
+User -> CLI: tidal-cleanup diff\n[--playlist NAME]\n[--exclude SERVICE]
+activate CLI
+
+== Initialization ==
+CLI -> Init: init(config)
+activate Init
+Init -> DB: Initialize database
+Init -> TidalAPI: Initialize Tidal API client
+Init -> RB: Initialize Rekordbox service
+Init --> CLI: (db_service, tidal_service,\n download_service, rekordbox_service)
+deactivate Init
+
+== Phase 1: Fetch Tidal State ==
+alt "tidal" not excluded
+    CLI -> DB: clear_playlist_track_flag("in_tidal")
+    activate DB
+    DB -> DB: Set all playlist_tracks.in_tidal = False
+    note right: **CRITICAL**: Clears flags\nbefore repopulating
+    DB --> CLI: count updated
+    deactivate DB
+
+    CLI -> Snapshot: sync_tidal_to_db(playlist_name)
+    activate Snapshot
+
+    Snapshot -> Snapshot: capture_tidal_snapshot()
+    activate Snapshot
+
+    Snapshot -> TidalAPI: session.user.playlists()
+    activate TidalAPI
+    TidalAPI --> Snapshot: tidal_playlists[]
+    deactivate TidalAPI
+
+    alt playlist_name specified
+        Snapshot -> Snapshot: Filter by playlist_name
+    end
+
+    Snapshot -> DB: get_all_playlists()
+    DB --> Snapshot: db_playlists[]
+
+    Snapshot -> Comparator: compare_playlists(\ndb_playlists, tidal_playlists)
+    activate Comparator
+    Comparator -> Comparator: Detect:\n- PLAYLIST_ADDED\n- PLAYLIST_REMOVED\n- PLAYLIST_RENAMED\n- DESCRIPTION_CHANGED
+    Comparator --> Snapshot: playlist_changes[]
+    deactivate Comparator
+
+    loop For each tidal_playlist
+        Snapshot -> TidalAPI: playlist.tracks()
+        activate TidalAPI
+        TidalAPI --> Snapshot: tidal_tracks[]
+        deactivate TidalAPI
+
+        Snapshot -> DB: get_playlist_track_associations(\nplaylist_id)
+        DB --> Snapshot: db_tracks[]
+
+        Snapshot -> Comparator: compare_playlist_tracks(\ndb_tracks, tidal_tracks)
+        activate Comparator
+        Comparator -> Comparator: Detect:\n- TRACK_ADDED_TO_PLAYLIST\n- TRACK_REMOVED_FROM_PLAYLIST\n- TRACK_MOVED_WITHIN_PLAYLIST\n- TRACK_METADATA_CHANGED
+        Comparator --> Snapshot: track_changes[]
+        deactivate Comparator
+    end
+
+    Snapshot --> Snapshot: SyncState with all changes
+    deactivate Snapshot
+
+    Snapshot -> Snapshot: apply_tidal_state_to_db(sync_state)
+    activate Snapshot
+
+    loop For each change
+        alt PLAYLIST_ADDED
+            Snapshot -> DB: create_or_update_playlist(data)
+            Snapshot -> DB: Add all tracks with in_tidal=True
+        else PLAYLIST_REMOVED
+            Snapshot -> DB: update_track_sync_state(..., in_tidal=False)
+        else PLAYLIST_RENAMED
+            Snapshot -> DB: update_playlist(id, {name: new_name})
+        else TRACK_ADDED_TO_PLAYLIST
+            Snapshot -> DB: get_track_by_tidal_id(tidal_id)
+            alt Track not in DB
+                Snapshot -> DB: create_or_update_track(track_data)
+            end
+            Snapshot -> DB: add_track_to_playlist(\nplaylist_id, track_id,\nposition, in_tidal=True)
+            note right: **Sets in_tidal=True**
+        else TRACK_REMOVED_FROM_PLAYLIST
+            Snapshot -> DB: update_track_sync_state(\nplaylist_id, track_id,\nin_tidal=False)
+            note right: **Sets in_tidal=False**\nfor removed tracks
+        else TRACK_MOVED_WITHIN_PLAYLIST
+            Snapshot -> DB: update_track_position(...)
+        end
+    end
+
+    deactivate Snapshot
+
+    Snapshot --> CLI: {changes_detected, changes_applied,\nsync_state}
+    deactivate Snapshot
+end
+
+== Phase 2: Scan Local Filesystem ==
+alt "local" not excluded
+    CLI -> DB: clear_playlist_track_flag("in_local")
+    activate DB
+    DB -> DB: Set all playlist_tracks.in_local = False
+    DB --> CLI: count updated
+    deactivate DB
+
+    CLI -> Scanner: scan_all_playlists()
+    activate Scanner
+
+    Scanner -> FS: List directories in Playlists/
+    FS --> Scanner: playlist_dirs[]
+
+    loop For each playlist_dir
+        Scanner -> DB: get_playlist_by_name(name)
+        DB --> Scanner: playlist
+
+        Scanner -> FS: List audio files in playlist_dir
+        FS --> Scanner: files[]
+
+        loop For each file
+            Scanner -> Scanner: Extract artist/title from filename
+
+            Scanner -> DB: find_track_by_normalized_name(\n"artist - title")
+            DB --> Scanner: track?
+
+            alt Track found
+                Scanner -> DB: add_file_path_to_track(\ntrack_id, file_path)
+            else Track not found
+                Scanner -> Scanner: Try fuzzy matching
+                Scanner -> DB: get_all_tracks()
+                Scanner -> Scanner: Compute similarity scores
+                alt Best match found
+                    Scanner -> DB: add_file_path_to_track(\ntrack_id, file_path)
+                end
+            end
+        end
+    end
+
+    Scanner --> CLI: ScanStatistics
+    deactivate Scanner
+
+    CLI -> DB: mark_tracks_with_file_paths_as_local(playlist_id)
+    activate DB
+    DB -> DB: Set in_local=True where\ntrack.file_paths is not null
+    note right: **Sets in_local=True**\nfor files found on disk
+    DB --> CLI: marked_count
+    deactivate DB
+end
+
+== Phase 3: Check Rekordbox Database ==
+alt "rekordbox" not excluded
+    CLI -> DB: clear_playlist_track_flag("in_rekordbox")
+    activate DB
+    DB -> DB: Set all playlist_tracks.in_rekordbox = False
+    DB --> CLI: count updated
+    deactivate DB
+
+    CLI -> RB: Get Rekordbox tracks
+    activate RB
+    alt RB database available
+        RB -> RB: Query Rekordbox database
+        RB --> CLI: track_count
+
+        CLI -> DB: mark_tracks_with_rekordbox_ids()
+        activate DB
+        DB -> DB: Set in_rekordbox=True where\ntrack.rekordbox_id is not null
+        DB --> CLI: marked_count
+        deactivate DB
+    else RB not available
+        RB --> CLI: {available: false}
+    end
+    deactivate RB
+end
+
+== Phase 4: Compute Differences ==
+alt playlist specified
+    CLI -> DB: get_playlist_tracks_with_tracks(\nplaylist_id, order_by_position=True)
+    activate DB
+    DB --> CLI: all_tracks[]
+    deactivate DB
+
+    loop For each track
+        CLI -> CLI: Build track info with:\n- in_tidal, in_local, in_rekordbox\n- file_paths\n- position
+    end
+
+    CLI -> Display: display_playlist_table(\nall_tracks, playlist, exclude_services)
+    activate Display
+    Display -> Display: Build rich table showing:\n- Position\n- Artist - Title\n- Tidal/Local/RB status (✓/✗)\n- File paths
+    Display --> CLI: Display table
+    deactivate Display
+else No playlist filter
+    CLI -> DB: get_playlist_tracks_with_tracks()
+    activate DB
+    DB --> CLI: all_playlist_tracks[]
+    deactivate DB
+
+    loop For each playlist_track
+        CLI -> CLI: compute_diff_status(\nplaylist_track, exclude_services)
+        activate CLI
+
+        CLI -> CLI: Get in_tidal, in_local, in_rekordbox
+        CLI -> CLI: Apply exclusions
+        CLI -> CLI: Check if all localities match
+
+        alt Not all localities match
+            CLI -> CLI: has_diff = True
+            CLI -> CLI: Add to tracks_with_diffs[]
+        end
+
+        deactivate CLI
+    end
+
+    CLI -> Display: display_diff_table(\ntracks_with_diffs, exclude_services)
+    activate Display
+    Display -> Display: Build rich table showing only\ntracks with mismatches across services
+    Display --> CLI: Display table
+    deactivate Display
+end
+
+== Summary ==
+CLI -> DB: Count total tracks
+DB --> CLI: total_tracks
+
+CLI -> Display: Show summary:\n- Total tracks\n- Tracks with differences\n- Tracks in sync
+activate Display
+Display --> CLI: Summary table
+deactivate Display
+
+CLI --> User: ✓ Diff complete
+deactivate CLI
+
+note over CLI,DB
+**Key Points:**
+1. Flags are CLEARED before each fetch phase
+2. Snapshot service REPOPULATES in_tidal flags
+3. Scanner REPOPULATES in_local flags
+4. If process is interrupted, flags remain in cleared state
+5. Stale in_tidal=False can cause unwanted removals in db sync
+end note
+
+@enduml

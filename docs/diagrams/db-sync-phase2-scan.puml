@@ -1,0 +1,48 @@
+@startuml db-sync-phase2-scan
+' Code refs:
+' orchestrator.py: _execute_filesystem_scan_step(), FilesystemScanner wiring
+' database.py (CLI scan): scan_all_playlists usage and stats
+
+title Phase 2 — Scan Filesystem
+
+participant SyncOrchestrator as Orch
+participant FilesystemScanner as Scanner
+participant DatabaseService as DB
+participant "File System" as FS
+
+Orch -> Scanner: scan_all_playlists()
+activate Scanner
+
+Scanner -> FS: Enumerate Playlists/ directories
+FS --> Scanner: playlist_dirs[]
+
+loop For each playlist_dir
+  Scanner -> DB: get_playlist_by_name(name)
+  DB --> Scanner: playlist
+  Scanner -> FS: List audio files (*.mp3, *.flac, *.m4a, *.wav)
+  FS --> Scanner: files[]
+
+  loop For each file
+    Scanner -> Scanner: Parse filename (Artist - Title)
+    Scanner -> DB: find_track_by_normalized_name("artist - title")
+    DB --> Scanner: track?
+    alt Track found
+      Scanner -> DB: add_file_path_to_track(track_id, relative_path)
+    else Not found
+      Scanner -> DB: get_all_tracks()
+      Scanner -> Scanner: Fuzzy match best candidate
+      alt Match found
+        Scanner -> DB: add_file_path_to_track(track_id, relative_path)
+      else Orphan file
+        Scanner -> Scanner: Record orphan
+      end
+    end
+  end
+end
+
+Scanner --> Orch: ScanStatistics (playlists_scanned, files_found)
+
+Orch -> DB: mark_tracks_with_file_paths_as_local(optional_playlist_id)
+DB --> Orch: marked_count
+
+@enduml

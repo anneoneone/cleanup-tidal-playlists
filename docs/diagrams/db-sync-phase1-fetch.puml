@@ -1,0 +1,65 @@
+@startuml db-sync-phase1-fetch
+' Code refs:
+' state_fetcher.py: fetch_all_playlists(), _process_single_playlist(), _fetch_playlist_tracks()
+' orchestrator.py: _execute_tidal_fetch_step()
+
+title Phase 1 — Fetch from Tidal
+
+actor User
+participant "CLI\n(db sync)" as CLI
+participant SyncOrchestrator as Orch
+participant TidalStateFetcher as Fetcher
+participant DatabaseService as DB
+participant "Tidal API" as TidalAPI
+
+User -> CLI: tidal-cleanup db sync
+activate CLI
+CLI -> Orch: sync_all()
+activate Orch
+
+Orch -> Fetcher: fetch_all_playlists()
+activate Fetcher
+
+Fetcher -> DB: get_last_sync_timestamp("tidal_sync")
+DB --> Fetcher: last_sync_time
+
+Fetcher -> TidalAPI: session.user.playlists()
+TidalAPI --> Fetcher: tidal_playlists[]
+
+loop For each tidal_playlist
+  Fetcher -> Fetcher: _convert_tidal_playlist()
+  Fetcher -> DB: get_playlist_by_tidal_id(tidal_id)
+  DB --> Fetcher: existing?
+  alt Exists
+    Fetcher -> Fetcher: _update_playlist(existing, data)
+  else New
+    Fetcher -> DB: create_playlist(data)
+  end
+
+  alt Should fetch tracks
+    Fetcher -> TidalAPI: tidal_playlist.tracks()
+    TidalAPI --> Fetcher: tidal_tracks[]
+    loop For each tidal_track
+      Fetcher -> Fetcher: _convert_tidal_track()
+      Fetcher -> DB: get_track_by_tidal_id(tidal_id)
+      DB --> Fetcher: db_track?
+      alt Exists
+        Fetcher -> DB: update_track(data)
+      else New
+        Fetcher -> DB: create_track(data)
+      end
+      Fetcher -> DB: add_track_to_playlist(playlist_id, track_id, position, in_tidal=True)
+    end
+  end
+end
+
+Fetcher -> DB: create_snapshot("tidal_sync", stats)
+Fetcher --> Orch: FetchStatistics
+
+deactivate Fetcher
+Orch --> CLI: proceed to Stage 2
+deactivate Orch
+
+deactivate CLI
+
+@enduml
