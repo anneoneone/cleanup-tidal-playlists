@@ -7,13 +7,14 @@ workflow: Tidal fetch → Filesystem scan → Compare → Sync.
 """
 
 import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ...database.models import DownloadStatus
+from ...database.models import DownloadStatus, PlaylistSource, PlaylistSyncStatus
 from ...database.service import DatabaseService
 
 logger = logging.getLogger(__name__)
@@ -167,12 +168,23 @@ class FilesystemScanner:
             # Get or create playlist in database
             playlist = self.db_service.get_playlist_by_name(playlist_name)
 
-            if not playlist:
-                logger.warning(
-                    f"Playlist '{playlist_name}' not found in database, skipping"
+            # Determine if this is a local-only directory or matched to Tidal
+            if playlist and playlist.source == "tidal":
+                # Use existing Tidal playlist (files will match via track metadata)
+                logger.debug(f"Using existing Tidal playlist: '{playlist_name}'")
+            elif not playlist:
+                # Create local-only playlist for directories not in database
+                logger.info(
+                    f"Creating local-only playlist for directory: '{playlist_name}'"
                 )
-                self._stats.playlists_scanned += 1
-                return
+                playlist = self._create_local_playlist(playlist_name, playlist_dir)
+                if not playlist:
+                    logger.warning(
+                        f"Failed to create playlist for '{playlist_name}', skipping"
+                    )
+                    self._stats.playlists_scanned += 1
+                    return
+            # else: use existing playlist (already local or other source)
 
             # Preload playlist-track associations to prefer playlist-specific tracks
             playlist_tracks = self.db_service.get_playlist_track_associations(
@@ -191,9 +203,16 @@ class FilesystemScanner:
             files = self._find_audio_files(playlist_dir)
             logger.debug("Found %d files in %s", len(files), playlist_name)
 
+            # Track if this is a local-only playlist for post-processing
+            is_local_only = (
+                playlist.source == "local" if hasattr(playlist, "source") else False
+            )
+
             # Process each file
             for file_path in files:
-                self._process_file(playlist, file_path, normalized_playlist_tracks)
+                self._process_file(
+                    playlist, file_path, normalized_playlist_tracks, is_local_only
+                )
 
             self._stats.playlists_scanned += 1
 
@@ -203,6 +222,32 @@ class FilesystemScanner:
             )
             logger.error(error_msg)
             self._stats.errors.append(error_msg)
+
+    def _create_local_playlist(self, playlist_name: str, playlist_dir: Path) -> Any:
+        """Create a local-only playlist entry in the database.
+
+        Args:
+            playlist_name: Name of the local playlist (directory name)
+            playlist_dir: Path to the playlist directory
+
+        Returns:
+            Playlist object if created, else None
+        """
+        try:
+            playlist_data = {
+                "name": playlist_name,
+                "tidal_id": None,
+                "source": PlaylistSource.LOCAL.value,
+                "local_folder_path": str(playlist_dir.relative_to(self.library_root)),
+                "sync_status": PlaylistSyncStatus.UNKNOWN.value,
+                "last_synced_filesystem": datetime.now(timezone.utc),
+            }
+            playlist = self.db_service.create_playlist(playlist_data)
+            logger.debug("Created local-only playlist: %s", playlist_name)
+            return playlist
+        except Exception:
+            logger.exception("Failed to create local-only playlist: %s", playlist_name)
+            return None
 
     def _find_audio_files(self, directory: Path) -> List[Path]:
         """Find all audio files in directory (non-recursive).
@@ -226,6 +271,7 @@ class FilesystemScanner:
         playlist: Any,
         file_path: Path,
         playlist_tracks_map: Dict[str, List[Any]],
+        is_local_only: bool = False,
     ) -> None:
         """Process a single file.
 
@@ -233,6 +279,7 @@ class FilesystemScanner:
             playlist: Playlist database object
             file_path: Path to file
             playlist_tracks_map: Lookup of playlist tracks keyed by normalized name
+            is_local_only: Whether this is a local-only playlist
         """
         try:
             self._stats.files_found += 1
@@ -248,24 +295,18 @@ class FilesystemScanner:
                 if self._update_track_file_metadata(track.id, file_path):
                     self._stats.tracks_updated += 1
 
-                # Add this file path to all playlist tracks that reference it
-                targets: List[Any]
-                if normalized_key and playlist_tracks_map:
-                    targets = playlist_tracks_map.get(normalized_key, [])
-                    if not targets:
-                        targets = [track]
-                else:
-                    targets = [track]
+                # For all playlists: mark track as present locally
+                self._ensure_local_playlist_track(playlist, track)
 
-                for candidate in targets:
-                    try:
-                        self.db_service.add_file_path_to_track(
-                            candidate.id, relative_path
-                        )
-                    except ValueError:
-                        logger.debug(
-                            "Skipping empty path assignment for track %s", candidate.id
-                        )
+                # Add this file path to all playlist tracks that reference it
+                self._update_file_paths_for_targets(
+                    normalized_key, playlist_tracks_map, track, relative_path
+                )
+            elif is_local_only:
+                # Only create new tracks for local-only playlists
+                new_track = self._create_track_from_file(file_path, relative_path)
+                if new_track:
+                    self._ensure_local_playlist_track(playlist, new_track)
 
         except Exception as e:
             error_msg = f"Error processing file '{file_path.name}': {e}"
@@ -369,6 +410,98 @@ class FilesystemScanner:
             if track.normalized_name and filename_lower in track.normalized_name:
                 return track, track.normalized_name
         return None
+
+    def _update_file_paths_for_targets(
+        self,
+        normalized_key: Optional[str],
+        playlist_tracks_map: Dict[str, List[Any]],
+        track: Any,
+        relative_path: str,
+    ) -> None:
+        """Update file path for candidates referencing the track."""
+        targets: List[Any]
+        if normalized_key and playlist_tracks_map:
+            targets = playlist_tracks_map.get(normalized_key, []) or [track]
+        else:
+            targets = [track]
+
+        for candidate in targets:
+            try:
+                self.db_service.add_file_path_to_track(candidate.id, relative_path)
+            except ValueError:
+                logger.debug(
+                    "Skipping empty path assignment for track %s", candidate.id
+                )
+
+    def _ensure_local_playlist_track(self, playlist: Any, track: Any) -> None:
+        """Ensure the playlist-track association marks local presence."""
+        try:
+            logger.debug(
+                "Adding track %s to playlist %s (ID: %s) as local",
+                getattr(track, "id", "?"),
+                getattr(playlist, "name", "?"),
+                getattr(playlist, "id", "?"),
+            )
+            result = self.db_service.add_track_to_playlist(
+                playlist.id, track.id, in_local=True
+            )
+            logger.debug(
+                "Successfully added, result ID: %s", getattr(result, "id", "?")
+            )
+            self._stats.playlist_tracks_updated += 1
+        except Exception as exc:
+            logger.error(
+                "Failed to add track %s to playlist %s: %s",
+                getattr(track, "id", "?"),
+                getattr(playlist, "id", "?"),
+                exc,
+                exc_info=True,
+            )
+
+    def _create_track_from_file(
+        self, file_path: Path, relative_path: str
+    ) -> Optional[Any]:
+        """Create a new Track from the filesystem file and return it."""
+        artist = "Unknown"
+        title = file_path.stem
+        split = self._split_artist_title(file_path.stem)
+        if split:
+            artist, title = split
+
+        file_stat = None
+        with suppress(OSError):
+            file_stat = file_path.stat()
+
+        track_data: Dict[str, Any] = {
+            "title": title,
+            "artist": artist,
+            "file_paths": [relative_path],
+            "download_status": DownloadStatus.DOWNLOADED.value,
+        }
+        if file_stat:
+            track_data.update(
+                {
+                    "file_size_bytes": file_stat.st_size,
+                    "file_last_modified": datetime.fromtimestamp(file_stat.st_mtime),
+                }
+            )
+
+        try:
+            new_track = self.db_service.create_track(track_data)
+            self._stats.tracks_updated += 1
+            logger.debug(
+                "Created new local track '%s - %s'",
+                artist,
+                title,
+            )
+            return new_track
+        except Exception as exc:
+            logger.exception(
+                "Failed creating track for file %s: %s",
+                file_path,
+                exc,
+            )
+            return None
 
     def _generate_artist_variations(self, artist_field: str) -> List[str]:
         """Generate possible artist tokens from a filename artist field."""

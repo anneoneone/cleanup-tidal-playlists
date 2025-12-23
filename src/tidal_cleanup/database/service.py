@@ -10,6 +10,9 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
+from alembic import command  # type: ignore[attr-defined]
+from alembic.config import Config as AlembicConfig  # type: ignore[import-not-found]
+
 from .models import Base, Playlist, PlaylistTrack, SyncOperation, SyncSnapshot, Track
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,9 @@ class DatabaseService:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Check if database exists before creating engine
+        db_exists = self.db_path.exists()
+
         # Create engine
         db_url = f"sqlite:///{self.db_path}"
         self.engine = create_engine(db_url, echo=False)
@@ -42,10 +48,88 @@ class DatabaseService:
 
         logger.info("Database initialized at: %s", self.db_path)
 
+        # If database didn't exist, initialize it with schema and migrations
+        if not db_exists:
+            logger.info("New database detected, initializing schema...")
+            self.init_db()
+
     def init_db(self) -> None:
-        """Initialize database schema (create all tables)."""
+        """Initialize database schema.
+
+        This creates base tables using SQLAlchemy and then stamps Alembic to mark the
+        database as current (since all tables are created).
+        """
         Base.metadata.create_all(bind=self.engine)
         logger.info("Database schema created successfully")
+
+        # Stamp database as being at latest migration (since we created all tables)
+        self._stamp_migrations()
+
+    def _stamp_migrations(self) -> None:
+        """Stamp database as being at the latest migration version."""
+        try:
+            # Find alembic.ini and alembic directory in the project root
+            package_dir = Path(__file__).parent.parent.parent.parent
+            alembic_ini = package_dir / "alembic.ini"
+            alembic_dir = package_dir / "alembic"
+
+            if not alembic_ini.exists() or not alembic_dir.exists():
+                logger.warning("Alembic not found, skipping migration stamp")
+                return
+
+            # Create Alembic config
+            alembic_cfg = AlembicConfig(str(alembic_ini))
+            alembic_cfg.set_main_option("script_location", str(alembic_dir))
+            alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+
+            # Stamp database as being at head
+            command.stamp(alembic_cfg, "head")
+            logger.info("Database stamped with latest migration version")
+
+        except Exception as e:
+            logger.error("Failed to stamp migrations: %s", e)
+            logger.warning("Database may need manual migration")
+
+    def run_migrations(self) -> None:
+        """Run Alembic migrations to upgrade database to latest version."""
+        try:
+            # Find alembic.ini and alembic directory in the project root
+            # The database service is in src/tidal_cleanup/database/
+            # alembic.ini and alembic/ are in project root
+            package_dir = Path(__file__).parent.parent.parent.parent
+            alembic_ini = package_dir / "alembic.ini"
+            alembic_dir = package_dir / "alembic"
+
+            if not alembic_ini.exists():
+                logger.warning(
+                    "alembic.ini not found at %s, skipping migrations", alembic_ini
+                )
+                return
+
+            if not alembic_dir.exists():
+                logger.warning(
+                    "alembic directory not found at %s, skipping migrations",
+                    alembic_dir,
+                )
+                return
+
+            # Create Alembic config
+            alembic_cfg = AlembicConfig(str(alembic_ini))
+
+            # Set the script location to absolute path
+            alembic_cfg.set_main_option("script_location", str(alembic_dir))
+
+            # Override database URL to use our database path
+            alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+
+            # Run upgrade to head
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Database migrations applied successfully")
+
+        except Exception as e:
+            logger.error("Failed to run migrations: %s", e)
+            # Don't fail completely - the base tables were created
+            logger.warning("Continuing with base schema only")
 
     def get_session(self) -> Session:
         """Get a new database session.
@@ -510,6 +594,21 @@ class DatabaseService:
 
         # Create new playlist
         return self.create_playlist(playlist_data)
+
+    def delete_playlist(self, playlist_id: int) -> None:
+        """Delete a playlist and all related associations.
+
+        Args:
+            playlist_id: Playlist database ID
+        """
+        with self.get_session() as session:
+            playlist = session.get(Playlist, playlist_id)
+            if not playlist:
+                logger.warning("Playlist not found for deletion: %s", playlist_id)
+                return
+            session.delete(playlist)
+            session.commit()
+            logger.info("Deleted playlist: %s", playlist_id)
 
     # =========================================================================
     # Playlist-Track Relationship Operations

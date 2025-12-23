@@ -335,8 +335,23 @@ class SyncDecisionEngine:
         active_playlist_paths: Dict[str, Set[int]],
         existing_path: Optional[Path] = None,
     ) -> Optional[DecisionResult]:
-        """Determine if a playlist-track should trigger a removal action."""
+        """Determine if a playlist-track should trigger a removal action.
+
+        Don't remove files that:
+        - Are still in Tidal (in_tidal=True)
+        - Exist locally on filesystem (in_local=True)
+        """
         if playlist_track.in_tidal:
+            return None
+
+        # Don't delete files that exist locally, even if removed from Tidal
+        if playlist_track.in_local:
+            logger.debug(
+                "Skipping removal for track %s in playlist %s; "
+                "file exists locally (in_local=True)",
+                track.id,
+                playlist.id,
+            )
             return None
 
         # Check for an actual file associated with this playlist

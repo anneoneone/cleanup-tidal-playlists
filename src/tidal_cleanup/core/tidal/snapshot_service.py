@@ -510,7 +510,7 @@ class TidalSnapshotService:
             # Need to fetch track from Tidal
             # Get playlist to fetch its tracks (with caching)
             db_playlist = self.db_service.get_playlist_by_id(change.playlist_id)
-            if db_playlist:
+            if db_playlist and db_playlist.tidal_id:
                 tidal_tracks = self._get_playlist_tracks_cached(db_playlist.tidal_id)
                 tidal_track = next(
                     (t for t in tidal_tracks if t.tidal_id == tidal_id), None

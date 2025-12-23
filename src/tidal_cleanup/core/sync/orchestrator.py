@@ -9,6 +9,7 @@ This module provides the high-level SyncOrchestrator that coordinates:
 """
 
 import logging
+import shutil
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, List
 
 from ...config import Config
+from ...database.models import PlaylistSource, PlaylistSyncStatus, PlaylistTrack
 from ...database.service import DatabaseService
 from ..filesystem.scanner import FilesystemScanner, ScanStatistics
 from ..tidal.download_service import TidalDownloadService
@@ -231,6 +233,8 @@ class SyncOrchestrator:
         self._collect_errors(
             result, result.filesystem_scan.errors, "Filesystem scan error"
         )
+        # After scanning, cleanup playlists that were removed from Tidal
+        self._cleanup_removed_tidal_playlists()
 
     def _execute_deduplication_step(self, result: SyncResult) -> None:
         """Execute step 3: Analyze deduplication."""
@@ -325,6 +329,78 @@ class SyncOrchestrator:
         if errors:
             for error in errors:
                 result.add_error(f"{prefix}: {error}")
+
+    def _cleanup_removed_tidal_playlists(self) -> None:
+        """Delete local files and remove playlists no longer in Tidal.
+
+        Conditions:
+        - Playlist sourced from Tidal
+        - Marked as needs_removal
+        - Has a local folder path
+        """
+        try:
+            all_playlists = self.db_service.get_all_playlists()
+            candidates = [p for p in all_playlists if self._should_cleanup_playlist(p)]
+            for p in candidates:
+                self._delete_playlist_resources(p)
+        except Exception:
+            logger.exception("Cleanup of removed Tidal playlists failed")
+
+    def _should_cleanup_playlist(self, p: Any) -> bool:
+        """Return True if playlist meets cleanup criteria.
+
+        Only cleanup playlists that:
+        - Are sourced from Tidal (not local-only)
+        - Are marked for removal
+        - Have a local folder path
+        - Don't have local files (checked via in_local flag)
+        """
+        src = getattr(p, "source", PlaylistSource.TIDAL.value)
+        if src != PlaylistSource.TIDAL.value:
+            return False
+        if p.sync_status != PlaylistSyncStatus.NEEDS_REMOVAL.value:
+            return False
+        if not p.local_folder_path:
+            return False
+
+        # Don't delete playlists that have local files
+        # Check if any playlist_tracks have in_local=True
+        with self.db_service.get_session() as session:
+            has_local_files = session.query(
+                session.query(PlaylistTrack)
+                .filter(PlaylistTrack.playlist_id == p.id)
+                .filter(PlaylistTrack.in_local.is_(True))
+                .exists()
+            ).scalar()
+
+        if has_local_files:
+            logger.info("Skipping cleanup of playlist '%s' - has local files", p.name)
+            return False
+
+        return True
+
+    def _delete_playlist_resources(self, p: Any) -> None:
+        """Delete local folder and remove playlist from database."""
+        folder_path = Path(self.config.mp3_directory) / p.local_folder_path
+        if folder_path.exists() and folder_path.is_dir():
+            logger.info(
+                "Deleting local folder for removed Tidal playlist: %s",
+                folder_path,
+            )
+            try:
+                shutil.rmtree(folder_path)
+            except Exception:
+                logger.exception("Failed to delete folder for playlist: %s", p.name)
+                return
+
+        try:
+            self.db_service.delete_playlist(p.id)
+            logger.info(
+                "Removed playlist from database (deleted in Tidal): %s",
+                p.name,
+            )
+        except Exception:
+            logger.exception("Failed to delete playlist from database: %s", p.name)
 
     def _log_sync_summary(self, result: SyncResult) -> None:
         """Log the sync operation summary."""

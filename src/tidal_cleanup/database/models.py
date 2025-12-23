@@ -45,6 +45,13 @@ class PlaylistSyncStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+class PlaylistSource(str, Enum):
+    """Source of playlist (Tidal vs local-only)."""
+
+    TIDAL = "tidal"  # Playlist originated from Tidal
+    LOCAL = "local"  # Local-only custom playlist (not from Tidal)
+
+
 class TrackSyncStatus(str, Enum):
     """PlaylistTrack sync status for unified sync."""
 
@@ -191,9 +198,17 @@ class Playlist(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Tidal identifiers
-    tidal_id: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False, index=True
+    tidal_id: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, nullable=True, index=True
     )
+
+    # Playlist source: tidal or local
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=PlaylistSource.TIDAL.value,
+        index=True,
+    )  # Enum: tidal (from Tidal API), local (local-only custom playlist)
 
     # Playlist metadata
     name: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
