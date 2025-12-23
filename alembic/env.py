@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Import our models for autogenerate support
 from tidal_cleanup.database.models import Base  # noqa: E402
+from tidal_cleanup.config import get_config  # noqa: E402
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -58,6 +59,11 @@ def run_migrations_online() -> None:
     In this scenario we need to create an Engine and associate a connection with the
     context.
     """
+    # Ensure Alembic uses the same database path as the application Config
+    app_config = get_config()
+    db_url = f"sqlite:///{str(app_config.database_path)}"
+    config.set_main_option("sqlalchemy.url", db_url)
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
