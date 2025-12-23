@@ -5,9 +5,9 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
 from .models import Base, Playlist, PlaylistTrack, SyncOperation, SyncSnapshot, Track
@@ -31,6 +31,9 @@ class DatabaseService:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Check if database exists before creating engine
+        db_exists = self.db_path.exists()
+
         # Create engine
         db_url = f"sqlite:///{self.db_path}"
         self.engine = create_engine(db_url, echo=False)
@@ -42,10 +45,100 @@ class DatabaseService:
 
         logger.info("Database initialized at: %s", self.db_path)
 
+        # If database didn't exist, initialize it with schema and migrations
+        if not db_exists:
+            logger.info("New database detected, initializing schema...")
+            self.init_db()
+
     def init_db(self) -> None:
-        """Initialize database schema (create all tables)."""
+        """Initialize database schema.
+
+        This creates base tables using SQLAlchemy and then stamps Alembic to mark the
+        database as current (since all tables are created).
+        """
         Base.metadata.create_all(bind=self.engine)
         logger.info("Database schema created successfully")
+
+        # Stamp database as being at latest migration (since we created all tables)
+        self._stamp_migrations()
+
+    def _stamp_migrations(self) -> None:
+        """Stamp database as being at the latest migration version."""
+        try:
+            # Find alembic.ini and alembic directory in the project root
+            package_dir = Path(__file__).parent.parent.parent.parent
+            alembic_ini = package_dir / "alembic.ini"
+            alembic_dir = package_dir / "alembic"
+
+            if not alembic_ini.exists() or not alembic_dir.exists():
+                logger.warning("Alembic not found, skipping migration stamp")
+                return
+
+            import importlib
+
+            alembic_config_module = cast(Any, importlib.import_module("alembic.config"))
+            alembic_command_module = cast(
+                Any, importlib.import_module("alembic.command")
+            )
+
+            alembic_cfg = alembic_config_module.Config(str(alembic_ini))
+            alembic_cfg.set_main_option("script_location", str(alembic_dir))
+            alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+
+            # Stamp database as being at head
+            alembic_command_module.stamp(alembic_cfg, "head")
+            logger.info("Database stamped with latest migration version")
+
+        except Exception as e:
+            logger.error("Failed to stamp migrations: %s", e)
+            logger.warning("Database may need manual migration")
+
+    def run_migrations(self) -> None:
+        """Run Alembic migrations to upgrade database to latest version."""
+        try:
+            # Find alembic.ini and alembic directory in the project root
+            # The database service is in src/tidal_cleanup/database/
+            # alembic.ini and alembic/ are in project root
+            package_dir = Path(__file__).parent.parent.parent.parent
+            alembic_ini = package_dir / "alembic.ini"
+            alembic_dir = package_dir / "alembic"
+
+            if not alembic_ini.exists():
+                logger.warning(
+                    "alembic.ini not found at %s, skipping migrations", alembic_ini
+                )
+                return
+
+            if not alembic_dir.exists():
+                logger.warning(
+                    "alembic directory not found at %s, skipping migrations",
+                    alembic_dir,
+                )
+                return
+
+            import importlib
+
+            alembic_config_module = cast(Any, importlib.import_module("alembic.config"))
+            alembic_command_module = cast(
+                Any, importlib.import_module("alembic.command")
+            )
+
+            alembic_cfg = alembic_config_module.Config(str(alembic_ini))
+
+            # Set the script location to absolute path
+            alembic_cfg.set_main_option("script_location", str(alembic_dir))
+
+            # Override database URL to use our database path
+            alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
+
+            # Run upgrade to head
+            alembic_command_module.upgrade(alembic_cfg, "head")
+            logger.info("Database migrations applied successfully")
+
+        except Exception as e:
+            logger.error("Failed to run migrations: %s", e)
+            # Don't fail completely - the base tables were created
+            logger.warning("Continuing with base schema only")
 
     def get_session(self) -> Session:
         """Get a new database session.
@@ -57,6 +150,50 @@ class DatabaseService:
             Caller is responsible for closing the session
         """
         return self.SessionLocal()
+
+    def is_initialized(self) -> bool:
+        """Check if the database service is properly initialized.
+
+        This checks:
+        - SessionLocal exists and is callable
+        - Engine exists and is connected
+        - Required tables (tracks, playlists) exist
+
+        Returns:
+            True if fully initialized, False otherwise
+        """
+        try:
+            # Check if SessionLocal exists and is callable
+            if not hasattr(self, "SessionLocal") or not callable(self.SessionLocal):
+                logger.debug("SessionLocal not properly set up")
+                return False
+
+            # Check if engine exists
+            if not hasattr(self, "engine"):
+                logger.debug("Engine not set up")
+                return False
+
+            # Check if required tables exist
+            inspector = inspect(self.engine)
+            has_tracks = inspector.has_table("tracks")
+            has_playlists = inspector.has_table("playlists")
+
+            if not (has_tracks and has_playlists):
+                logger.debug(
+                    "Required tables missing - tracks: %s, playlists: %s",
+                    has_tracks,
+                    has_playlists,
+                )
+                return False
+
+            # Try to create a test session to verify configuration works
+            with self.SessionLocal() as session:
+                session.execute(select(1))
+
+            return True
+        except Exception as e:
+            logger.debug("Database initialization check failed: %s", e)
+            return False
 
     # =========================================================================
     # Track Operations
@@ -97,8 +234,20 @@ class DatabaseService:
             Track object or None if not found
         """
         with self.get_session() as session:
-            stmt = select(Track).where(Track.file_path == file_path)
-            return session.scalar(stmt)
+            query = text(
+                """
+                SELECT tracks.id
+                FROM tracks, json_each(tracks.file_paths) AS file_entry
+                WHERE file_entry.value = :file_path
+                LIMIT 1
+                """
+            )
+            track_id = session.execute(
+                query, {"file_path": file_path}
+            ).scalar_one_or_none()
+            if track_id is None:
+                return None
+            return session.get(Track, track_id)
 
     def find_track_by_metadata(self, title: str, artist: str) -> Optional[Track]:
         """Find track by metadata (title and artist).
@@ -178,7 +327,7 @@ class DatabaseService:
             logger.debug("Updated track: %s", track.id)
             return track
 
-    def create_or_update_track(self, track_data: Dict[str, Any]) -> Track:
+    def create_or_update_track(self, track_data: Dict[str, Any]) -> Track:  # noqa: C901
         """Create track if it doesn't exist, otherwise update it.
 
         Args:
@@ -192,14 +341,35 @@ class DatabaseService:
         if tidal_id:
             existing_track = self.get_track_by_tidal_id(tidal_id)
             if existing_track:
-                return self.update_track(existing_track.id, track_data)
+                # If a new file path is provided, add it to the list
+                new_path = track_data.get("file_path")
+                if new_path:
+                    # Remove file_path key; handled separately
+                    track_data_copy = {
+                        k: v for k, v in track_data.items() if k != "file_path"
+                    }
+                    updated_track = self.update_track(
+                        existing_track.id, track_data_copy
+                    )
+                    # Add the new path to file_paths if not already present
+                    self.add_file_path_to_track(updated_track.id, new_path)
+                    return updated_track
+                else:
+                    return self.update_track(existing_track.id, track_data)
 
         # Try to find by file path
         file_path = track_data.get("file_path")
         if file_path:
             existing_track = self.get_track_by_path(file_path)
             if existing_track:
-                return self.update_track(existing_track.id, track_data)
+                # Remove file_path key to avoid conflicts
+                track_data_copy = {
+                    k: v for k, v in track_data.items() if k != "file_path"
+                }
+                updated_track = self.update_track(existing_track.id, track_data_copy)
+                # Ensure the path is in the list
+                self.add_file_path_to_track(updated_track.id, file_path)
+                return updated_track
 
         # Try to find by metadata
         title = track_data.get("title")
@@ -207,10 +377,106 @@ class DatabaseService:
         if title and artist:
             existing_track = self.find_track_by_metadata(title, artist)
             if existing_track:
-                return self.update_track(existing_track.id, track_data)
+                # Remove file_path key if present
+                new_path = track_data.get("file_path")
 
-        # Create new track
+                track_data_copy = {
+                    k: v for k, v in track_data.items() if k != "file_path"
+                }
+                updated_track = self.update_track(existing_track.id, track_data_copy)
+                if new_path:
+                    self.add_file_path_to_track(updated_track.id, new_path)
+                return updated_track
+
+        # Create new track - convert file_path to file_paths list
+        if "file_path" in track_data:
+            file_path = track_data.pop("file_path")
+            if "file_paths" not in track_data:
+                track_data["file_paths"] = [file_path] if file_path else []
         return self.create_track(track_data)
+
+    def add_file_path_to_track(self, track_id: int, file_path: str) -> Track:
+        """Add a file path to track's file_paths list if not already present.
+
+        Args:
+            track_id: Track database ID
+            file_path: File path to add (relative to MP3 directory)
+
+        Returns:
+            Updated Track object
+        """
+        with self.get_session() as session:
+            track = session.get(Track, track_id)
+            if not track:
+                raise ValueError(f"Track not found: {track_id}")
+
+            if file_path == "" or file_path is None:
+                raise ValueError("File path cannot be empty")
+
+            # Initialize file_paths if None
+            if track.file_paths is None:
+                track.file_paths = []
+
+            # Add path if not already present
+            if file_path not in track.file_paths:
+                # Create new list to trigger SQLAlchemy update detection
+                track.file_paths = track.file_paths + [file_path]
+                track.updated_at = datetime.now(timezone.utc)
+                session.commit()
+                logger.debug(f"Added file path {file_path} to track {track_id}")
+
+            session.refresh(track)
+            return track
+
+    def remove_file_path_from_track(self, track_id: int, file_path: str) -> Track:
+        """Remove a file path from track's file_paths list.
+
+        Args:
+            track_id: Track database ID
+            file_path: File path to remove
+
+        Returns:
+            Updated Track object
+        """
+        with self.get_session() as session:
+            track = session.get(Track, track_id)
+            if not track:
+                raise ValueError(f"Track not found: {track_id}")
+
+            # Remove path if present
+            if track.file_paths and file_path in track.file_paths:
+                # Create new list to trigger SQLAlchemy update detection
+                track.file_paths = [p for p in track.file_paths if p != file_path]
+                track.updated_at = datetime.now(timezone.utc)
+                session.commit()
+                logger.debug(f"Removed file path {file_path} from track {track_id}")
+
+            session.refresh(track)
+            return track
+
+    def delete_track_if_unused(self, track_id: int) -> bool:
+        """Delete a track if it has no file paths or playlist references."""
+        with self.get_session() as session:
+            track = session.get(Track, track_id)
+            if not track:
+                return False
+
+            if track.file_paths:
+                return False
+
+            has_playlist = (
+                session.query(PlaylistTrack)
+                .filter(PlaylistTrack.track_id == track_id)
+                .first()
+                is not None
+            )
+            if has_playlist:
+                return False
+
+            session.delete(track)
+            session.commit()
+            logger.info("Deleted orphan track %s", track_id)
+            return True
 
     def get_all_tracks(self) -> List[Track]:
         """Get all tracks from database.
@@ -338,6 +604,21 @@ class DatabaseService:
         # Create new playlist
         return self.create_playlist(playlist_data)
 
+    def delete_playlist(self, playlist_id: int) -> None:
+        """Delete a playlist and all related associations.
+
+        Args:
+            playlist_id: Playlist database ID
+        """
+        with self.get_session() as session:
+            playlist = session.get(Playlist, playlist_id)
+            if not playlist:
+                logger.warning("Playlist not found for deletion: %s", playlist_id)
+                return
+            session.delete(playlist)
+            session.commit()
+            logger.info("Deleted playlist: %s", playlist_id)
+
     # =========================================================================
     # Playlist-Track Relationship Operations
     # =========================================================================
@@ -377,15 +658,15 @@ class DatabaseService:
                 if position is not None:
                     playlist_track.position = position
                 if in_tidal:
-                    playlist_track.in_tidal = True
+                    playlist_track.in_tidal = bool(True)
                     if not playlist_track.added_to_tidal:
                         playlist_track.added_to_tidal = datetime.now(timezone.utc)
                 if in_local:
-                    playlist_track.in_local = True
+                    playlist_track.in_local = bool(True)
                     if not playlist_track.added_to_local:
                         playlist_track.added_to_local = datetime.now(timezone.utc)
                 if in_rekordbox:
-                    playlist_track.in_rekordbox = True
+                    playlist_track.in_rekordbox = bool(True)
                     if not playlist_track.added_to_rekordbox:
                         playlist_track.added_to_rekordbox = datetime.now(timezone.utc)
                 playlist_track.updated_at = datetime.now(timezone.utc)
@@ -503,6 +784,33 @@ class DatabaseService:
             )
             return list(session.scalars(stmt).all())
 
+    def get_playlist_tracks_with_tracks(
+        self,
+        playlist_id: Optional[int] = None,
+        order_by_position: bool = False,
+    ) -> List[PlaylistTrack]:
+        """Fetch PlaylistTrack rows with Track eagerly loaded.
+
+        Args:
+            playlist_id: Optional playlist ID to filter by. If None, returns all.
+            order_by_position: Whether to order results by playlist position
+
+        Returns:
+            List of PlaylistTrack objects with track relationship populated
+        """
+        with self.get_session() as session:
+            query = session.query(PlaylistTrack).options(
+                joinedload(PlaylistTrack.track)
+            )
+
+            if playlist_id is not None:
+                query = query.filter(PlaylistTrack.playlist_id == playlist_id)
+
+            if order_by_position:
+                query = query.order_by(PlaylistTrack.position)
+
+            return list(query.all())
+
     def get_track_playlists(self, track_id: int) -> List[Playlist]:
         """Get all playlists containing a track.
 
@@ -524,6 +832,119 @@ class DatabaseService:
                 .where(PlaylistTrack.track_id == track_id)
             )
             return list(session.scalars(stmt).all())
+
+    def mark_tracks_with_file_paths_as_local(
+        self, playlist_id: Optional[int] = None
+    ) -> int:
+        """Mark playlist tracks as local if their Track has file paths.
+
+        Args:
+            playlist_id: Optional playlist ID filter
+
+        Returns:
+            Number of playlist tracks updated
+        """
+        with self.get_session() as session:
+            stmt = select(PlaylistTrack).join(Track).where(Track.file_paths.isnot(None))
+
+            if playlist_id is not None:
+                stmt = stmt.where(PlaylistTrack.playlist_id == playlist_id)
+
+            playlist_tracks = session.execute(stmt).scalars().all()
+
+            marked_count = 0
+            for pt in playlist_tracks:
+                if not pt.in_local:
+                    pt.in_local = True
+                    marked_count += 1
+
+            session.commit()
+            logger.debug(
+                f"Marked {marked_count} playlist tracks as in_local"
+                f"{' for playlist ' + str(playlist_id) if playlist_id else ''}"
+            )
+            return marked_count
+
+    def mark_tracks_with_rekordbox_ids(self, playlist_id: Optional[int] = None) -> int:
+        """Mark playlist tracks as present in Rekordbox when content IDs exist.
+
+        Args:
+            playlist_id: Optional playlist ID filter
+
+        Returns:
+            Number of playlist tracks updated
+        """
+        with self.get_session() as session:
+            stmt = (
+                select(PlaylistTrack)
+                .join(Track)
+                .where(Track.rekordbox_content_id.isnot(None))
+            )
+
+            if playlist_id is not None:
+                stmt = stmt.where(PlaylistTrack.playlist_id == playlist_id)
+
+            playlist_tracks = session.execute(stmt).scalars().all()
+
+            marked_count = 0
+            for pt in playlist_tracks:
+                if not pt.in_rekordbox:
+                    pt.in_rekordbox = True
+                    marked_count += 1
+
+            session.commit()
+            logger.debug(
+                f"Marked {marked_count} playlist tracks as in_rekordbox"
+                f"{' for playlist ' + str(playlist_id) if playlist_id else ''}"
+            )
+            return marked_count
+
+    def set_playlist_rekordbox_id(
+        self, playlist_id: int, rekordbox_playlist_id: Optional[str]
+    ) -> bool:
+        """Update the Rekordbox playlist identifier for a playlist."""
+        with self.get_session() as session:
+            playlist = session.get(Playlist, playlist_id)
+            if not playlist:
+                logger.warning(
+                    "Playlist not found while setting Rekordbox ID: %s", playlist_id
+                )
+                return False
+
+            playlist.rekordbox_playlist_id = (
+                str(rekordbox_playlist_id) if rekordbox_playlist_id else None
+            )
+            session.commit()
+            logger.debug(
+                "Playlist %s Rekordbox ID set to %s",
+                playlist_id,
+                playlist.rekordbox_playlist_id,
+            )
+            return True
+
+    def set_track_rekordbox_id(
+        self, track_id: int, rekordbox_content_id: Optional[str]
+    ) -> bool:
+        """Update the Rekordbox content identifier for a track."""
+        with self.get_session() as session:
+            track = session.get(Track, track_id)
+            if not track:
+                logger.warning(
+                    "Track not found while setting Rekordbox content ID: %s",
+                    track_id,
+                )
+                return False
+
+            track.rekordbox_content_id = (
+                str(rekordbox_content_id) if rekordbox_content_id else None
+            )
+            session.commit()
+            logger.debug(
+                "Track %s Rekordbox content ID set to %s",
+                track_id,
+                track.rekordbox_content_id,
+            )
+            return True
 
     def update_track_position(
         self, playlist_id: int, track_id: int, position: int
@@ -587,10 +1008,15 @@ class DatabaseService:
             )
             playlist_track = session.scalar(stmt)
 
+            # Get names for readable logging
+            playlist_name = self.get_playlist_name(playlist_id)
+            track_name = self.get_track_name(track_id)
+
             if not playlist_track:
                 logger.warning(
                     f"PlaylistTrack not found: "
-                    f"playlist={playlist_id}, track={track_id}"
+                    f"playlist={playlist_name}(id={playlist_id}), "
+                    f"track={track_name}(id={track_id})"
                 )
                 return False
 
@@ -603,10 +1029,64 @@ class DatabaseService:
 
             session.commit()
             logger.debug(
-                f"Updated track sync state: playlist={playlist_id}, "
-                f"track={track_id}"
+                f"Updated track sync state: playlist='{playlist_name}', "
+                f"track='{track_name}' (in_tidal={in_tidal}, in_local={in_local}, "
+                f"in_rekordbox={in_rekordbox})"
             )
             return True
+
+    def clear_playlist_track_flag(
+        self,
+        flag_name: str,
+        playlist_name: Optional[str] = None,
+    ) -> int:
+        """Clear a specific flag for playlist tracks.
+
+        This method sets a boolean flag (in_tidal, in_local, or in_rekordbox)
+        to False for all playlist tracks, or only those in a specific playlist.
+
+        Args:
+            flag_name: Name of flag to clear ('in_tidal', 'in_local',
+                      'in_rekordbox')
+            playlist_name: Optional playlist name to filter by.
+                          If None, clears flag for all playlists.
+
+        Returns:
+            Number of playlist tracks updated
+
+        Raises:
+            ValueError: If flag_name is not valid
+        """
+        valid_flags = {"in_tidal", "in_local", "in_rekordbox"}
+        if flag_name not in valid_flags:
+            raise ValueError(
+                f"Invalid flag name: {flag_name}. Must be one of {valid_flags}"
+            )
+
+        with self.get_session() as session:
+            query = session.query(PlaylistTrack)
+
+            # Filter by playlist if specified
+            if playlist_name:
+                playlist_obj = self.get_playlist_by_name(playlist_name)
+                if playlist_obj:
+                    logger.debug(
+                        f"Clearing {flag_name} flags for playlist '{playlist_name}' "
+                        f"(ID: {playlist_obj.id})"
+                    )
+                    query = query.filter(PlaylistTrack.playlist_id == playlist_obj.id)
+                else:
+                    logger.warning(f"Playlist '{playlist_name}' not found in database")
+                    return 0
+            else:
+                logger.debug(f"Clearing {flag_name} flags for all playlists")
+
+            # Update flag to False (0)
+            reset_count = query.update({flag_name: 0})
+            session.commit()
+            logger.debug(f"Cleared {flag_name} flag for {reset_count} playlist tracks")
+
+            return reset_count
 
     # =========================================================================
     # Sync Operation Management
@@ -738,6 +1218,30 @@ class DatabaseService:
     # =========================================================================
     # Utility Methods
     # =========================================================================
+
+    def get_playlist_name(self, playlist_id: int) -> str:
+        """Get playlist name by ID for logging/display.
+
+        Args:
+            playlist_id: Playlist database ID
+
+        Returns:
+            Playlist name or formatted ID if not found
+        """
+        playlist = self.get_playlist_by_id(playlist_id)
+        return playlist.name if playlist else f"ID:{playlist_id}"
+
+    def get_track_name(self, track_id: int) -> str:
+        """Get track name by ID for logging/display.
+
+        Args:
+            track_id: Track database ID
+
+        Returns:
+            Formatted track name (Artist - Title) or ID if not found
+        """
+        track = self.get_track_by_id(track_id)
+        return f"{track.artist} - {track.title}" if track else f"ID:{track_id}"
 
     @staticmethod
     def _normalize_track_name(title: str, artist: str) -> str:
@@ -936,57 +1440,6 @@ class DatabaseService:
                 .all()
             )
 
-    def get_primary_playlist_tracks(self, playlist_id: int) -> List[PlaylistTrack]:
-        """Get playlist tracks where this playlist has the primary file.
-
-        Args:
-            playlist_id: Playlist database ID
-
-        Returns:
-            List of PlaylistTrack objects where is_primary=True
-        """
-        with self.get_session() as session:
-            return (
-                session.query(PlaylistTrack)
-                .filter(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.is_primary.is_(True),
-                )
-                .all()
-            )
-
-    def get_symlink_playlist_tracks(self, playlist_id: int) -> List[PlaylistTrack]:
-        """Get playlist tracks where this playlist has symlinks.
-
-        Args:
-            playlist_id: Playlist database ID
-
-        Returns:
-            List of PlaylistTrack objects where is_primary=False
-        """
-        with self.get_session() as session:
-            return (
-                session.query(PlaylistTrack)
-                .filter(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.is_primary.is_(False),
-                )
-                .all()
-            )
-
-    def get_broken_symlinks(self) -> List[PlaylistTrack]:
-        """Get all playlist tracks with broken symlinks.
-
-        Returns:
-            List of PlaylistTrack objects where symlink_valid=False
-        """
-        with self.get_session() as session:
-            return (
-                session.query(PlaylistTrack)
-                .filter(PlaylistTrack.symlink_valid.is_(False))
-                .all()
-            )
-
     def get_duplicate_tracks(self) -> Dict[int, List[PlaylistTrack]]:
         """Get tracks that appear in multiple playlists.
 
@@ -1009,79 +1462,20 @@ class DatabaseService:
                 track_id: pts for track_id, pts in track_map.items() if len(pts) > 1
             }
 
-    def mark_playlist_track_as_primary(
-        self, playlist_id: int, track_id: int
-    ) -> PlaylistTrack | None:
-        """Mark a playlist-track relationship as having the primary file.
-
-        This will also mark all other occurrences of this track as non-primary.
-
-        Args:
-            playlist_id: Playlist database ID
-            track_id: Track database ID
-
-        Returns:
-            Updated PlaylistTrack object, or None if not found
-        """
+    def track_has_active_playlist(self, track_id: int) -> bool:
+        """Return True if track still belongs to any Tidal playlist."""
         with self.get_session() as session:
-            # Mark all occurrences as non-primary
-            session.query(PlaylistTrack).filter(
-                PlaylistTrack.track_id == track_id
-            ).update({"is_primary": False})
+            from .models import PlaylistTrack
 
-            # Mark this one as primary
-            pt = (
+            return (
                 session.query(PlaylistTrack)
                 .filter(
-                    PlaylistTrack.playlist_id == playlist_id,
                     PlaylistTrack.track_id == track_id,
+                    PlaylistTrack.in_tidal.is_(True),
                 )
                 .first()
+                is not None
             )
-
-            if pt:
-                pt.is_primary = True
-                pt.sync_status = "synced"
-                pt.synced_at = datetime.now(timezone.utc)
-                session.commit()
-                session.refresh(pt)
-
-            return pt
-
-    def update_symlink_status(
-        self, playlist_id: int, track_id: int, symlink_path: str, valid: bool
-    ) -> PlaylistTrack | None:
-        """Update symlink information for a playlist-track relationship.
-
-        Args:
-            playlist_id: Playlist database ID
-            track_id: Track database ID
-            symlink_path: Full path to symlink
-            valid: Whether symlink is valid
-
-        Returns:
-            Updated PlaylistTrack object, or None if not found
-        """
-        with self.get_session() as session:
-            pt = (
-                session.query(PlaylistTrack)
-                .filter(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.track_id == track_id,
-                )
-                .first()
-            )
-
-            if pt:
-                pt.symlink_path = symlink_path
-                pt.symlink_valid = valid
-                pt.is_primary = False
-                pt.sync_status = "synced" if valid else "needs_symlink"
-                pt.synced_at = datetime.now(timezone.utc) if valid else None
-                session.commit()
-                session.refresh(pt)
-
-            return pt
 
     def get_sync_statistics(self) -> Dict[str, Any]:
         """Get comprehensive sync statistics.
@@ -1136,21 +1530,6 @@ class DatabaseService:
 
             # Deduplication statistics
             total_playlist_tracks = session.query(PlaylistTrack).count()
-            primary_files = (
-                session.query(PlaylistTrack)
-                .filter(PlaylistTrack.is_primary.is_(True))
-                .count()
-            )
-            symlinks = (
-                session.query(PlaylistTrack)
-                .filter(PlaylistTrack.is_primary.is_(False))
-                .count()
-            )
-            broken_symlinks = (
-                session.query(PlaylistTrack)
-                .filter(PlaylistTrack.symlink_valid.is_(False))
-                .count()
-            )
 
             return {
                 "tracks": {
@@ -1169,9 +1548,6 @@ class DatabaseService:
                 },
                 "deduplication": {
                     "total_playlist_tracks": total_playlist_tracks,
-                    "primary_files": primary_files,
-                    "symlinks": symlinks,
-                    "broken_symlinks": broken_symlinks,
                 },
                 "database_path": str(self.db_path),
             }

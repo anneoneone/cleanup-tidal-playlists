@@ -172,8 +172,10 @@ class FileScannerService:
             Matched Track or None
         """
         for track in db_tracks:
-            if track.file_path and Path(track.file_path) == file_path:
-                return track
+            if track.file_paths:
+                for file_path_str in track.file_paths:
+                    if Path(file_path_str) == file_path:
+                        return track
         return None
 
     def _match_by_isrc(
@@ -362,12 +364,13 @@ class FileScannerService:
         missing = []
 
         for track in db_tracks:
-            if track.file_path:
-                if not Path(track.file_path).exists():
-                    missing.append(track)
-            else:
-                # No file path set at all
+            if not track.file_paths or len(track.file_paths) == 0:
+                # No file paths at all
                 missing.append(track)
+            else:
+                # Check if any of the paths exist
+                if not any(Path(p).exists() for p in track.file_paths):
+                    missing.append(track)
 
         logger.info("Found %d tracks with missing files", len(missing))
         return missing
@@ -384,10 +387,12 @@ class FileScannerService:
         audio_files = self._find_audio_files(directory)
         db_tracks = self.db_service.get_all_tracks()
 
-        # Create set of known file paths
-        known_paths = {
-            Path(track.file_path).resolve() for track in db_tracks if track.file_path
-        }
+        # Create set of known file paths (all paths from all tracks)
+        known_paths = set()
+        for track in db_tracks:
+            if track.file_paths:
+                for file_path_str in track.file_paths:
+                    known_paths.add(Path(file_path_str).resolve())
 
         # Find files not in database
         orphaned = [f for f in audio_files if f.resolve() not in known_paths]
@@ -408,18 +413,27 @@ class FileScannerService:
             # Get tracks with files in this directory
             db_tracks = self.db_service.get_all_tracks()
             tracks = [
-                t for t in db_tracks if t.file_path and str(directory) in t.file_path
+                t
+                for t in db_tracks
+                if t.file_paths and any(str(directory) in p for p in t.file_paths)
             ]
         else:
             tracks = self.db_service.get_all_tracks()
 
         updated = 0
         for track in tracks:
-            if not track.file_path:
+            if not track.file_paths:
                 continue
 
-            file_path = Path(track.file_path)
-            if not file_path.exists():
+            # Use first existing file path for hashing
+            file_path = None
+            for path_str in track.file_paths:
+                p = Path(path_str)
+                if p.exists():
+                    file_path = p
+                    break
+
+            if not file_path:
                 continue
 
             # Compute hash
@@ -451,25 +465,29 @@ class FileScannerService:
         no_hash = []
 
         for track in db_tracks:
-            if not track.file_path:
+            if not track.file_paths or len(track.file_paths) == 0:
                 no_hash.append(track)
                 continue
 
-            file_path = Path(track.file_path)
-            if not file_path.exists():
+            # Check all paths for this track
+            file_exists = False
+            for path_str in track.file_paths:
+                file_path = Path(path_str)
+                if file_path.exists():
+                    file_exists = True
+                    if not track.file_hash:
+                        no_hash.append(track)
+                    else:
+                        # Verify hash of first existing file
+                        current_hash = self._compute_file_hash(file_path)
+                        if current_hash == track.file_hash:
+                            valid.append(track)
+                        else:
+                            modified.append(track)
+                    break
+
+            if not file_exists:
                 missing.append(track)
-                continue
-
-            if not track.file_hash:
-                no_hash.append(track)
-                continue
-
-            # Verify hash
-            current_hash = self._compute_file_hash(file_path)
-            if current_hash == track.file_hash:
-                valid.append(track)
-            else:
-                modified.append(track)
 
         logger.info(
             f"File integrity check: {len(valid)} valid, "

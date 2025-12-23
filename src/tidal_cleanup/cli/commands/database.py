@@ -7,6 +7,7 @@ tracking, conflict resolution, and deduplication.
 import logging
 from collections import Counter
 from pathlib import Path
+from typing import Dict, List
 
 import click
 from rich.console import Console
@@ -14,8 +15,16 @@ from rich.table import Table
 
 from ...config import Config
 from ...core.filesystem import FilesystemScanner
-from ...core.sync import DeduplicationLogic, SyncDecisionEngine, SyncOrchestrator
-from ...core.tidal import TidalDownloadService, TidalStateFetcher
+from ...core.sync import (
+    DecisionResult,
+    DeduplicationLogic,
+    SyncAction,
+    SyncDecisionEngine,
+    SyncDecisions,
+    SyncOrchestrator,
+    SyncStage,
+)
+from ...core.tidal import TidalApiService, TidalDownloadService, TidalStateFetcher
 from ...database import (
     ConsoleProgressReporter,
     DatabaseService,
@@ -58,7 +67,7 @@ def db() -> None:
     - State tracking across sync operations
     - Conflict detection and resolution
     - Progress tracking with visual feedback
-    - Deduplication logic for symlink management
+    - Deduplication logic for managing track copies across playlists
     """
     pass
 
@@ -95,6 +104,17 @@ def db() -> None:
     is_flag=True,
     help="Show detailed progress information",
 )
+@click.option(
+    "--stage-until",
+    type=click.Choice([stage.value for stage in SyncStage], case_sensitive=False),
+    default=SyncStage.EXECUTION.value,
+    show_default=True,
+    help=(
+        "Stop after this stage boundary. Useful for staged runs when "
+        "debugging fetch, scan, dedup, decisions, or execution steps."
+        "Available stages: fetch, scan, dedup, decisions, execution"
+    ),
+)
 def db_sync(
     dry_run: bool,
     no_fetch: bool,
@@ -102,14 +122,15 @@ def db_sync(
     no_dedup: bool,
     progress: bool,
     verbose: bool,
+    stage_until: str,
 ) -> None:
     """Execute database-driven sync operation.
 
     This command orchestrates a complete sync:
     1. Fetch current state from Tidal API
     2. Scan local filesystem for existing files
-    3. Analyze deduplication needs (symlink planning)
-    4. Generate sync decisions (download, create symlinks, etc.)
+    3. Analyze deduplication needs
+    4. Generate sync decisions (download, create, etc.)
     5. Execute decisions with conflict resolution
 
     Examples:
@@ -127,29 +148,48 @@ def db_sync(
     """
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
-    download_service = TidalDownloadService(config)
 
     # Setup progress tracking (for future use)
     setup_progress_reporter(progress, verbose)
+
+    # Initialize and authenticate Tidal services
+    tidal_session = None
+    tidal_download_service = TidalDownloadService(config)
+
+    if not no_fetch:
+        console.print("[cyan]Connecting to Tidal API...[/cyan]")
+        tidal_api_service = TidalApiService(config.tidal_token_file)
+        tidal_api_service.connect()
+        tidal_session = tidal_api_service.session
+        console.print("[green]✓[/green] Connected to Tidal API\n")
+
+    # Authenticate download service (needed for execution stage)
+    console.print("[cyan]Initializing Tidal downloader...[/cyan]")
+    tidal_download_service.connect()
+    console.print("[green]✓[/green] Tidal downloader ready\n")
 
     # Create orchestrator
     orchestrator = SyncOrchestrator(
         config=config,
         db_service=db_service,
-        download_service=download_service,
+        tidal_download_service=tidal_download_service,
+        tidal_session=tidal_session,
         dry_run=dry_run,
     )
 
     # Execute sync
-    console.print("\n[bold cyan]🔄 Starting database-driven sync...[/bold cyan]")
+    console.print("[bold cyan]🔄 Starting database-driven sync...[/bold cyan]")
     if dry_run:
         console.print("[yellow]DRY RUN MODE - No changes will be made[/yellow]\n")
 
     try:
+        stop_stage = SyncStage(stage_until)
+
         result = orchestrator.sync_all(
             fetch_tidal=not no_fetch,
             scan_filesystem=not no_scan,
             analyze_deduplication=not no_dedup,
+            stop_after_stage=stop_stage,
         )
 
         # Display results
@@ -192,7 +232,13 @@ def db_fetch(verbose: bool) -> None:
     console.print("\n[bold cyan]📥 Fetching state from Tidal...[/bold cyan]\n")
 
     try:
-        fetcher = TidalStateFetcher(db_service)
+        # Initialize and authenticate Tidal API
+        console.print("[cyan]Connecting to Tidal API...[/cyan]")
+        tidal_service = TidalApiService(config.tidal_token_file)
+        tidal_service.connect()
+        console.print("[green]✓[/green] Connected to Tidal API\n")
+
+        fetcher = TidalStateFetcher(db_service, tidal_session=tidal_service.session)
         _ = fetcher.fetch_all_playlists()
         stats = fetcher.get_fetch_statistics()
 
@@ -246,7 +292,7 @@ def db_scan(verbose: bool) -> None:
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
 
-    playlists_root = Path(config.m4a_directory) / "Playlists"
+    playlists_root = Path(config.mp3_directory) / "Playlists"
 
     console.print(
         f"\n[bold cyan]📂 Scanning filesystem: {playlists_root}[/bold cyan]\n"
@@ -264,8 +310,6 @@ def db_scan(verbose: bool) -> None:
 
         table.add_row("Playlists Scanned", str(stats.get("playlists_scanned", 0)))
         table.add_row("Files Found", str(stats.get("files_found", 0)))
-        table.add_row("Symlinks Found", str(stats.get("symlinks_found", 0)))
-        table.add_row("Broken Symlinks", str(stats.get("broken_symlinks", 0)))
         table.add_row("Files Removed", str(stats.get("files_removed", 0)))
 
         console.print(table)
@@ -287,33 +331,26 @@ def db_scan(verbose: bool) -> None:
     "--strategy",
     type=click.Choice(["first_alphabetically", "most_playlists", "newest_file"]),
     default="first_alphabetically",
-    help="Deduplication strategy to use",
+    help="Legacy strategy flag (retained for backwards compatibility)",
 )
 def db_analyze(strategy: str) -> None:
-    """Analyze deduplication needs.
+    """Analyze playlist overlap and track distribution.
 
-    Determines which files should be primary copies and which should be symlinks.
-    This helps avoid duplicate downloads and saves disk space.
-
-    Strategies:
-        first_alphabetically: Use file from first playlist alphabetically
-        most_playlists: Use file from playlist with most tracks
-        newest_file: Use the newest file found
-
-    Examples:
-        tidal-cleanup db analyze
-        tidal-cleanup db analyze --strategy most_playlists
+    Now that each playlist receives its own copy of a track, the analysis report focuses
+    on identifying which tracks appear in multiple playlists so you can prioritize
+    downloads or storage planning. The `--strategy` option remains for compatibility
+    with previous versions but no longer changes the outcome.
     """
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
 
     console.print(
-        f"\n[bold cyan]🔍 Analyzing deduplication "
-        f"(strategy: {strategy})...[/bold cyan]\n"
+        f"\n[bold cyan]🔍 Analyzing playlist overlap "
+        f"(strategy flag: {strategy})...[/bold cyan]\n"
     )
 
     try:
-        dedup = DeduplicationLogic(db_service, strategy=strategy)
+        dedup = DeduplicationLogic(db_service)
         result = dedup.analyze_all_tracks()
 
         console.print("[green]✓ Analysis complete[/green]\n")
@@ -322,17 +359,45 @@ def db_analyze(strategy: str) -> None:
         table.add_column("Metric", style="cyan")
         table.add_column("Count", style="green", justify="right")
 
-        tracks_analyzed = len(result.decisions)
-        total_symlinks = sum(len(d.symlink_playlist_ids) for d in result.decisions)
-        tracks_needing_symlinks = sum(
-            1 for d in result.decisions if len(d.symlink_playlist_ids) > 0
+        summary = result.get_summary()
+        table.add_row("Tracks Analyzed", str(summary["tracks_analyzed"]))
+        table.add_row(
+            "Tracks In Multiple Playlists",
+            str(summary["tracks_in_multiple_playlists"]),
         )
 
-        table.add_row("Tracks Analyzed", str(tracks_analyzed))
-        table.add_row("Tracks Needing Symlinks", str(tracks_needing_symlinks))
-        table.add_row("Total Symlinks Needed", str(total_symlinks))
-
         console.print(table)
+
+        overlapping = [dist for dist in result.distributions if dist.num_playlists > 1]
+        if overlapping:
+            top_overlaps = sorted(
+                overlapping, key=lambda dist: dist.num_playlists, reverse=True
+            )[:10]
+
+            detail_table = Table(
+                show_header=True,
+                header_style="bold magenta",
+                title="\nTop Overlapping Tracks",
+            )
+            detail_table.add_column("Track", style="cyan")
+            detail_table.add_column("Playlists", style="green", justify="right")
+            detail_table.add_column("Playlist Names", style="yellow")
+
+            for dist in top_overlaps:
+                track = db_service.get_track_by_id(dist.track_id)
+                label = (
+                    f"{track.artist} - {track.title}"
+                    if track
+                    else f"ID {dist.track_id}"
+                )
+                playlist_names = ", ".join(dist.playlist_names)
+                detail_table.add_row(label, str(dist.num_playlists), playlist_names)
+
+            console.print(detail_table)
+        else:
+            console.print(
+                "[green]All tracks currently belong to a single playlist.[/green]"
+            )
 
     except Exception as e:
         logger.exception("Analysis failed")
@@ -350,16 +415,31 @@ def db_analyze(strategy: str) -> None:
 @click.option(
     "--action",
     type=click.Choice(
-        ["DOWNLOAD_TRACK", "CREATE_SYMLINK", "UPDATE_SYMLINK", "REMOVE_FILE", "ALL"]
+        [
+            "DOWNLOAD_TRACK",
+            "UPDATE_METADATA",
+            "VERIFY_FILE",
+            "REMOVE_FILE",
+            "CREATE_PLAYLIST_DIR",
+            "REMOVE_PLAYLIST_DIR",
+            "SYNC_PLAYLIST",
+            "NO_ACTION",
+            "ALL",
+        ]
     ),
     default="ALL",
     help="Filter by action type",
 )
-def db_decisions(limit: int, action: str) -> None:
+@click.option(
+    "--hide-no-action",
+    is_flag=True,
+    help="Suppress NO_ACTION rows to focus on actionable decisions",
+)
+def db_decisions(limit: int, action: str, hide_no_action: bool) -> None:
     """Show sync decisions that would be executed.
 
     Displays what actions the sync system has decided to take, such as
-    downloading tracks, creating symlinks, or removing files.
+    downloading tracks, updating metadata, or removing files.
 
     Examples:
         tidal-cleanup db decisions
@@ -371,42 +451,19 @@ def db_decisions(limit: int, action: str) -> None:
     console.print("\n[bold cyan]📋 Generating sync decisions...[/bold cyan]\n")
 
     try:
-        engine = SyncDecisionEngine(db_service, music_root=config.m4a_directory)
+        engine = SyncDecisionEngine(db_service, music_root=config.mp3_directory)
         decisions = engine.analyze_all_playlists()
+        playlist_lookup = {
+            playlist.id: playlist.name for playlist in db_service.get_all_playlists()
+        }
 
-        # Filter by action if specified
-        filtered_decisions = decisions.decisions
-        if action != "ALL":
-            filtered_decisions = [
-                d for d in decisions.decisions if d.action.name == action
-            ]
+        filtered_decisions = _apply_decision_filters(decisions, action, hide_no_action)
 
-        console.print(
-            f"[green]✓ Generated {len(decisions.decisions)} decisions[/green]"
+        _print_decision_generation_summary(
+            len(decisions.decisions), len(filtered_decisions), action
         )
-        if action != "ALL":
-            console.print(
-                f"[cyan]Showing {len(filtered_decisions)} "
-                f"decisions of type {action}[/cyan]\n"
-            )
-        else:
-            console.print()
 
-        # Display decisions
-        table = Table(show_header=True, header_style="bold magenta")
-        table.add_column("Action", style="cyan", no_wrap=True)
-        table.add_column("Track ID", style="white")
-        table.add_column("Details", style="yellow")
-
-        for decision in filtered_decisions[:limit]:
-            track_id = str(decision.track_id) if decision.track_id else "N/A"
-
-            details = decision.reason or ""
-            if decision.target_path:
-                details = str(decision.target_path)
-
-            table.add_row(decision.action.value, track_id, details)
-
+        table = _build_decisions_table(filtered_decisions, playlist_lookup, limit)
         console.print(table)
 
         if len(filtered_decisions) > limit:
@@ -415,22 +472,88 @@ def db_decisions(limit: int, action: str) -> None:
             )
 
         # Summary by action type
-        summary_table = Table(
-            show_header=True, header_style="bold magenta", title="\nSummary by Action"
-        )
-        summary_table.add_column("Action", style="cyan")
-        summary_table.add_column("Count", style="green", justify="right")
-
-        action_counts = Counter(d.action.name for d in decisions.decisions)
-        for action_name, count in sorted(action_counts.items()):
-            summary_table.add_row(action_name, str(count))
-
+        summary_table = _build_action_summary_table(decisions)
         console.print(summary_table)
 
     except Exception as e:
         logger.exception("Decision generation failed")
         console.print(f"\n[red]✗ Failed to generate decisions: {e}[/red]")
         raise click.ClickException(str(e))
+
+
+def _apply_decision_filters(
+    decisions: SyncDecisions, action: str, hide_no_action: bool
+) -> List[DecisionResult]:
+    filtered: List[DecisionResult] = decisions.decisions
+    if hide_no_action:
+        filtered = [d for d in filtered if d.action != SyncAction.NO_ACTION]
+    if action != "ALL":
+        filtered = [d for d in filtered if d.action.name == action]
+    return filtered
+
+
+def _print_decision_generation_summary(
+    total_decisions: int, filtered_count: int, action: str
+) -> None:
+    console.print(f"[green]✓ Generated {total_decisions} decisions[/green]")
+    if action != "ALL":
+        console.print(
+            f"[cyan]Showing {filtered_count} decisions of type {action}[/cyan]\n"
+        )
+    else:
+        console.print()
+
+
+def _build_decisions_table(
+    filtered_decisions: List[DecisionResult],
+    playlist_lookup: Dict[int, str],
+    limit: int,
+) -> Table:
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Action", style="cyan", no_wrap=True)
+    table.add_column("Track ID", style="white")
+    table.add_column("Playlist", style="magenta")
+    table.add_column("Filename", style="green")
+    table.add_column("Details", style="yellow")
+
+    for decision in filtered_decisions[:limit]:
+        track_id = str(decision.track_id) if decision.track_id else "N/A"
+        playlist_name = (
+            playlist_lookup.get(decision.playlist_id, "-")
+            if decision.playlist_id is not None
+            else "-"
+        )
+
+        file_path = decision.target_path or decision.source_path
+        filename = Path(file_path).name if file_path else "-"
+
+        details = decision.reason or ""
+        if file_path:
+            details = f"{details} ({file_path})" if details else str(file_path)
+
+        table.add_row(
+            decision.action.value,
+            track_id,
+            playlist_name,
+            filename,
+            details,
+        )
+
+    return table
+
+
+def _build_action_summary_table(decisions: SyncDecisions) -> Table:
+    summary_table = Table(
+        show_header=True, header_style="bold magenta", title="\nSummary by Action"
+    )
+    summary_table.add_column("Action", style="cyan")
+    summary_table.add_column("Count", style="green", justify="right")
+
+    action_counts = Counter(d.action.name for d in decisions.decisions)
+    for action_name, count in sorted(action_counts.items()):
+        summary_table.add_row(action_name, str(count))
+
+    return summary_table
 
 
 @db.command(name="status")
@@ -459,7 +582,7 @@ def db_status() -> None:
             playlist_track_count = session.query(PlaylistTrack).count()
             # Count tracks with file paths (files on disk)
             file_count = (
-                session.query(Track).filter(Track.file_path.isnot(None)).count()
+                session.query(Track).filter(Track.file_paths.isnot(None)).count()
             )
 
         # Display database info
@@ -468,8 +591,8 @@ def db_status() -> None:
         db_table.add_column("Value", style="white")
 
         db_table.add_row("Database Path", str(config.database_path))
-        db_table.add_row("M4A Directory", str(config.m4a_directory))
-        db_table.add_row("Playlists Directory", str(config.m4a_directory / "Playlists"))
+        db_table.add_row("MP3 Directory", str(config.mp3_directory))
+        db_table.add_row("Playlists Directory", str(config.mp3_directory / "Playlists"))
 
         console.print(db_table)
         console.print()

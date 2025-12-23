@@ -75,7 +75,7 @@ class TidalDownloadService:
         else:
             # Use defaults (no config files found)
             logger.info("No config found, using defaults")
-            settings.data.download_base_path = str(self.config.m4a_directory)
+            settings.data.download_base_path = str(self.config.mp3_directory)
             settings.data.quality_audio = "HI_RES_LOSSLESS"
             settings.data.skip_existing = True
             settings.data.video_download = False
@@ -204,7 +204,7 @@ class TidalDownloadService:
 
             # Calculate target directory
             playlist_dir: Path = (
-                self.config.m4a_directory / "Playlists" / safe_playlist_name
+                self.config.mp3_directory / "Playlists" / safe_playlist_name
             )
 
             if create_directory:
@@ -389,7 +389,7 @@ class TidalDownloadService:
             # self.tidal_dl is checked above to not be None
             dl = Download(
                 self.tidal_dl,  # Pass TidalDL object, not session
-                path_base=str(target_dir.parent.parent),  # Base path (m4a directory)
+                path_base=str(target_dir.parent.parent),  # Base path (mp3 directory)
                 fn_logger=fn_logger,
                 skip_existing=True,
                 progress=progress,

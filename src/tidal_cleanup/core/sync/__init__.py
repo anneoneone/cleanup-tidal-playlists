@@ -19,10 +19,10 @@ from .decision_engine import (
 from .deduplication import (
     DeduplicationLogic,
     DeduplicationResult,
-    PrimaryFileDecision,
+    TrackDistribution,
 )
 from .download_orchestrator import DownloadOrchestrator, ExecutionResult
-from .orchestrator import SyncOrchestrator, SyncResult
+from .orchestrator import SyncOrchestrator, SyncResult, SyncStage
 from .state import Change, ChangeType, SyncState, SyncStateComparator
 
 __all__ = [
@@ -34,12 +34,13 @@ __all__ = [
     # Deduplication
     "DeduplicationLogic",
     "DeduplicationResult",
-    "PrimaryFileDecision",
+    "TrackDistribution",
     # Orchestration
     "DownloadOrchestrator",
     "ExecutionResult",
     "SyncOrchestrator",
     "SyncResult",
+    "SyncStage",
     # Conflict resolution
     "Conflict",
     "ConflictType",

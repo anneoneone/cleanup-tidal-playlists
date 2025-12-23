@@ -9,10 +9,10 @@ All services have been reorganized:
 # Re-export from new locations for backward compatibility
 from ..core.rekordbox import RekordboxGenerationError, RekordboxService
 from ..core.tidal import (
+    TidalApiService,
     TidalConnectionError,
     TidalDownloadError,
     TidalDownloadService,
-    TidalService,
 )
 from ..legacy import (
     DeletionMode,
@@ -26,7 +26,7 @@ from ..legacy import (
 )
 
 __all__ = [
-    "TidalService",
+    "TidalApiService",
     "TidalConnectionError",
     "TidalDownloadService",
     "TidalDownloadError",

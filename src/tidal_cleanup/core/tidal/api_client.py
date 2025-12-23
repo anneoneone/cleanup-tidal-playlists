@@ -20,7 +20,7 @@ class TidalConnectionError(Exception):
     pass
 
 
-class TidalService:
+class TidalApiService:
     """Service for interacting with the Tidal API."""
 
     def __init__(self, token_file: Path) -> None:
@@ -222,7 +222,7 @@ class TidalService:
             tracks = [self._extract_track_metadata(t) for t in tidal_tracks]
 
             logger.info(
-                "Retrieved %d tracks from playlist %d", len(tracks), playlist_id
+                "Retrieved %d tracks from playlist %s", len(tracks), playlist_id
             )
             return tracks
 

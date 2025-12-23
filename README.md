@@ -204,11 +204,11 @@ You can also use the services directly in Python:
 
 ```python
 from tidal_cleanup.config import get_config
-from tidal_cleanup.services import TidalService, FileService
+from tidal_cleanup.services import TidalApiService, FileService
 
 # Initialize services
 config = get_config()
-tidal_service = TidalService(config.tidal_token_file)
+tidal_service = TidalApiService(config.tidal_token_file)
 file_service = FileService()
 
 # Connect to Tidal

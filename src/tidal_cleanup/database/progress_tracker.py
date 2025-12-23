@@ -24,7 +24,6 @@ class ProgressPhase(str, Enum):
     GENERATING_DECISIONS = "generating_decisions"
     EXECUTING_DECISIONS = "executing_decisions"
     DOWNLOADING = "downloading"
-    CREATING_SYMLINKS = "creating_symlinks"
     UPDATING_METADATA = "updating_metadata"
     CLEANING_UP = "cleaning_up"
     COMPLETE = "complete"

@@ -2,6 +2,9 @@
 **/tidal_session*.json
 tidal_session*.json
 
+# Config directory with sensitive settings
+config/
+
 .vscode
 
 .DS_Store

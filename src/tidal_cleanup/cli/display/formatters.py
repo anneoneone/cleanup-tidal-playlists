@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from rich.console import Console
 from rich.table import Table
 
+from ...core.sync import SyncStage
 from ...database import DatabaseService
 
 console = Console()
@@ -117,6 +118,29 @@ def display_db_sync_result(summary: dict[str, Any], dry_run: bool) -> None:
     """
     console.print("\n[bold green]✓ Sync operation completed[/bold green]\n")
 
+    stage_info = summary.get("stage")
+    if stage_info:
+        table = Table(
+            show_header=True,
+            header_style="bold magenta",
+            title="Stage Progress",
+        )
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green", justify="right")
+
+        requested = stage_info.get("requested") or SyncStage.EXECUTION.value
+        completed = stage_info.get("completed") or SyncStage.EXECUTION.value
+        status = (
+            "Reached requested stage" if requested == completed else "Stopped early"
+        )
+
+        table.add_row("Requested Stop", requested.title())
+        table.add_row("Completed Stage", completed.title())
+        table.add_row("Status", status)
+
+        console.print(table)
+        console.print()
+
     if "tidal" in summary:
         table = Table(
             show_header=True, header_style="bold magenta", title="Tidal Fetch"
@@ -155,7 +179,10 @@ def display_db_sync_result(summary: dict[str, Any], dry_run: bool) -> None:
 
         dedup = summary["deduplication"]
         table.add_row("Tracks Analyzed", str(dedup["tracks_analyzed"]))
-        table.add_row("Symlinks Needed", str(dedup["symlinks_needed"]))
+        table.add_row(
+            "Tracks in Multiple Playlists",
+            str(dedup.get("tracks_in_multiple_playlists", 0)),
+        )
 
         console.print(table)
         console.print()
@@ -170,7 +197,6 @@ def display_db_sync_result(summary: dict[str, Any], dry_run: bool) -> None:
         decisions = summary["decisions"]
         table.add_row("Total Decisions", str(decisions["total"]))
         table.add_row("Downloads", str(decisions["downloads"]))
-        table.add_row("Symlinks", str(decisions["symlinks"]))
 
         console.print(table)
         console.print()
@@ -187,8 +213,6 @@ def display_db_sync_result(summary: dict[str, Any], dry_run: bool) -> None:
         table.add_row("Downloads Attempted", str(execution["downloads_attempted"]))
         table.add_row("Downloads Successful", str(execution["downloads_successful"]))
         table.add_row("Downloads Failed", str(execution["downloads_failed"]))
-        table.add_row("Symlinks Created", str(execution["symlinks_created"]))
-        table.add_row("Symlinks Updated", str(execution["symlinks_updated"]))
 
         console.print(table)
 

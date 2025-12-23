@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from ...database.models import Playlist, PlaylistTrack, Track
 
@@ -135,6 +135,10 @@ class SyncState:
     def add_change(self, change: Change) -> None:
         """Add a change to the sync state."""
         self.changes.append(change)
+
+    def add_changes(self, changes: Iterable[Change]) -> None:
+        """Add multiple changes to the sync state."""
+        self.changes.extend(changes)
 
     def get_changes_by_type(self, change_type: ChangeType) -> list[Change]:
         """Get all changes of a specific type."""
@@ -263,7 +267,7 @@ class SyncStateComparator:
                         change_type=ChangeType.PLAYLIST_ADDED,
                         entity_type="playlist",
                         new_value=snapshot_pl["name"],
-                        metadata={"tidal_id": tidal_id},
+                        metadata={"tidal_id": tidal_id, "playlist_data": snapshot_pl},
                     )
                 )
             else:

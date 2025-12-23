@@ -5,14 +5,18 @@ to synchronize playlists between Tidal and the filesystem.
 """
 
 import logging
+import unicodedata
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
-from ...database.models import DownloadStatus, Track
+from ...database.models import DownloadStatus, Playlist, PlaylistTrack, Track
 from ...database.service import DatabaseService
+
+if TYPE_CHECKING:  # pragma: no cover - type checking only
+    from .deduplication import DeduplicationLogic
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +29,6 @@ class SyncAction(str, Enum):
     UPDATE_METADATA = "update_metadata"  # Update track metadata
     REMOVE_FILE = "remove_file"  # Remove file no longer in Tidal
     VERIFY_FILE = "verify_file"  # Verify file integrity
-
-    # PlaylistTrack-level actions
-    CREATE_SYMLINK = "create_symlink"  # Create symlink to primary file
-    UPDATE_SYMLINK = "update_symlink"  # Update broken/incorrect symlink
-    REMOVE_SYMLINK = "remove_symlink"  # Remove symlink no longer needed
-    MARK_PRIMARY = "mark_primary"  # Mark this playlist as having primary file
 
     # Playlist-level actions
     CREATE_PLAYLIST_DIR = "create_playlist_dir"  # Create playlist directory
@@ -75,8 +73,6 @@ class SyncDecisions:
 
     # Statistics
     tracks_to_download: int = 0
-    symlinks_to_create: int = 0
-    symlinks_to_update: int = 0
     files_to_remove: int = 0
     metadata_updates: int = 0
     no_action_needed: int = 0
@@ -88,10 +84,6 @@ class SyncDecisions:
         # Update statistics based on action
         if decision.action == SyncAction.DOWNLOAD_TRACK:
             self.tracks_to_download += 1
-        elif decision.action == SyncAction.CREATE_SYMLINK:
-            self.symlinks_to_create += 1
-        elif decision.action == SyncAction.UPDATE_SYMLINK:
-            self.symlinks_to_update += 1
         elif decision.action == SyncAction.REMOVE_FILE:
             self.files_to_remove += 1
         elif decision.action == SyncAction.UPDATE_METADATA:
@@ -104,8 +96,6 @@ class SyncDecisions:
         return {
             "total_decisions": len(self.decisions),
             "tracks_to_download": self.tracks_to_download,
-            "symlinks_to_create": self.symlinks_to_create,
-            "symlinks_to_update": self.symlinks_to_update,
             "files_to_remove": self.files_to_remove,
             "metadata_updates": self.metadata_updates,
             "no_action_needed": self.no_action_needed,
@@ -120,16 +110,33 @@ class SyncDecisionEngine:
     to achieve synchronization.
     """
 
-    def __init__(self, db_service: DatabaseService, music_root: Path | str):
+    SUPPORTED_EXTENSIONS: tuple[str, ...] = (".mp3", ".flac", ".m4a", ".wav")
+
+    def __init__(
+        self,
+        db_service: DatabaseService,
+        music_root: Path | str,
+        target_format: Optional[str] = None,
+        dedup_logic: Optional["DeduplicationLogic"] = None,
+    ):
         """Initialize the decision engine.
 
         Args:
             db_service: Database service instance
             music_root: Root directory for music files (contains Playlists/)
+            target_format: Desired audio format/extension for downloads (default mp3)
+            dedup_logic: Optional deduplication logic instance for future use
         """
         self.db_service = db_service
         self.music_root = Path(music_root)
         self.playlists_root = self.music_root / "Playlists"
+        normalized_format = (target_format or "mp3").lower().replace(".", "")
+        self.target_format = normalized_format
+        self.target_extension = f".{normalized_format}"
+        self.dedup_logic = dedup_logic
+        self._track_active_cache: Dict[int, bool] = {}
+        self._all_tracks_cache: List[Track] | None = None
+        self._simplified_track_names: Dict[int, str] = {}
 
     def analyze_playlist_sync(self, playlist_id: int) -> SyncDecisions:
         """Analyze sync status for a single playlist.
@@ -150,6 +157,9 @@ class SyncDecisionEngine:
 
         # Get all playlist-track associations
         playlist_tracks = self.db_service.get_playlist_track_associations(playlist_id)
+        active_playlist_paths = self._collect_active_playlist_paths(
+            playlist, playlist_tracks
+        )
 
         for pt in playlist_tracks:
             track = pt.track
@@ -158,8 +168,16 @@ class SyncDecisionEngine:
                 continue
 
             # Decide action for this track in this playlist
-            decision = self._decide_playlist_track_action(playlist, track, pt)
+            decision = self._decide_playlist_track_action(
+                playlist, track, pt, active_playlist_paths
+            )
             decisions.add_decision(decision)
+
+        orphan_decisions = self._identify_orphan_file_decisions(
+            playlist, playlist_tracks, decisions, active_playlist_paths
+        )
+        for orphan_decision in orphan_decisions:
+            decisions.add_decision(orphan_decision)
 
         return decisions
 
@@ -190,7 +208,11 @@ class SyncDecisionEngine:
         return decisions
 
     def _decide_playlist_track_action(
-        self, playlist: Any, track: Track, playlist_track: Any
+        self,
+        playlist: Playlist,
+        track: Track,
+        playlist_track: PlaylistTrack,
+        active_playlist_paths: Dict[str, Set[int]],
     ) -> DecisionResult:
         """Decide what action to take for a track in a playlist.
 
@@ -202,7 +224,26 @@ class SyncDecisionEngine:
         Returns:
             DecisionResult with the action to take
         """
-        # Check if track needs to be downloaded
+        existing_path = self._find_existing_track_file(playlist, track)
+
+        removal_decision = self._decide_removal_action(
+            playlist, track, playlist_track, active_playlist_paths, existing_path
+        )
+        if removal_decision:
+            return removal_decision
+
+        if existing_path and existing_path.exists():
+            return DecisionResult(
+                action=SyncAction.NO_ACTION,
+                track_id=track.id,
+                playlist_id=playlist.id,
+                playlist_track_id=playlist_track.id,
+                target_path=str(existing_path),
+                reason="Track exists in playlist directory",
+                priority=0,
+            )
+
+        # Check if track needs to be downloaded to this playlist
         if track.download_status == DownloadStatus.NOT_DOWNLOADED:
             return self._decide_download_action(playlist, track, playlist_track)
 
@@ -214,19 +255,14 @@ class SyncDecisionEngine:
             decision.priority = 5
             return decision
 
-        # Track is downloaded, check if file exists
-        if not track.file_path or not Path(track.file_path).exists():
-            decision = self._decide_download_action(playlist, track, playlist_track)
-            # Update reason and priority for missing file
-            decision.reason = "Track marked as downloaded but file missing"
-            decision.priority = 8
-            return decision
-
-        # Track exists, check playlist-track sync status
-        return self._decide_symlink_action(playlist, track, playlist_track)
+        # Track is downloaded, check if file exists in this playlist's directory
+        decision = self._decide_download_action(playlist, track, playlist_track)
+        decision.reason = "Track needs to be downloaded to this playlist"
+        decision.priority = 6
+        return decision
 
     def _decide_download_action(
-        self, playlist: Any, track: Track, playlist_track: Any
+        self, playlist: Playlist, track: Track, playlist_track: PlaylistTrack
     ) -> DecisionResult:
         """Decide download action for a track.
 
@@ -256,45 +292,25 @@ class SyncDecisionEngine:
         # Determine where to download
         playlist_dir = self.playlists_root / playlist.name
 
-        # Construct filename using artist - title format (matches tidal-dl-ng)
-        # Use original Tidal metadata, not normalized name
-        base_filename = f"{track.artist} - {track.title}"
+        target_path = self._build_track_path(playlist, track)
 
-        # Determine target extension from music_root path
-        # e.g., if music_root is /path/to/mp3, use .mp3
-        target_format = self.music_root.name  # Gets last part of path
-        target_ext = f".{target_format}"
-
-        filename = f"{base_filename}{target_ext}"
-        target_path = playlist_dir / filename
-
-        # Check if file already exists at target location
-        # Use a more flexible check since tidal-dl-ng may sanitize the filename
-        if playlist_dir.exists():
-            # Look for any file with target extension that matches the pattern
-            # artist - title (accounting for filename sanitization)
-            for existing_file in playlist_dir.glob(f"*{target_ext}"):
-                # Basic match: check if artist and title appear in filename
-                filename_lower = existing_file.stem.lower()
-                artist_lower = track.artist.lower()
-                title_lower = track.title.lower()
-
-                # Check if both artist and title are in the filename
-                # This handles cases where tidal-dl-ng sanitized characters
-                if artist_lower in filename_lower and title_lower in filename_lower:
-                    logger.debug(
-                        f"Track {track.id} already exists as {existing_file}, "
-                        "skipping"
-                    )
-                    return DecisionResult(
-                        action=SyncAction.NO_ACTION,
-                        track_id=track.id,
-                        playlist_id=playlist.id,
-                        playlist_track_id=playlist_track.id,
-                        target_path=str(existing_file),
-                        reason="File already exists at target location",
-                        priority=0,
-                    )
+        # Check if file already exists at target location or elsewhere in dir
+        existing_file = self._find_matching_playlist_file(playlist_dir, track)
+        if existing_file is not None:
+            logger.debug(
+                "Track %s already exists as %s, skipping download",
+                track.id,
+                existing_file,
+            )
+            return DecisionResult(
+                action=SyncAction.NO_ACTION,
+                track_id=track.id,
+                playlist_id=playlist.id,
+                playlist_track_id=playlist_track.id,
+                target_path=str(existing_file),
+                reason="File already exists at target location",
+                priority=0,
+            )
 
         return DecisionResult(
             action=SyncAction.DOWNLOAD_TRACK,
@@ -311,110 +327,342 @@ class SyncDecisionEngine:
             },
         )
 
-    def _decide_symlink_action(
-        self, playlist: Any, track: Track, playlist_track: Any
-    ) -> DecisionResult:
-        """Decide symlink action for a track in a playlist.
+    def _decide_removal_action(
+        self,
+        playlist: Playlist,
+        track: Track,
+        playlist_track: PlaylistTrack,
+        active_playlist_paths: Dict[str, Set[int]],
+        existing_path: Optional[Path] = None,
+    ) -> Optional[DecisionResult]:
+        """Determine if a playlist-track should trigger a removal action.
 
-        Args:
-            playlist: Playlist object
-            track: Track object
-            playlist_track: PlaylistTrack association object
-
-        Returns:
-            DecisionResult with symlink-related action
+        Don't remove files that:
+        - Are still in Tidal (in_tidal=True)
+        - Exist locally on filesystem (in_local=True)
         """
-        # Check if this playlist should have the primary file
-        if playlist_track.is_primary:
-            # This playlist has the primary file
-            if playlist_track.symlink_path:
-                # Shouldn't have symlink if it's primary
-                return DecisionResult(
-                    action=SyncAction.REMOVE_SYMLINK,
-                    track_id=track.id,
-                    playlist_id=playlist.id,
-                    playlist_track_id=playlist_track.id,
-                    source_path=playlist_track.symlink_path,
-                    reason="Primary file shouldn't have symlink",
-                    priority=3,
-                )
-            else:
-                # All good - primary file, no symlink
-                return DecisionResult(
-                    action=SyncAction.NO_ACTION,
-                    track_id=track.id,
-                    playlist_id=playlist.id,
-                    playlist_track_id=playlist_track.id,
-                    reason="Primary file exists, no symlink needed",
-                    priority=0,
-                )
+        if playlist_track.in_tidal:
+            return None
 
-        # Not primary - should have symlink
-        if not playlist_track.symlink_path:
-            # Need to create symlink
-            return self._decide_create_symlink(playlist, track, playlist_track)
-
-        # Has symlink - check if valid
-        if not playlist_track.symlink_valid:
-            # Symlink is broken
-            return DecisionResult(
-                action=SyncAction.UPDATE_SYMLINK,
-                track_id=track.id,
-                playlist_id=playlist.id,
-                playlist_track_id=playlist_track.id,
-                source_path=playlist_track.symlink_path,
-                target_path=track.file_path,
-                reason="Symlink is broken, needs update",
-                priority=7,
+        # Don't delete files that exist locally, even if removed from Tidal
+        if playlist_track.in_local:
+            logger.debug(
+                "Skipping removal for track %s in playlist %s; "
+                "file exists locally (in_local=True)",
+                track.id,
+                playlist.id,
             )
+            return None
 
-        # Symlink exists and is valid
+        # Check for an actual file associated with this playlist
+        if existing_path is None:
+            existing_path = self._find_existing_track_file(playlist, track)
+        if not existing_path or not existing_path.exists():
+            return None
+
+        existing_path_key = str(existing_path)
+        active_track_users = active_playlist_paths.get(existing_path_key, set())
+        if active_track_users:
+            logger.debug(
+                "Skipping removal for %s in playlist %s; "
+                "path reused by active track(s) %s",
+                existing_path_key,
+                playlist.id,
+                sorted(active_track_users),
+            )
+            return None
+
         return DecisionResult(
-            action=SyncAction.NO_ACTION,
+            action=SyncAction.REMOVE_FILE,
             track_id=track.id,
             playlist_id=playlist.id,
             playlist_track_id=playlist_track.id,
-            reason="Symlink exists and is valid",
-            priority=0,
+            source_path=str(existing_path),
+            reason="Track removed from playlist in Tidal",
+            priority=8,
         )
 
-    def _decide_create_symlink(
-        self, playlist: Any, track: Track, playlist_track: Any
-    ) -> DecisionResult:
-        """Decide to create a symlink.
-
-        Args:
-            playlist: Playlist object
-            track: Track object
-            playlist_track: PlaylistTrack association object
-
-        Returns:
-            DecisionResult with create symlink action
-        """
-        # Construct symlink path
+    def _build_track_path(self, playlist: Playlist, track: Track) -> Path:
+        """Compute the expected file location for a track within a playlist."""
         playlist_dir = self.playlists_root / playlist.name
-        # Use same filename as primary file
-        if track.file_path:
-            filename = Path(track.file_path).name
+
+        # Construct filename using artist - title format (matches tidal-dl-ng)
+        if track.artist and track.title:
+            base_filename = f"{track.artist} - {track.title}"
+        elif track.title:
+            base_filename = track.title
         else:
-            filename = (
-                f"{track.normalized_name}.mp3"
-                if track.normalized_name
-                else f"{track.title}.mp3"
+            base_filename = f"track-{track.id}"
+
+        filename = f"{base_filename}{self.target_extension}"
+        return playlist_dir / filename
+
+    def _identify_orphan_file_decisions(
+        self,
+        playlist: Playlist,
+        playlist_tracks: List[PlaylistTrack],
+        decisions: SyncDecisions,
+        active_playlist_paths: Dict[str, Set[int]],
+    ) -> List[DecisionResult]:
+        """Find files on disk that no longer belong to a Tidal playlist."""
+        playlist_dir = self.playlists_root / playlist.name
+        if not playlist_dir.exists():
+            return []
+
+        track_map: Dict[int, PlaylistTrack] = {
+            pt.track_id: pt for pt in playlist_tracks if pt.track_id
+        }
+        existing_sources = {
+            str(Path(d.source_path))
+            for d in decisions.decisions
+            if d.action == SyncAction.REMOVE_FILE and d.source_path
+        }
+
+        orphan_decisions: List[DecisionResult] = []
+        for file_path in self._list_audio_files(playlist_dir):
+            if str(file_path) in active_playlist_paths:
+                continue
+            if str(file_path) in existing_sources:
+                continue
+
+            track = self._find_track_for_path(file_path)
+            playlist_track = track_map.get(track.id) if track else None
+
+            if playlist_track is not None:
+                continue
+
+            orphan_decisions.append(
+                DecisionResult(
+                    action=SyncAction.REMOVE_FILE,
+                    track_id=track.id if track else None,
+                    playlist_id=playlist.id,
+                    playlist_track_id=playlist_track.id if playlist_track else None,
+                    source_path=str(file_path),
+                    reason="File exists locally but is no longer in Tidal",
+                    priority=7,
+                    metadata={
+                        "relative_path": self._to_library_relative_path(file_path),
+                        "matched_track": track.id if track else None,
+                    },
+                )
             )
 
-        symlink_path = playlist_dir / filename
+        return orphan_decisions
 
-        return DecisionResult(
-            action=SyncAction.CREATE_SYMLINK,
-            track_id=track.id,
-            playlist_id=playlist.id,
-            playlist_track_id=playlist_track.id,
-            source_path=str(symlink_path),
-            target_path=track.file_path,
-            reason="Track exists but playlist needs symlink",
-            priority=6,
+    def _list_audio_files(self, playlist_dir: Path) -> List[Path]:
+        """Return audio files in a playlist directory."""
+        files: List[Path] = []
+        for item in playlist_dir.iterdir():
+            if item.is_file() and item.suffix.lower() in self.SUPPORTED_EXTENSIONS:
+                files.append(item)
+        return sorted(files)
+
+    def _find_existing_track_file(
+        self, playlist: Playlist, track: Track
+    ) -> Optional[Path]:
+        """Locate an on-disk file for a playlist/track pair."""
+        playlist_dir = self.playlists_root / playlist.name
+        for raw_path in track.file_paths or []:
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = self.music_root / raw_path
+            if (
+                candidate.parent == playlist_dir or playlist_dir in candidate.parents
+            ) and candidate.exists():
+                return candidate
+
+        fallback = self._build_track_path(playlist, track)
+        if fallback.exists():
+            return fallback
+
+        return self._find_matching_playlist_file(playlist_dir, track)
+
+    def _find_matching_playlist_file(
+        self, playlist_dir: Path, track: Track
+    ) -> Optional[Path]:
+        """Locate a file in playlist_dir that matches the given track."""
+        if not playlist_dir.exists():
+            return None
+
+        target_ext = self.target_extension
+        artist_lower = (track.artist or "").lower()
+        title_lower = (track.title or "").lower()
+
+        for existing_file in playlist_dir.glob(f"*{target_ext}"):
+            filename_lower = existing_file.stem.lower()
+            if artist_lower and artist_lower not in filename_lower:
+                continue
+            if title_lower and title_lower not in filename_lower:
+                continue
+            return existing_file
+
+        return None
+
+    def _collect_active_playlist_paths(
+        self, playlist: Playlist, playlist_tracks: List[PlaylistTrack]
+    ) -> Dict[str, Set[int]]:
+        """Map playlist file paths that are still referenced in Tidal."""
+        playlist_dir = self.playlists_root / playlist.name
+        active_paths: Dict[str, Set[int]] = {}
+
+        for pt in playlist_tracks:
+            if not pt.in_tidal or not pt.track:
+                continue
+            for raw_path in pt.track.file_paths or []:
+                candidate = Path(raw_path)
+                if not candidate.is_absolute():
+                    candidate = self.music_root / raw_path
+                if not (
+                    candidate.parent == playlist_dir
+                    or playlist_dir in candidate.parents
+                ):
+                    continue
+                if not candidate.exists():
+                    continue
+                active_paths.setdefault(str(candidate), set()).add(pt.track_id)
+
+            # Fall back to locating the file within the playlist directory if
+            # the track doesn't yet have an explicit file-path entry for this
+            # playlist (common when tracks were re-added in Tidal before a new
+            # filesystem scan).
+            existing_path = self._find_existing_track_file(playlist, pt.track)
+            if existing_path and existing_path.exists():
+                active_paths.setdefault(str(existing_path), set()).add(pt.track_id)
+
+        return active_paths
+
+    def _find_track_for_path(self, file_path: Path) -> Optional[Track]:
+        """Attempt to find the Track associated with a filesystem path."""
+        relative_path = self._to_library_relative_path(file_path)
+        track = self.db_service.get_track_by_path(relative_path)
+        if track:
+            return track
+        return self._match_file_to_track(file_path)
+
+    def _match_file_to_track(self, file_path: Path) -> Optional[Track]:
+        """Match a file to a track by filename heuristics."""
+        filename = file_path.stem
+        artist_title = self._split_filename_artist_title(filename)
+        if artist_title:
+            track = self._match_by_normalized_name(*artist_title)
+            if track:
+                return track
+
+        return self._match_by_similarity(filename)
+
+    def _split_filename_artist_title(self, filename: str) -> Optional[tuple[str, str]]:
+        """Split filenames formatted as 'Artist - Title'."""
+        if " - " not in filename:
+            return None
+        artist, title = filename.split(" - ", 1)
+        artist = artist.strip()
+        title = title.strip()
+        if not artist or not title:
+            return None
+        return artist, title
+
+    def _match_by_normalized_name(self, artist: str, title: str) -> Optional[Track]:
+        """Look up a track by its normalized artist/title combination."""
+        normalized_name = f"{artist.lower()} - {title.lower()}"
+        return self.db_service.find_track_by_normalized_name(normalized_name)
+
+    def _match_by_similarity(self, filename: str) -> Optional[Track]:
+        """Use fuzzy scoring to find the best matching track for a filename."""
+        simplified_filename = self._simplify_name(filename.lower())
+        best_candidate: Optional[Track] = None
+        best_score = 0
+
+        for candidate in self._get_all_tracks_cached():
+            candidate_simple = self._get_simplified_track_name(candidate)
+            if candidate_simple and candidate_simple == simplified_filename:
+                return candidate
+
+            score = self._compute_similarity_score(
+                candidate, simplified_filename, candidate_simple
+            )
+            if score > best_score:
+                best_score = score
+                best_candidate = candidate
+
+        return best_candidate
+
+    def _compute_similarity_score(
+        self,
+        candidate: Track,
+        simplified_filename: str,
+        candidate_simple: Optional[str],
+    ) -> int:
+        """Return a heuristic score for how well a track matches a filename."""
+        title_simple = self._simplify_name(
+            candidate.title.lower() if candidate.title else ""
         )
+        artist_simple = self._simplify_name(
+            candidate.artist.lower() if candidate.artist else ""
+        )
+
+        title_match = bool(title_simple and title_simple in simplified_filename)
+        artist_match = bool(artist_simple and artist_simple in simplified_filename)
+
+        if not title_match and not artist_match:
+            return 0
+
+        score = 0
+        if title_match:
+            score += len(title_simple)
+        if artist_match:
+            score += len(artist_simple)
+        if candidate_simple and candidate_simple in simplified_filename:
+            score += len(candidate_simple)
+        if candidate.duration:
+            score += candidate.duration // 5
+
+        return score
+
+    def _simplify_name(self, value: Optional[str]) -> str:
+        """Normalize a name for approximate comparisons."""
+        if not value:
+            return ""
+        normalized = unicodedata.normalize("NFKD", value)
+        return "".join(ch for ch in normalized if ch.isalnum())
+
+    def _get_simplified_track_name(self, track: Track) -> str:
+        """Return cached simplified version of a track's normalized name."""
+        track_id = track.id
+        if track_id in self._simplified_track_names:
+            return self._simplified_track_names[track_id]
+
+        base_name = track.normalized_name
+        if not base_name:
+            parts: List[str] = []
+            if track.artist:
+                parts.append(track.artist.lower())
+            if track.title:
+                parts.append(track.title.lower())
+            base_name = " - ".join(parts)
+
+        simplified = self._simplify_name(base_name)
+        self._simplified_track_names[track_id] = simplified
+        return simplified
+
+    def _to_library_relative_path(self, file_path: Path) -> str:
+        """Return a path relative to the music library root when possible."""
+        try:
+            return str(file_path.relative_to(self.music_root))
+        except ValueError:
+            return str(file_path)
+
+    def _get_all_tracks_cached(self) -> List[Track]:
+        """Cache the list of tracks to avoid repeated full-table scans."""
+        if self._all_tracks_cache is None:
+            self._all_tracks_cache = self.db_service.get_all_tracks()
+        return self._all_tracks_cache
+
+    def _track_in_active_playlist(self, track_id: int) -> bool:
+        """Check if track still belongs to at least one playlist in Tidal."""
+        if track_id not in self._track_active_cache:
+            active = self.db_service.track_has_active_playlist(track_id)
+            self._track_active_cache[track_id] = active
+        return self._track_active_cache[track_id]
 
     def get_prioritized_decisions(
         self, decisions: SyncDecisions

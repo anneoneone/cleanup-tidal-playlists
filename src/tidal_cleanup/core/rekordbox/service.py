@@ -265,6 +265,41 @@ class RekordboxService:
                 self.db.rollback()
             return None
 
+    def get_or_create_content(self, track_path: Path) -> Optional[Any]:
+        """Retrieve existing Rekordbox content or add it if missing."""
+        if not self.db:
+            logger.error("Database not available")
+            return None
+
+        try:
+            existing_content = self.db.get_content(FolderPath=str(track_path)).first()
+            if existing_content:
+                return existing_content
+
+            metadata = self._extract_track_metadata(track_path)
+            new_content = self.db.add_content(str(track_path), **metadata)
+            if new_content:
+                logger.info("Added new content to Rekordbox: %s", track_path)
+            return new_content
+
+        except Exception as exc:
+            logger.error("Failed to add content for %s: %s", track_path, exc)
+            if self.db:
+                self.db.rollback()
+            return None
+
+    def refresh_playlist(self, playlist: Any) -> Any:
+        """Reload a playlist with its latest songs from the database."""
+        if not self.db:
+            return playlist
+
+        try:
+            refreshed = self.db.get_playlist(ID=playlist.ID).first()
+            return refreshed if refreshed else playlist
+        except Exception as exc:
+            logger.debug("Failed to refresh playlist %s: %s", playlist.Name, exc)
+            return playlist
+
     def _add_track_to_playlist(self, playlist: Any, track_path: Path) -> bool:
         """Add a single track to a playlist.
 

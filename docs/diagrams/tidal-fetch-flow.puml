@@ -1,0 +1,70 @@
+@startuml tidal-fetch-flow
+title Tidal State Fetcher - Playlist Sync Flow
+
+participant TidalStateFetcher as Fetcher
+participant DatabaseService as DB
+participant "Tidal API\nSession" as API
+
+-> Fetcher: fetch_all_playlists()
+activate Fetcher
+
+Fetcher -> DB: get_last_sync_timestamp("tidal_sync")
+DB --> Fetcher: last_sync_time
+
+Fetcher -> API: session.user.playlists()
+activate API
+API --> Fetcher: tidal_playlists[]
+deactivate API
+
+loop For each tidal_playlist
+    Fetcher -> Fetcher: _convert_tidal_playlist()
+
+    Fetcher -> DB: get_playlist_by_tidal_id(tidal_id)
+    DB --> Fetcher: existing_playlist?
+
+    alt Playlist exists
+        Fetcher -> Fetcher: Check if updated since last_sync
+        alt Playlist changed
+            Fetcher -> DB: update_playlist(data)
+            note right: Mark NEEDS_UPDATE
+        else No changes
+            Fetcher -> DB: update last_seen timestamp only
+            note right: Skip track fetch\n(optimization)
+        end
+    else New playlist
+        Fetcher -> DB: create_playlist(data)
+        note right: Mark NEEDS_DOWNLOAD
+    end
+
+    alt should_fetch_tracks
+        Fetcher -> API: tidal_playlist.tracks()
+        activate API
+        API --> Fetcher: tidal_tracks[]
+        deactivate API
+
+        loop For each tidal_track
+            Fetcher -> Fetcher: _convert_tidal_track()
+
+            Fetcher -> DB: get_track_by_tidal_id(tidal_id)
+            DB --> Fetcher: existing_track?
+
+            alt Track exists
+                Fetcher -> DB: update_track(data)
+            else New track
+                Fetcher -> DB: create_track(data)
+                note right: download_status=\nNOT_DOWNLOADED
+            end
+
+            Fetcher -> DB: add_track_to_playlist(\n  playlist_id, track_id,\n  position, in_tidal=True)
+            note right: Sets in_tidal flag\nand position
+        end
+    end
+end
+
+Fetcher -> DB: create_snapshot("tidal_sync", stats)
+DB --> Fetcher: snapshot
+
+<-- Fetcher: updated_playlists[]
+deactivate Fetcher
+
+@enduml

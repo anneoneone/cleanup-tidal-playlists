@@ -1,0 +1,178 @@
+@startuml db-sync-comprehensive
+' Code references:
+' CLI (db sync): src/tidal_cleanup/cli/commands/database.py#L61-L157
+' Orchestrator: src/tidal_cleanup/core/sync/orchestrator.py#L76-L141, L157-L219, L224-L308, L343-L358
+' TidalStateFetcher: src/tidal_cleanup/core/tidal/state_fetcher.py#L101-L171, L172-L262, L400-L470
+' FilesystemScanner (usage): src/tidal_cleanup/cli/commands/database.py#L177-L246
+' SyncDecisionEngine: src/tidal_cleanup/core/sync/decision_engine.py#L100-L187, L339-L381, L409-L520
+' DownloadOrchestrator (wired): src/tidal_cleanup/core/sync/orchestrator.py#L116-L141, L372-L383
+title tidal-cleanup db sync — Comprehensive Flow
+
+actor User
+participant "CLI\n(db sync)" as CLI
+participant SyncOrchestrator as Orch
+participant DatabaseService as DB
+participant TidalStateFetcher as Fetcher
+participant FilesystemScanner as Scanner
+participant DeduplicationLogic as Dedup
+participant SyncDecisionEngine as Engine
+participant DownloadOrchestrator as Exec
+participant "Tidal API" as TidalAPI
+participant "tidal-dl-ng" as TidalDL
+participant "File System" as FS
+
+User -> CLI: tidal-cleanup db sync
+activate CLI
+
+CLI -> CLI: Parse options, init Config
+CLI -> DB: DatabaseService(db_path)
+CLI -> TidalAPI: Connect
+CLI -> TidalDL: Connect
+CLI -> Orch: new SyncOrchestrator(config, db_service,\n download_service, tidal_session)
+activate Orch
+
+== Stage 1: Fetch from Tidal ==
+Orch -> Orch: _execute_tidal_fetch_step()
+Orch -> Fetcher: fetch_all_playlists()
+activate Fetcher
+
+Fetcher -> DB: get_last_sync_timestamp("tidal_sync")
+DB --> Fetcher: last_sync_time
+
+Fetcher -> TidalAPI: session.user.playlists()
+TidalAPI --> Fetcher: tidal_playlists[]
+
+loop For each tidal_playlist
+    Fetcher -> Fetcher: _convert_tidal_playlist()
+    Fetcher -> DB: get_playlist_by_tidal_id(tidal_id)
+    DB --> Fetcher: existing?
+    alt Exists
+        Fetcher -> Fetcher: _update_playlist(existing, data)
+    else New
+        Fetcher -> DB: create_playlist(data)
+    end
+
+    alt Should fetch tracks
+        Fetcher -> TidalAPI: tidal_playlist.tracks()
+        TidalAPI --> Fetcher: tidal_tracks[]
+        loop For each tidal_track
+            Fetcher -> Fetcher: _convert_tidal_track()
+            Fetcher -> DB: get_track_by_tidal_id(tidal_id)
+            DB --> Fetcher: db_track?
+            alt Exists
+                Fetcher -> DB: update_track(data)
+            else New
+                Fetcher -> DB: create_track(data)
+            end
+            Fetcher -> DB: add_track_to_playlist(playlist_id, track_id,\n position, in_tidal=True)
+        end
+    end
+end
+
+Fetcher -> DB: create_snapshot("tidal_sync", stats)
+Fetcher --> Orch: FetchStatistics
+deactivate Fetcher
+
+== Stage 2: Scan Filesystem ==
+Orch -> Orch: _execute_filesystem_scan_step()
+Orch -> Scanner: scan_all_playlists()
+activate Scanner
+Scanner -> FS: List Playlists/ directories and files
+loop For each playlist_dir
+    Scanner -> DB: get_playlist_by_name(name)
+    DB --> Scanner: playlist
+    Scanner -> FS: List audio files (*.mp3, *.flac, ...)
+    loop For each file
+        Scanner -> Scanner: Parse filename → artist/title
+        Scanner -> DB: find_track_by_normalized_name("artist - title")
+        DB --> Scanner: track?
+        alt Found
+            Scanner -> DB: add_file_path_to_track(track_id, rel_path)
+        else Not found
+            Scanner -> DB: get_all_tracks()
+            Scanner -> Scanner: Fuzzy match best candidate
+            alt Match found
+                Scanner -> DB: add_file_path_to_track(track_id, rel_path)
+            else Orphan file
+                Scanner -> Scanner: Record orphan
+            end
+        end
+    end
+end
+Scanner --> Orch: ScanStatistics
+deactivate Scanner
+
+== Stage 3: Analyze Deduplication ==
+Orch -> Orch: _execute_deduplication_step()
+Orch -> Dedup: analyze_all_tracks()
+activate Dedup
+Dedup -> DB: Inspect track distributions across playlists
+Dedup --> Orch: DeduplicationResult
+deactivate Dedup
+
+== Stage 4: Generate Decisions ==
+Orch -> Orch: _execute_decision_generation_step()
+Orch -> Engine: analyze_all_playlists()
+activate Engine
+
+Engine -> DB: get_all_playlists()
+DB --> Engine: playlists[]
+loop For each playlist
+    Engine -> DB: get_playlist_track_associations(playlist_id)
+    DB --> Engine: playlist_tracks[]
+    Engine -> Engine: _collect_active_playlist_paths()
+
+    loop For each playlist_track
+        Engine -> Engine: _find_existing_track_file(playlist, track)
+        alt Track not in Tidal && file exists
+            Engine -> Engine: Decision: REMOVE_FILE\n(reason: removed from Tidal, priority=8)
+        else File exists at target
+            Engine -> Engine: Decision: NO_ACTION
+        else File missing or needed in playlist
+            Engine -> Engine: Decision: DOWNLOAD_TRACK\n(target: Playlists/Artist - Title.ext, priority=10)
+        end
+    end
+
+    Engine -> Engine: _identify_orphan_file_decisions()
+    note right: Add REMOVE_FILE decisions for files\nnot referenced by any playlist_tracks
+end
+Engine --> Orch: SyncDecisions
+deactivate Engine
+
+== Stage 5: Execute Decisions ==
+Orch -> Orch: _execute_decision_execution_step()
+Orch -> Exec: execute_decisions(decisions, target_format)
+activate Exec
+
+loop For each decision
+    alt DOWNLOAD_TRACK
+        Exec -> FS: Ensure playlist directory exists
+        Exec -> DB: get_track_by_id(track_id)
+        DB --> Exec: track
+        Exec -> TidalDL: Download tidal_id → target_path
+        TidalDL --> Exec: file downloaded
+        Exec -> DB: add_file_path_to_track(track_id, rel_path)
+        Exec -> DB: update_track(download_status=DOWNLOADED)
+    else REMOVE_FILE
+        Exec -> DB: get_track_by_id(track_id)
+        DB --> Exec: track
+        Exec -> Exec: Verify file not reused by active tracks
+        Exec -> FS: Delete file
+        Exec -> DB: remove_file_path_from_track(track_id, rel_path)
+    else UPDATE_METADATA
+        Exec -> DB: update_track(track_id, metadata)
+    end
+end
+Exec --> Orch: ExecutionResult
+deactivate Exec
+
+== Summary ==
+Orch -> Orch: get_summary()
+Orch --> CLI: Summary (tidal, filesystem, dedup, decisions, execution)
+CLI -> CLI: display_db_sync_result(summary)
+CLI --> User: ✓ Sync complete
+
+deactivate Orch
+deactivate CLI
+
+@enduml

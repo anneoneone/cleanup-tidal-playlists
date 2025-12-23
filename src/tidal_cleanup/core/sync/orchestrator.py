@@ -9,12 +9,15 @@ This module provides the high-level SyncOrchestrator that coordinates:
 """
 
 import logging
+import shutil
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
+from enum import Enum
 from pathlib import Path
 from typing import Any, List
 
 from ...config import Config
+from ...database.models import PlaylistSource, PlaylistSyncStatus, PlaylistTrack
 from ...database.service import DatabaseService
 from ..filesystem.scanner import FilesystemScanner, ScanStatistics
 from ..tidal.download_service import TidalDownloadService
@@ -24,6 +27,21 @@ from .deduplication import DeduplicationLogic, DeduplicationResult
 from .download_orchestrator import DownloadOrchestrator, ExecutionResult
 
 logger = logging.getLogger(__name__)
+
+
+class SyncStage(str, Enum):
+    """Ordered sync stages used for staging runs."""
+
+    FETCH = "fetch"
+    SCAN = "scan"
+    DEDUP = "dedup"
+    DECISIONS = "decisions"
+    EXECUTION = "execution"
+
+    @classmethod
+    def ordered(cls) -> List["SyncStage"]:
+        """Return stages in execution order."""
+        return [cls.FETCH, cls.SCAN, cls.DEDUP, cls.DECISIONS, cls.EXECUTION]
 
 
 @dataclass
@@ -36,6 +54,8 @@ class SyncResult:
     decisions: SyncDecisions | None = None
     execution: ExecutionResult | None = None
     errors: List[str] = dataclass_field(default_factory=list)
+    stop_requested: SyncStage | None = None
+    stopped_after: SyncStage | None = None
 
     def add_error(self, error: str) -> None:
         """Add an error message."""
@@ -48,6 +68,14 @@ class SyncResult:
             "success": len(self.errors) == 0,
             "errors": len(self.errors),
         }
+
+        if self.stop_requested or self.stopped_after:
+            summary["stage"] = {
+                "requested": (
+                    self.stop_requested.value if self.stop_requested else None
+                ),
+                "completed": (self.stopped_after.value if self.stopped_after else None),
+            }
 
         if self.tidal_fetch:
             summary["tidal"] = {
@@ -64,9 +92,9 @@ class SyncResult:
 
         if self.deduplication:
             summary["deduplication"] = {
-                "tracks_analyzed": len(self.deduplication.decisions),
-                "symlinks_needed": sum(
-                    len(d.symlink_playlist_ids) for d in self.deduplication.decisions
+                "tracks_analyzed": len(self.deduplication.distributions),
+                "tracks_in_multiple_playlists": (
+                    self.deduplication.tracks_in_multiple_playlists
                 ),
             }
 
@@ -74,13 +102,9 @@ class SyncResult:
             downloads = [
                 d for d in self.decisions.decisions if d.action.name == "DOWNLOAD_TRACK"
             ]
-            symlinks = [
-                d for d in self.decisions.decisions if "SYMLINK" in d.action.name
-            ]
             summary["decisions"] = {
                 "total": len(self.decisions.decisions),
                 "downloads": len(downloads),
-                "symlinks": len(symlinks),
             }
 
         if self.execution:
@@ -104,7 +128,8 @@ class SyncOrchestrator:
         self,
         config: Config,
         db_service: DatabaseService,
-        download_service: TidalDownloadService | None = None,
+        tidal_download_service: TidalDownloadService | None = None,
+        tidal_session: Any | None = None,
         dry_run: bool = False,
     ):
         """Initialize sync orchestrator.
@@ -112,31 +137,34 @@ class SyncOrchestrator:
         Args:
             config: Application configuration
             db_service: Database service instance
-            download_service: Optional Tidal download service
+            tidal_download_service: Optional Tidal download service
+            tidal_session: Optional authenticated Tidal session
             dry_run: If True, don't make actual changes
         """
         self.config = config
         self.db_service = db_service
-        self.download_service = download_service
+        self.tidal_download_service = tidal_download_service
+        self.tidal_session = tidal_session
         self.dry_run = dry_run
 
         # Initialize components
-        self.tidal_fetcher = TidalStateFetcher(db_service)
-        playlists_root = Path(config.m4a_directory) / "Playlists"
+        self.tidal_fetcher = TidalStateFetcher(db_service, tidal_session=tidal_session)
+        playlists_root = Path(config.mp3_directory) / "Playlists"
         self.filesystem_scanner = FilesystemScanner(
             db_service, playlists_root=playlists_root
         )
-        self.dedup_logic = DeduplicationLogic(
-            db_service, strategy="first_alphabetically"
-        )
+        self.dedup_logic = DeduplicationLogic(db_service)
         self.decision_engine = SyncDecisionEngine(
-            db_service, music_root=config.m4a_directory
+            db_service,
+            music_root=config.mp3_directory,
+            target_format=config.target_audio_format,
+            dedup_logic=self.dedup_logic,
         )
         self.download_orchestrator = DownloadOrchestrator(
             db_service=db_service,
-            music_root=config.m4a_directory,
+            music_root=config.mp3_directory,
             deduplication_logic=self.dedup_logic,
-            download_service=download_service,
+            tidal_download_service=tidal_download_service,
             dry_run=dry_run,
         )
 
@@ -145,6 +173,7 @@ class SyncOrchestrator:
         fetch_tidal: bool = True,
         scan_filesystem: bool = True,
         analyze_deduplication: bool = True,
+        stop_after_stage: SyncStage | None = None,
     ) -> SyncResult:
         """Execute complete sync operation.
 
@@ -152,30 +181,37 @@ class SyncOrchestrator:
             fetch_tidal: Whether to fetch state from Tidal
             scan_filesystem: Whether to scan filesystem
             analyze_deduplication: Whether to analyze deduplication needs
+            stop_after_stage: Stage after which to stop execution
+                (defaults to execution)
 
         Returns:
             SyncResult with details of sync operation
         """
         result = SyncResult()
+        requested_stage = stop_after_stage or SyncStage.EXECUTION
+        result.stop_requested = requested_stage
 
         try:
-            # Execute sync steps
-            if fetch_tidal:
-                self._execute_tidal_fetch_step(result)
+            for stage in SyncStage.ordered():
+                continue_run = self._execute_stage(
+                    stage,
+                    result,
+                    fetch_tidal=fetch_tidal,
+                    scan_filesystem=scan_filesystem,
+                    analyze_deduplication=analyze_deduplication,
+                )
 
-            if scan_filesystem:
-                self._execute_filesystem_scan_step(result)
+                if not continue_run:
+                    result.stopped_after = stage
+                    break
 
-            if analyze_deduplication:
-                self._execute_deduplication_step(result)
+                if requested_stage == stage:
+                    result.stopped_after = stage
+                    break
 
-            # Generate and execute decisions
-            if not self._execute_decision_generation_step(result):
-                return result
+            if result.stopped_after is None:
+                result.stopped_after = SyncStage.EXECUTION
 
-            self._execute_decision_execution_step(result)
-
-            # Log summary
             self._log_sync_summary(result)
 
             return result
@@ -197,6 +233,8 @@ class SyncOrchestrator:
         self._collect_errors(
             result, result.filesystem_scan.errors, "Filesystem scan error"
         )
+        # After scanning, cleanup playlists that were removed from Tidal
+        self._cleanup_removed_tidal_playlists()
 
     def _execute_deduplication_step(self, result: SyncResult) -> None:
         """Execute step 3: Analyze deduplication."""
@@ -230,6 +268,60 @@ class SyncOrchestrator:
         result.execution = self._execute_decisions(decisions)
         self._collect_errors(result, result.execution.errors, "Execution error")
 
+    def _execute_stage(
+        self,
+        stage: SyncStage,
+        result: SyncResult,
+        *,
+        fetch_tidal: bool,
+        scan_filesystem: bool,
+        analyze_deduplication: bool,
+    ) -> bool:
+        """Execute a single stage.
+
+        Returns False to halt further processing.
+        """
+        if stage == SyncStage.FETCH:
+            if fetch_tidal:
+                self._execute_tidal_fetch_step(result)
+            else:
+                logger.info(
+                    "Step 1/5: Fetching state from Tidal... " "[skipped via --no-fetch]"
+                )
+            return True
+
+        if stage == SyncStage.SCAN:
+            if scan_filesystem:
+                self._execute_filesystem_scan_step(result)
+            else:
+                logger.info(
+                    "Step 2/5: Scanning local filesystem... " "[skipped via --no-scan]"
+                )
+            return True
+
+        if stage == SyncStage.DEDUP:
+            if analyze_deduplication:
+                self._execute_deduplication_step(result)
+            else:
+                logger.info(
+                    "Step 3/5: Analyzing deduplication needs... "
+                    "[skipped via --no-dedup]"
+                )
+            return True
+
+        if stage == SyncStage.DECISIONS:
+            return self._execute_decision_generation_step(result)
+
+        # All stages handled above
+        if result.decisions:
+            self._execute_decision_execution_step(result)
+        else:
+            logger.info(
+                "Step 5/5: Executing sync decisions... "
+                "[skipped - no decisions available]"
+            )
+        return True
+
     def _collect_errors(
         self, result: SyncResult, errors: List[str], prefix: str
     ) -> None:
@@ -237,6 +329,78 @@ class SyncOrchestrator:
         if errors:
             for error in errors:
                 result.add_error(f"{prefix}: {error}")
+
+    def _cleanup_removed_tidal_playlists(self) -> None:
+        """Delete local files and remove playlists no longer in Tidal.
+
+        Conditions:
+        - Playlist sourced from Tidal
+        - Marked as needs_removal
+        - Has a local folder path
+        """
+        try:
+            all_playlists = self.db_service.get_all_playlists()
+            candidates = [p for p in all_playlists if self._should_cleanup_playlist(p)]
+            for p in candidates:
+                self._delete_playlist_resources(p)
+        except Exception:
+            logger.exception("Cleanup of removed Tidal playlists failed")
+
+    def _should_cleanup_playlist(self, p: Any) -> bool:
+        """Return True if playlist meets cleanup criteria.
+
+        Only cleanup playlists that:
+        - Are sourced from Tidal (not local-only)
+        - Are marked for removal
+        - Have a local folder path
+        - Don't have local files (checked via in_local flag)
+        """
+        src = getattr(p, "source", PlaylistSource.TIDAL.value)
+        if src != PlaylistSource.TIDAL.value:
+            return False
+        if p.sync_status != PlaylistSyncStatus.NEEDS_REMOVAL.value:
+            return False
+        if not p.local_folder_path:
+            return False
+
+        # Don't delete playlists that have local files
+        # Check if any playlist_tracks have in_local=True
+        with self.db_service.get_session() as session:
+            has_local_files = session.query(
+                session.query(PlaylistTrack)
+                .filter(PlaylistTrack.playlist_id == p.id)
+                .filter(PlaylistTrack.in_local.is_(True))
+                .exists()
+            ).scalar()
+
+        if has_local_files:
+            logger.info("Skipping cleanup of playlist '%s' - has local files", p.name)
+            return False
+
+        return True
+
+    def _delete_playlist_resources(self, p: Any) -> None:
+        """Delete local folder and remove playlist from database."""
+        folder_path = Path(self.config.mp3_directory) / p.local_folder_path
+        if folder_path.exists() and folder_path.is_dir():
+            logger.info(
+                "Deleting local folder for removed Tidal playlist: %s",
+                folder_path,
+            )
+            try:
+                shutil.rmtree(folder_path)
+            except Exception:
+                logger.exception("Failed to delete folder for playlist: %s", p.name)
+                return
+
+        try:
+            self.db_service.delete_playlist(p.id)
+            logger.info(
+                "Removed playlist from database (deleted in Tidal): %s",
+                p.name,
+            )
+        except Exception:
+            logger.exception("Failed to delete playlist from database: %s", p.name)
 
     def _log_sync_summary(self, result: SyncResult) -> None:
         """Log the sync operation summary."""
@@ -376,7 +540,9 @@ class SyncOrchestrator:
 
     def _execute_decisions(self, decisions: SyncDecisions) -> ExecutionResult:
         """Execute sync decisions."""
-        return self.download_orchestrator.execute_decisions(decisions)
+        return self.download_orchestrator.execute_decisions(
+            decisions, target_format=self.config.target_audio_format
+        )
 
     def ensure_directories(self) -> int:
         """Ensure all playlist directories exist.

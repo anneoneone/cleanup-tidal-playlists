@@ -8,7 +8,6 @@ This module handles edge cases and conflicts that can arise during sync operatio
 """
 
 import logging
-import os
 import time
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
@@ -29,13 +28,11 @@ class ConflictType(str, Enum):
     FILE_EXISTS = "file_exists"  # Target file already exists
     FILE_MISSING = "file_missing"  # Expected file is missing
     FILE_MODIFIED = "file_modified"  # File was modified during sync
-    SYMLINK_BROKEN = "symlink_broken"  # Symlink target doesn't exist
     PERMISSION_DENIED = "permission_denied"  # Insufficient permissions
 
     # Decision conflicts
     DUPLICATE_DECISION = "duplicate_decision"  # Multiple decisions for same target
     CONFLICTING_ACTIONS = "conflicting_actions"  # Conflicting actions for same file
-    CIRCULAR_DEPENDENCY = "circular_dependency"  # Circular symlink dependencies
 
     # Race conditions
     CONCURRENT_MODIFICATION = "concurrent_modification"  # File changed during sync
@@ -135,30 +132,11 @@ class ConflictResolver:
         """
         # Check if target exists when it shouldn't
         if action == SyncAction.DOWNLOAD_TRACK and target_path.exists():
-            if target_path.is_symlink():
-                return Conflict(
-                    conflict_type=ConflictType.FILE_EXISTS,
-                    description="Symlink already exists at target location",
-                    file_path=target_path,
-                )
             return Conflict(
                 conflict_type=ConflictType.FILE_EXISTS,
                 description="File already exists at target location",
                 file_path=target_path,
             )
-
-        # Check if source file is missing for symlink creation
-        if (
-            action in (SyncAction.CREATE_SYMLINK, SyncAction.UPDATE_SYMLINK)
-            and target_path.is_symlink()
-        ):
-            link_target = target_path.resolve()
-            if not link_target.exists():
-                return Conflict(
-                    conflict_type=ConflictType.SYMLINK_BROKEN,
-                    description=f"Symlink target does not exist: {link_target}",
-                    file_path=target_path,
-                )
 
         # Check permissions
         if target_path.exists():
@@ -196,10 +174,6 @@ class ConflictResolver:
         elif conflict.conflict_type == ConflictType.FILE_MISSING:
             # Missing file - try to download again
             return ConflictResolution.RETRY
-
-        elif conflict.conflict_type == ConflictType.SYMLINK_BROKEN:
-            # Broken symlink - remove and recreate
-            return ConflictResolution.OVERWRITE
 
         elif conflict.conflict_type == ConflictType.PERMISSION_DENIED:
             # Permission issues - skip
@@ -291,12 +265,14 @@ class ConflictResolver:
                     logger.info("Resolved duplicate decision: kept first decision")
 
             elif conflict.conflict_type == ConflictType.CONFLICTING_ACTIONS:
-                # Prioritize actions: DOWNLOAD > UPDATE_SYMLINK > CREATE_SYMLINK
+                # ! REMOVE MAGIC NUMBERS!
+                # Prioritize destructive operations last to reduce risk
                 priority = {
-                    SyncAction.DOWNLOAD_TRACK: 3,
-                    SyncAction.UPDATE_SYMLINK: 2,
-                    SyncAction.CREATE_SYMLINK: 1,
-                    SyncAction.REMOVE_SYMLINK: 0,
+                    SyncAction.DOWNLOAD_TRACK: 4,
+                    SyncAction.UPDATE_METADATA: 3,
+                    SyncAction.VERIFY_FILE: 2,
+                    SyncAction.REMOVE_FILE: 1,
+                    SyncAction.NO_ACTION: 0,
                 }
 
                 highest_priority = max(
@@ -320,6 +296,8 @@ class ConflictResolver:
         Returns:
             Path to backup file, or None if backup failed
         """
+        import shutil
+
         if not file_path.exists():
             return None
 
@@ -327,14 +305,7 @@ class ConflictResolver:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             backup_path = file_path.parent / f"{file_path.name}.backup_{timestamp}"
 
-            # For symlinks, copy the link itself, not the target
-            if file_path.is_symlink():
-                link_target = os.readlink(file_path)
-                os.symlink(link_target, backup_path)
-            else:
-                import shutil
-
-                shutil.copy2(file_path, backup_path)
+            shutil.copy2(file_path, backup_path)
 
             logger.info("Created backup: %s", backup_path)
             return backup_path

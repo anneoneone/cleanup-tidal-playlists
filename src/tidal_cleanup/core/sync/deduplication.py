@@ -1,15 +1,14 @@
-"""Deduplication logic for determining primary file locations.
+"""Track distribution analysis for understanding playlist overlap.
 
-This module implements logic to decide which playlist should contain the primary
-(actual) file for each track, while other playlists get symlinks. This avoids
-downloading the same track multiple times.
+This module implements logic to analyze which playlists contain which tracks. Since we
+now download each track to every playlist it appears in, this is mainly for reporting
+and statistics.
 """
 
 import logging
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from ...database.service import DatabaseService
 
@@ -17,75 +16,66 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class PrimaryFileDecision:
-    """Decision about which playlist should have the primary file for a track."""
+class TrackDistribution:
+    """Information about which playlists contain a track."""
 
     track_id: int
-    primary_playlist_id: int
-    primary_playlist_name: str
-    symlink_playlist_ids: List[int]
-    reason: str
+    playlist_ids: List[int]
+    playlist_names: List[str]
+    num_playlists: int
 
 
 @dataclass
 class DeduplicationResult:
-    """Result of deduplication analysis."""
+    """Result of track distribution analysis."""
 
-    decisions: List[PrimaryFileDecision] = dataclass_field(default_factory=list)
+    distributions: List[TrackDistribution] = dataclass_field(default_factory=list)
     tracks_analyzed: int = 0
-    tracks_with_primary: int = 0
-    tracks_needing_primary: int = 0
-    symlinks_needed: int = 0
+    tracks_in_multiple_playlists: int = 0
 
-    def add_decision(self, decision: PrimaryFileDecision) -> None:
-        """Add a decision and update statistics."""
-        self.decisions.append(decision)
+    def add_distribution(self, distribution: TrackDistribution) -> None:
+        """Add a distribution and update statistics."""
+        self.distributions.append(distribution)
         self.tracks_analyzed += 1
-        self.symlinks_needed += len(decision.symlink_playlist_ids)
+        if distribution.num_playlists > 1:
+            self.tracks_in_multiple_playlists += 1
 
     def get_summary(self) -> Dict[str, int]:
         """Get summary statistics."""
         return {
             "tracks_analyzed": self.tracks_analyzed,
-            "tracks_with_primary": self.tracks_with_primary,
-            "tracks_needing_primary": self.tracks_needing_primary,
-            "symlinks_needed": self.symlinks_needed,
+            "tracks_in_multiple_playlists": self.tracks_in_multiple_playlists,
         }
+
+    @property
+    def decisions(self) -> List[TrackDistribution]:
+        """Backward-compatible alias for legacy result attribute."""
+        return self.distributions
 
 
 class DeduplicationLogic:
-    """Logic for determining which playlist should have the primary file.
+    """Logic for analyzing track distribution across playlists.
 
-    When a track appears in multiple playlists, we need to decide which playlist gets
-    the actual audio file and which get symlinks. This class implements various
-    strategies for making that decision.
+    Since we now download tracks to each playlist, this class is mainly for reporting
+    which tracks appear in multiple playlists.
     """
 
-    def __init__(
-        self,
-        db_service: DatabaseService,
-        strategy: str = "first_alphabetically",
-    ):
+    def __init__(self, db_service: DatabaseService):
         """Initialize deduplication logic.
 
         Args:
             db_service: Database service instance
-            strategy: Strategy for choosing primary playlist
-                - 'first_alphabetically': Choose first playlist alphabetically
-                - 'largest_playlist': Choose playlist with most tracks
-                - 'prefer_existing': Prefer playlist that already has the file
         """
         self.db_service = db_service
-        self.strategy = strategy
 
-    def analyze_track_distribution(self, track_id: int) -> PrimaryFileDecision:
-        """Analyze which playlists contain a track and decide primary location.
+    def analyze_track_distribution(self, track_id: int) -> TrackDistribution:
+        """Analyze which playlists contain a track.
 
         Args:
             track_id: Track database ID
 
         Returns:
-            PrimaryFileDecision with primary playlist and symlink locations
+            TrackDistribution with playlist information
         """
         # Get all PlaylistTrack associations for this track
         from ...database.models import PlaylistTrack
@@ -101,44 +91,26 @@ class DeduplicationLogic:
             raise ValueError(f"Track {track_id} not found in any playlists")
 
         # Get playlist information for each
-        playlists = []
+        playlist_ids = []
+        playlist_names = []
         for pt in playlist_tracks:
             playlist = self.db_service.get_playlist_by_id(pt.playlist_id)
             if playlist:
-                playlists.append(
-                    {
-                        "id": playlist.id,
-                        "name": playlist.name,
-                        "playlist_track": pt,
-                        "num_tracks": playlist.num_tracks or 0,
-                    }
-                )
+                playlist_ids.append(playlist.id)
+                playlist_names.append(playlist.name)
 
-        if not playlists:
-            raise ValueError(f"Could not find playlists for track {track_id}")
-
-        # Apply strategy to choose primary
-        primary = self._choose_primary_playlist(playlists, track_id)
-
-        # All other playlists get symlinks
-        symlink_ids: List[int] = []
-        for p in playlists:
-            if p["id"] != primary["id"]:
-                symlink_ids.append(p["id"])  # type: ignore[arg-type]
-
-        return PrimaryFileDecision(
+        return TrackDistribution(
             track_id=track_id,
-            primary_playlist_id=primary["id"],
-            primary_playlist_name=primary["name"],
-            symlink_playlist_ids=symlink_ids,
-            reason=f"Selected by strategy: {self.strategy}",
+            playlist_ids=playlist_ids,
+            playlist_names=playlist_names,
+            num_playlists=len(playlist_ids),
         )
 
     def analyze_all_tracks(self) -> DeduplicationResult:
-        """Analyze all tracks and determine primary file locations.
+        """Analyze all tracks and determine which are in multiple playlists.
 
         Returns:
-            DeduplicationResult with all decisions
+            DeduplicationResult with all distributions
         """
         result = DeduplicationResult()
 
@@ -162,22 +134,9 @@ class DeduplicationLogic:
                 if not playlist_tracks:
                     continue
 
-                # Skip tracks in only one playlist (no deduplication needed)
-                if len(playlist_tracks) == 1:
-                    result.tracks_analyzed += 1
-                    result.tracks_with_primary += 1
-                    continue
-
                 # Analyze this track
-                decision = self.analyze_track_distribution(track.id)
-                result.add_decision(decision)
-
-                # Check if track already has primary
-                has_primary = any(pt.is_primary for pt in playlist_tracks)
-                if has_primary:
-                    result.tracks_with_primary += 1
-                else:
-                    result.tracks_needing_primary += 1
+                distribution = self.analyze_track_distribution(track.id)
+                result.add_distribution(distribution)
 
             except Exception as e:
                 logger.error("Error analyzing track %s: %s", track.id, e)
@@ -185,103 +144,17 @@ class DeduplicationLogic:
 
         return result
 
-    def _choose_primary_playlist(
-        self, playlists: List[Dict[str, Any]], track_id: int
-    ) -> Dict[str, Any]:
-        """Choose which playlist should have the primary file.
-
-        Args:
-            playlists: List of playlist info dicts
-            track_id: Track ID being analyzed
-
-        Returns:
-            Playlist dict that should have the primary file
-        """
-        if self.strategy == "first_alphabetically":
-            return self._strategy_first_alphabetically(playlists)
-        elif self.strategy == "largest_playlist":
-            return self._strategy_largest_playlist(playlists)
-        elif self.strategy == "prefer_existing":
-            return self._strategy_prefer_existing(playlists, track_id)
-        else:
-            logger.warning(
-                f"Unknown strategy '{self.strategy}', using first_alphabetically"
-            )
-            return self._strategy_first_alphabetically(playlists)
-
-    def _strategy_first_alphabetically(
-        self, playlists: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Choose first playlist alphabetically by name."""
-        return sorted(playlists, key=lambda p: p["name"].lower())[0]
-
-    def _strategy_largest_playlist(
-        self, playlists: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Choose playlist with most tracks."""
-        return max(playlists, key=lambda p: p["num_tracks"])
-
-    def _strategy_prefer_existing(
-        self, playlists: List[Dict[str, Any]], track_id: int
-    ) -> Dict[str, Any]:
-        """Prefer playlist that already has is_primary=True, else alphabetically."""
-        # Check if any playlist already marked as primary
-        for playlist in playlists:
-            if playlist["playlist_track"].is_primary:
-                return playlist
-
-        # If none marked as primary, check if file exists in any
-        track = self.db_service.get_track_by_id(track_id)
-        if track and track.file_path and Path(track.file_path).exists():
-            # File exists - try to find which playlist directory it's in
-            file_path = Path(track.file_path)
-            for playlist in playlists:
-                # Check if file path contains playlist name
-                if playlist["name"] in str(file_path):
-                    return playlist
-
-        # Fall back to alphabetical
-        return self._strategy_first_alphabetically(playlists)
-
-    def get_primary_playlist_for_track(self, track_id: int) -> int | None:
-        """Get the playlist ID that should have the primary file for a track.
+    def get_playlists_for_track(self, track_id: int) -> List[int]:
+        """Get playlist IDs that contain a track.
 
         Args:
             track_id: Track database ID
 
         Returns:
-            Playlist ID that should have primary file, or None if track not found
+            List of playlist IDs
         """
         try:
-            decision = self.analyze_track_distribution(track_id)
-            return decision.primary_playlist_id
-        except ValueError:
-            return None
-
-    def should_be_primary(self, track_id: int, playlist_id: int) -> bool:
-        """Check if a playlist should have the primary file for a track.
-
-        Args:
-            track_id: Track database ID
-            playlist_id: Playlist database ID
-
-        Returns:
-            True if this playlist should have the primary file
-        """
-        primary_playlist_id = self.get_primary_playlist_for_track(track_id)
-        return primary_playlist_id == playlist_id
-
-    def get_symlink_playlists_for_track(self, track_id: int) -> List[int]:
-        """Get playlist IDs that should have symlinks for a track.
-
-        Args:
-            track_id: Track database ID
-
-        Returns:
-            List of playlist IDs that should have symlinks
-        """
-        try:
-            decision = self.analyze_track_distribution(track_id)
-            return decision.symlink_playlist_ids
+            distribution = self.analyze_track_distribution(track_id)
+            return distribution.playlist_ids
         except ValueError:
             return []

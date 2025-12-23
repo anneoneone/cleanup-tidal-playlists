@@ -305,7 +305,7 @@ class TestHelperMethods:
             )
         )
 
-        changes = tidal_snapshot_service._get_playlist_changes(sync_state)
+        changes = tidal_snapshot_service._filter_playlist_changes(sync_state)
         assert len(changes) == 1
         assert changes[0].change_type == ChangeType.PLAYLIST_ADDED
 
@@ -327,7 +327,7 @@ class TestHelperMethods:
             )
         )
 
-        changes = tidal_snapshot_service._get_track_changes(sync_state)
+        changes = tidal_snapshot_service._filter_track_changes(sync_state)
         assert len(changes) == 1
         assert changes[0].change_type == ChangeType.TRACK_ADDED_TO_PLAYLIST
 
@@ -434,7 +434,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Apply change
-        tidal_snapshot_service._apply_playlist_removed(change)
+        tidal_snapshot_service._handle_playlist_removed(change)
 
         # Verify tracks marked as not in Tidal
         playlist_tracks = temp_db.get_playlist_track_associations(db_playlist.id)
@@ -456,7 +456,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Should log warning and return without error
-        tidal_snapshot_service._apply_playlist_removed(change)
+        tidal_snapshot_service._handle_playlist_removed(change)
 
     def test_apply_playlist_renamed(
         self, tidal_snapshot_service, mock_tidal_service, temp_db
@@ -483,7 +483,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Apply change
-        tidal_snapshot_service._apply_playlist_renamed(change)
+        tidal_snapshot_service._handle_playlist_renamed(change)
 
         # Verify playlist was renamed
         updated = temp_db.get_playlist_by_id(db_playlist.id)
@@ -505,7 +505,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Should log warning and return without error
-        tidal_snapshot_service._apply_playlist_renamed(change)
+        tidal_snapshot_service._handle_playlist_renamed(change)
 
     def test_apply_playlist_description_changed(
         self, tidal_snapshot_service, mock_tidal_service, temp_db
@@ -532,7 +532,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Apply change
-        tidal_snapshot_service._apply_playlist_description_changed(change)
+        tidal_snapshot_service._handle_playlist_description_changed(change)
 
         # Verify description was updated
         updated = temp_db.get_playlist_by_id(db_playlist.id)
@@ -553,7 +553,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Should log warning and return without error
-        tidal_snapshot_service._apply_playlist_description_changed(change)
+        tidal_snapshot_service._handle_playlist_description_changed(change)
 
     def test_apply_track_removed_from_playlist(
         self, tidal_snapshot_service, mock_tidal_service, temp_db
@@ -590,7 +590,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Apply change
-        tidal_snapshot_service._apply_track_removed_from_playlist(change)
+        tidal_snapshot_service._handle_track_removed(change)
 
         # Verify track marked as not in Tidal
         playlist_tracks = temp_db.get_playlist_track_associations(db_playlist.id)
@@ -612,7 +612,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Should log warning and return without error
-        tidal_snapshot_service._apply_track_removed_from_playlist(change)
+        tidal_snapshot_service._handle_track_removed(change)
 
     def test_apply_track_moved_within_playlist(
         self, tidal_snapshot_service, mock_tidal_service, temp_db
@@ -651,7 +651,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Apply change
-        tidal_snapshot_service._apply_track_moved_within_playlist(change)
+        tidal_snapshot_service._handle_track_moved(change)
 
         # Verify position was updated
         playlist_tracks = temp_db.get_playlist_track_associations(db_playlist.id)
@@ -674,7 +674,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Should log warning and return without error
-        tidal_snapshot_service._apply_track_moved_within_playlist(change)
+        tidal_snapshot_service._handle_track_moved(change)
 
     def test_apply_track_metadata_changed(
         self, tidal_snapshot_service, mock_tidal_service, temp_db
@@ -706,7 +706,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Apply change
-        tidal_snapshot_service._apply_track_metadata_changed(change)
+        tidal_snapshot_service._handle_track_metadata_changed(change)
 
         # Verify metadata was updated
         updated = temp_db.get_track_by_id(db_track.id)
@@ -728,7 +728,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Should log warning and return without error
-        tidal_snapshot_service._apply_track_metadata_changed(change)
+        tidal_snapshot_service._handle_track_metadata_changed(change)
 
     def test_apply_track_added_to_playlist_with_existing_track(
         self, tidal_snapshot_service, mock_tidal_service, temp_db
@@ -762,7 +762,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Apply change
-        tidal_snapshot_service._apply_track_added_to_playlist(change)
+        tidal_snapshot_service._handle_track_added(change)
 
         # Verify track was added to playlist
         playlist_tracks = temp_db.get_playlist_tracks(db_playlist.id)
@@ -803,7 +803,7 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Apply change
-        tidal_snapshot_service._apply_track_added_to_playlist(change)
+        tidal_snapshot_service._handle_track_added(change)
 
         # Verify track was created and added to playlist
         playlist_tracks = temp_db.get_playlist_tracks(db_playlist.id)
@@ -826,4 +826,4 @@ class TestTidalSnapshotEdgeCases:
         )
 
         # Should log warning and return without error
-        tidal_snapshot_service._apply_track_added_to_playlist(change)
+        tidal_snapshot_service._handle_track_added(change)

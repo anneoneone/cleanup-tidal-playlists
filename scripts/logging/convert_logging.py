@@ -224,7 +224,7 @@ def process_file(file_path: Path, dry_run: bool = False) -> Tuple[int, int]:
     converted_count = 0
     new_lines = lines.copy()
 
-    for line_num, original_line, level in fstring_logs:
+    for line_num, original_line, _level in fstring_logs:
         try:
             converted_line = convert_log_line(original_line)
             if converted_line != original_line:

@@ -5,6 +5,7 @@ from enum import Enum
 from typing import List, Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -44,11 +45,17 @@ class PlaylistSyncStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
+class PlaylistSource(str, Enum):
+    """Source of playlist (Tidal vs local-only)."""
+
+    TIDAL = "tidal"  # Playlist originated from Tidal
+    LOCAL = "local"  # Local-only custom playlist (not from Tidal)
+
+
 class TrackSyncStatus(str, Enum):
     """PlaylistTrack sync status for unified sync."""
 
     SYNCED = "synced"
-    NEEDS_SYMLINK = "needs_symlink"
     NEEDS_MOVE = "needs_move"
     NEEDS_REMOVAL = "needs_removal"
     UNKNOWN = "unknown"
@@ -121,9 +128,9 @@ class Track(Base):
     )
 
     # File information
-    file_path: Mapped[Optional[str]] = mapped_column(
-        String(1000), nullable=True, index=True
-    )  # Primary file location (actual audio data) - relative to MP3 directory
+    file_paths: Mapped[Optional[List[str]]] = mapped_column(
+        JSON, nullable=True
+    )  # Relative file paths for each playlist copy
     file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     file_format: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     file_hash: Mapped[Optional[str]] = mapped_column(
@@ -191,9 +198,17 @@ class Playlist(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Tidal identifiers
-    tidal_id: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False, index=True
+    tidal_id: Mapped[Optional[str]] = mapped_column(
+        String(255), unique=True, nullable=True, index=True
     )
+
+    # Playlist source: tidal or local
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=PlaylistSource.TIDAL.value,
+        index=True,
+    )  # Enum: tidal (from Tidal API), local (local-only custom playlist)
 
     # Playlist metadata
     name: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
@@ -309,22 +324,13 @@ class PlaylistTrack(Base):
     in_local: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     in_rekordbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # Deduplication and symlink tracking (unified sync)
-    is_primary: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
-    )  # True if this playlist has the primary file (actual audio data)
-    symlink_path: Mapped[Optional[str]] = mapped_column(
-        String(1000), nullable=True
-    )  # Full path to symlink if is_primary=False
-    symlink_valid: Mapped[Optional[bool]] = mapped_column(
-        Boolean, nullable=True
-    )  # False if symlink exists but target missing/broken
+    # Sync status (unified sync)
     sync_status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         default=TrackSyncStatus.UNKNOWN.value,
         index=True,
-    )  # Enum: synced, needs_symlink, needs_move, needs_removal, unknown
+    )  # Enum: synced, needs_move, needs_removal, unknown
     synced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )  # When this playlist-track relationship was last synced to filesystem

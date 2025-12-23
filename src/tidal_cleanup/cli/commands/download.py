@@ -17,7 +17,7 @@ from ...core.sync import (
     SyncDecisionEngine,
     SyncDecisions,
 )
-from ...core.tidal import TidalDownloadService, TidalService, TidalStateFetcher
+from ...core.tidal import TidalApiService, TidalDownloadService, TidalStateFetcher
 from ...database import DatabaseService
 from ..display import display_download_results, filter_decisions_by_playlist
 from .legacy import TidalCleanupApp
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 def fetch_tidal_playlists(
     db_service: DatabaseService,
-    tidal_service: TidalService,
+    tidal_service: TidalApiService,
     download_service: TidalDownloadService,
     force: bool = False,
     dry_run: bool = False,
@@ -123,7 +123,7 @@ def download(
     This command uses the new database-driven sync system to:
     1. Fetch playlist metadata from Tidal (optional)
     2. Determine which tracks need to be downloaded
-    3. Download missing tracks to the M4A directory
+    3. Download missing tracks to the MP3 directory
     4. Convert downloaded files to target format (default: mp3)
 
     Examples:
@@ -181,11 +181,15 @@ def download(
         if target_format_normalized == "mp3":
             target_root = config.mp3_directory
         else:
-            target_root = config.m4a_directory.parent / target_format_normalized
+            target_root = config.mp3_directory.parent / target_format_normalized
 
         # Step 3: Generate sync decisions
         with console.status("[bold green]Analyzing what needs to be downloaded..."):
-            decision_engine = SyncDecisionEngine(db_service, music_root=target_root)
+            decision_engine = SyncDecisionEngine(
+                db_service,
+                music_root=target_root,
+                target_format=target_format_normalized,
+            )
             decisions = decision_engine.analyze_all_playlists()
 
         # Filter for download decisions only
@@ -219,7 +223,7 @@ def download(
         orchestrator = DownloadOrchestrator(
             db_service=db_service,
             music_root=target_root,
-            download_service=download_service,
+            tidal_download_service=download_service,
             dry_run=dry_run,
         )
 

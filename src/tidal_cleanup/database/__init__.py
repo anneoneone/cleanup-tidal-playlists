@@ -27,7 +27,7 @@ from .service import DatabaseService
 
 # Note: Removed re-exports from core modules to avoid circular imports.
 # Import directly from core modules instead:
-# - from tidal_cleanup.core.tidal import TidalService, TidalStateFetcher, etc.
+# - from tidal_cleanup.core.tidal import TidalApiService, TidalStateFetcher, etc.
 # - from tidal_cleanup.core.filesystem import FilesystemScanner, etc.
 # - from tidal_cleanup.core.sync import SyncDecisionEngine, etc.
 

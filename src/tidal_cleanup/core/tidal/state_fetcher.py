@@ -199,7 +199,7 @@ class TidalStateFetcher:
             # (unless force flag is set)
             should_fetch_tracks = True
             if not self.force and last_sync_time and updated.last_updated_tidal:
-                # Ensure both datetimes are timezone-aware for comparison
+                # Ensure both datetimes are timezone-aware for comparison.
                 playlist_updated = updated.last_updated_tidal
                 if (
                     hasattr(playlist_updated, "tzinfo")
@@ -332,6 +332,8 @@ class TidalStateFetcher:
     ) -> tuple[Playlist, bool]:
         """Update existing playlist in database.
 
+        Compares timestamps and updates fields, marking sync status as needed.
+
         Args:
             existing: Existing Playlist object
             playlist_data: Updated playlist data
@@ -380,14 +382,14 @@ class TidalStateFetcher:
         # Only update database if the playlist actually changed in Tidal
         if has_changed:
             updated = self.db_service.update_playlist(existing.id, playlist_data)
-            logger.debug("Updated playlist: %s (%d)", updated.name, updated.tidal_id)
+            logger.debug("Updated playlist: %s (%s)", updated.name, updated.tidal_id)
             return updated, True
         else:
             # No changes in Tidal, just update last_seen timestamp
             minimal_update = {"last_seen_in_tidal": playlist_data["last_seen_in_tidal"]}
             updated = self.db_service.update_playlist(existing.id, minimal_update)
             logger.debug(
-                "Playlist unchanged: %s (%d)", existing.name, existing.tidal_id
+                "Playlist unchanged: %s (%s)", existing.name, existing.tidal_id
             )
             return updated, False
 
@@ -429,9 +431,9 @@ class TidalStateFetcher:
                         db_track = self._create_track(track_data)
                         stats["created"] += 1
 
-                    # Add track to playlist (or update position)
+                    # Add track to playlist (or update position) and mark as in_tidal
                     self.db_service.add_track_to_playlist(
-                        db_playlist.id, db_track.id, position=position
+                        db_playlist.id, db_track.id, position=position, in_tidal=True
                     )
 
                 except Exception as e:
