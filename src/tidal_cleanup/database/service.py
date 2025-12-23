@@ -5,13 +5,10 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session, joinedload, sessionmaker
-
-from alembic import command  # type: ignore[attr-defined]
-from alembic.config import Config as AlembicConfig  # type: ignore[import-not-found]
 
 from .models import Base, Playlist, PlaylistTrack, SyncOperation, SyncSnapshot, Track
 
@@ -77,13 +74,19 @@ class DatabaseService:
                 logger.warning("Alembic not found, skipping migration stamp")
                 return
 
-            # Create Alembic config
-            alembic_cfg = AlembicConfig(str(alembic_ini))
+            import importlib
+
+            alembic_config_module = cast(Any, importlib.import_module("alembic.config"))
+            alembic_command_module = cast(
+                Any, importlib.import_module("alembic.command")
+            )
+
+            alembic_cfg = alembic_config_module.Config(str(alembic_ini))
             alembic_cfg.set_main_option("script_location", str(alembic_dir))
             alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
 
             # Stamp database as being at head
-            command.stamp(alembic_cfg, "head")
+            alembic_command_module.stamp(alembic_cfg, "head")
             logger.info("Database stamped with latest migration version")
 
         except Exception as e:
@@ -113,8 +116,14 @@ class DatabaseService:
                 )
                 return
 
-            # Create Alembic config
-            alembic_cfg = AlembicConfig(str(alembic_ini))
+            import importlib
+
+            alembic_config_module = cast(Any, importlib.import_module("alembic.config"))
+            alembic_command_module = cast(
+                Any, importlib.import_module("alembic.command")
+            )
+
+            alembic_cfg = alembic_config_module.Config(str(alembic_ini))
 
             # Set the script location to absolute path
             alembic_cfg.set_main_option("script_location", str(alembic_dir))
@@ -123,7 +132,7 @@ class DatabaseService:
             alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{self.db_path}")
 
             # Run upgrade to head
-            command.upgrade(alembic_cfg, "head")
+            alembic_command_module.upgrade(alembic_cfg, "head")
             logger.info("Database migrations applied successfully")
 
         except Exception as e:
