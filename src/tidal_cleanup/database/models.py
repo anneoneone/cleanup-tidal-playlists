@@ -156,6 +156,9 @@ class Track(Base):
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )  # Last integrity verification
+    tidal_unavailable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, index=True
+    )  # Track is unavailable in Tidal (404 error)
 
     # Rekordbox integration
     rekordbox_content_id: Mapped[Optional[str]] = mapped_column(

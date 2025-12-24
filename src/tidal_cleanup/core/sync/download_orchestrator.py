@@ -396,9 +396,33 @@ class DownloadOrchestrator:
         error: Exception,
     ) -> None:
         """Handle download failure by updating database and result."""
-        self._update_track_status(track, DownloadStatus.ERROR)
-        result.downloads_failed += 1
-        result.add_error(f"Failed to download track {decision.track_id}: {str(error)}")
+        error_str = str(error)
+
+        # Check if this is a 404 error (track unavailable in Tidal)
+        if "404" in error_str and "Not Found" in error_str:
+            logger.warning(
+                f"Track {decision.track_id} is no longer available in Tidal (404), "
+                f"marking as unavailable"
+            )
+            # Mark track as unavailable but don't count as error
+            self.db_service.update_track(
+                track.id,
+                {
+                    "tidal_unavailable": True,
+                    "download_status": DownloadStatus.ERROR.value,
+                    "download_error": "Track unavailable in Tidal (404)",
+                },
+            )
+            result.downloads_failed += 1
+            # Log as info instead of error for unavailable tracks
+            logger.info(f"Track {decision.track_id} marked as unavailable in Tidal")
+        else:
+            # Other errors are real failures
+            self._update_track_status(track, DownloadStatus.ERROR)
+            result.downloads_failed += 1
+            result.add_error(
+                f"Failed to download track {decision.track_id}: {error_str}"
+            )
 
     def _handle_no_download_service(self, result: ExecutionResult) -> None:
         """Handle case where no download service is configured."""

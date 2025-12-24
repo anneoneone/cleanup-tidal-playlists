@@ -207,6 +207,170 @@ class SyncDecisionEngine:
 
         return decisions
 
+    def cleanup_deleted_local_files(self) -> int:
+        """Clean up local tracks whose files no longer exist on disk.
+
+        This should be called after Tidal sync but before Rekordbox sync,
+        to ensure deleted local files are removed from the database.
+
+        Returns:
+            Number of tracks removed
+        """
+        removed_count = 0
+
+        # Get all playlists
+        playlists = self.db_service.get_all_playlists()
+
+        for playlist in playlists:
+            removed = self._cleanup_playlist_local_tracks(playlist)
+            removed_count += removed
+
+        if removed_count > 0:
+            logger.info(
+                "Local file cleanup complete: removed %d deleted tracks from database",
+                removed_count,
+            )
+
+        return removed_count
+
+    def _cleanup_playlist_local_tracks(self, playlist: Playlist) -> int:
+        """Clean up local tracks for a single playlist.
+
+        Args:
+            playlist: Playlist object
+
+        Returns:
+            Number of tracks removed
+        """
+        playlist_dir = self.playlists_root / playlist.name
+        removed_count = 0
+
+        if not playlist_dir.exists():
+            # Entire playlist directory missing - clean up local-only tracks
+            logger.info(
+                "Playlist directory missing: %s - cleaning up local tracks",
+                playlist.name,
+            )
+            removed_count = self._remove_local_only_tracks(playlist)
+            return removed_count
+
+        # Playlist directory exists - check individual files
+        disk_files = {str(fp) for fp in self._list_audio_files(playlist_dir)}
+        playlist_tracks = self.db_service.get_playlist_track_associations(playlist.id)
+
+        for pt in playlist_tracks:
+            if not pt.in_local:
+                continue
+
+            if self._should_remove_local_track(pt, disk_files, playlist_dir):
+                removed_count += self._remove_local_track(playlist, pt)
+
+        return removed_count
+
+    def _remove_local_only_tracks(self, playlist: Playlist) -> int:
+        """Remove all local-only tracks from a playlist.
+
+        Args:
+            playlist: Playlist object
+
+        Returns:
+            Number of tracks removed
+        """
+        removed_count = 0
+        playlist_tracks = self.db_service.get_playlist_track_associations(playlist.id)
+
+        for pt in playlist_tracks:
+            if pt.in_local and not pt.in_tidal:
+                removed_count += self._remove_local_track(playlist, pt)
+
+        return removed_count
+
+    def _should_remove_local_track(
+        self, pt: PlaylistTrack, disk_files: Set[str], playlist_dir: Path
+    ) -> bool:
+        """Check if a local track should be removed (file no longer exists).
+
+        Args:
+            pt: PlaylistTrack object
+            disk_files: Set of file paths on disk (full paths as strings)
+            playlist_dir: Path to the playlist directory
+
+        Returns:
+            True if track file doesn't exist on disk in this playlist
+        """
+        track = self.db_service.get_track_by_id(pt.track_id)
+        if not track or not track.file_paths:
+            return True  # No file paths - should remove
+
+        # Check if any of the track's files exist in THIS playlist directory
+        # file_paths contains relative paths from music_root
+        for file_path_str in track.file_paths:
+            # Build full path from relative path
+            full_path = str(self.music_root / file_path_str)
+
+            # Check if this file exists on disk
+            if full_path in disk_files:
+                return False  # File exists, don't remove
+
+        # No files found in this playlist, so remove the track from this playlist
+        return True
+
+    def _remove_local_track(self, playlist: Playlist, pt: PlaylistTrack) -> int:
+        """Remove a local track from a playlist.
+
+        This removes the playlist-track association and cleans up file paths
+        for this specific playlist from the track's file_paths array.
+
+        Args:
+            playlist: Playlist object
+            pt: PlaylistTrack object
+
+        Returns:
+            1 if successful, 0 otherwise
+        """
+        logger.info(
+            "Removing local track %s from playlist %s (file no longer on disk)",
+            pt.track_id,
+            playlist.name,
+        )
+        try:
+            # First, clean up the file paths for this playlist
+            track = self.db_service.get_track_by_id(pt.track_id)
+            if track and track.file_paths:
+                playlist_prefix = f"Playlists/{playlist.name}/"
+
+                # Remove file paths that belong to this playlist
+                updated_paths = [
+                    fp for fp in track.file_paths if not fp.startswith(playlist_prefix)
+                ]
+
+                # Update track with cleaned file paths
+                if updated_paths != track.file_paths:
+                    self.db_service.update_track(
+                        track.id,
+                        {"file_paths": updated_paths},
+                    )
+                    logger.debug(
+                        "Cleaned file_paths for track %s: removed %d paths from %s",
+                        track.id,
+                        len(track.file_paths) - len(updated_paths),
+                        playlist.name,
+                    )
+
+            # Then remove the track from the playlist
+            self.db_service.remove_track_from_playlist(
+                playlist.id, pt.track_id, source="local"
+            )
+            return 1
+        except Exception as e:
+            logger.error(
+                "Failed to remove local track %s from playlist %s: %s",
+                pt.track_id,
+                playlist.name,
+                e,
+            )
+            return 0
+
     def _decide_playlist_track_action(
         self,
         playlist: Playlist,
@@ -274,6 +438,33 @@ class SyncDecisionEngine:
         Returns:
             DecisionResult with download action or NO_ACTION if file exists
         """
+        # Don't try to download local tracks - they already exist on disk
+        # and have no tidal_id
+        if playlist_track.in_local:
+            logger.debug("Track %s is a local track, skipping download", track.id)
+            return DecisionResult(
+                action=SyncAction.NO_ACTION,
+                track_id=track.id,
+                playlist_id=playlist.id,
+                playlist_track_id=playlist_track.id,
+                reason="Local track - already exists on filesystem",
+                priority=0,
+            )
+
+        # Skip tracks that are marked as unavailable in Tidal (404 errors)
+        if track.tidal_unavailable:
+            logger.debug(
+                "Track %s is unavailable in Tidal, skipping download", track.id
+            )
+            return DecisionResult(
+                action=SyncAction.NO_ACTION,
+                track_id=track.id,
+                playlist_id=playlist.id,
+                playlist_track_id=playlist_track.id,
+                reason="Track unavailable in Tidal (404)",
+                priority=0,
+            )
+
         # Validate track has required metadata
         if not track.artist or not track.title:
             logger.warning(
@@ -404,7 +595,10 @@ class SyncDecisionEngine:
         decisions: SyncDecisions,
         active_playlist_paths: Dict[str, Set[int]],
     ) -> List[DecisionResult]:
-        """Find files on disk that no longer belong to a Tidal playlist."""
+        """Find files on disk that no longer belong to a Tidal playlist.
+
+        Local tracks (marked with in_local=True) are preserved even if not in Tidal.
+        """
         playlist_dir = self.playlists_root / playlist.name
         if not playlist_dir.exists():
             return []
@@ -428,24 +622,32 @@ class SyncDecisionEngine:
             track = self._find_track_for_path(file_path)
             playlist_track = track_map.get(track.id) if track else None
 
+            # If track exists in playlist, skip it
             if playlist_track is not None:
                 continue
 
-            orphan_decisions.append(
-                DecisionResult(
-                    action=SyncAction.REMOVE_FILE,
-                    track_id=track.id if track else None,
-                    playlist_id=playlist.id,
-                    playlist_track_id=playlist_track.id if playlist_track else None,
-                    source_path=str(file_path),
-                    reason="File exists locally but is no longer in Tidal",
-                    priority=7,
-                    metadata={
-                        "relative_path": self._to_library_relative_path(file_path),
-                        "matched_track": track.id if track else None,
-                    },
-                )
+            # File found locally but not in current Tidal playlist
+            # Check if we already know about this file in the database for this playlist
+            if track:
+                # Track was matched to an existing database entry
+                existing_local_pt = self._check_if_local_track(playlist.id, track.id)
+                if existing_local_pt and existing_local_pt.in_local:
+                    # Already marked as local - preserve it
+                    logger.debug(
+                        "Preserving local track %s (%s) in playlist %s",
+                        track.id,
+                        file_path.name,
+                        playlist.name,
+                    )
+                    continue
+
+            # File not in current Tidal playlist - create new local track entry
+            # This is a locally-added file, not a Tidal track
+            logger.info(
+                "Found local file %s not in Tidal - creating new local track",
+                file_path.name,
             )
+            self._create_local_track(playlist.id, file_path)
 
         return orphan_decisions
 
@@ -475,27 +677,64 @@ class SyncDecisionEngine:
         if fallback.exists():
             return fallback
 
-        return self._find_matching_playlist_file(playlist_dir, track)
+        return None
 
     def _find_matching_playlist_file(
         self, playlist_dir: Path, track: Track
     ) -> Optional[Path]:
-        """Locate a file in playlist_dir that matches the given track."""
-        if not playlist_dir.exists():
-            return None
+        """Find an existing file in the playlist directory for the track."""
+        # 1) Prefer explicit file_paths stored on the track
+        for raw_path in track.file_paths or []:
+            candidate = Path(raw_path)
+            if not candidate.is_absolute():
+                candidate = self.music_root / raw_path
+            if candidate.exists() and (
+                candidate.parent == playlist_dir or playlist_dir in candidate.parents
+            ):
+                return candidate
 
-        target_ext = self.target_extension
-        artist_lower = (track.artist or "").lower()
-        title_lower = (track.title or "").lower()
+        # 2) Try the expected target path (artist - title with target extension)
+        if track.artist and track.title:
+            base_filename = f"{track.artist} - {track.title}"
+        elif track.title:
+            base_filename = track.title
+        else:
+            base_filename = f"track-{track.id}"
 
-        for existing_file in playlist_dir.glob(f"*{target_ext}"):
-            filename_lower = existing_file.stem.lower()
-            if artist_lower and artist_lower not in filename_lower:
-                continue
-            if title_lower and title_lower not in filename_lower:
-                continue
-            return existing_file
+        target_path = playlist_dir / f"{base_filename}{self.target_extension}"
+        if target_path.exists():
+            return target_path
 
+        # 3) Fallback: case-insensitive stem match for same extension
+        match = self._match_by_stem_case_insensitive(playlist_dir, base_filename)
+        if match:
+            return match
+
+        # 4) Fuzzy match on simplified stems (handles artist/title tweaks)
+        match = self._match_by_simplified_stem(playlist_dir, base_filename)
+        if match:
+            return match
+
+        return None
+
+    def _match_by_stem_case_insensitive(
+        self, playlist_dir: Path, base_filename: str
+    ) -> Optional[Path]:
+        """Case-insensitive stem match within playlist dir for target extension."""
+        target_stem = base_filename.lower()
+        for existing_file in playlist_dir.glob(f"*{self.target_extension}"):
+            if existing_file.stem.lower() == target_stem:
+                return existing_file
+        return None
+
+    def _match_by_simplified_stem(
+        self, playlist_dir: Path, base_filename: str
+    ) -> Optional[Path]:
+        """Fuzzy stem match using simplified names to tolerate metadata tweaks."""
+        target_simple = self._simplify_name(base_filename.lower())
+        for existing_file in self._list_audio_files(playlist_dir):
+            if self._simplify_name(existing_file.stem) == target_simple:
+                return existing_file
         return None
 
     def _collect_active_playlist_paths(
@@ -619,11 +858,19 @@ class SyncDecisionEngine:
         return score
 
     def _simplify_name(self, value: Optional[str]) -> str:
-        """Normalize a name for approximate comparisons."""
+        """Normalize a name for approximate comparisons.
+
+        Keeps unicode letters (including accented chars like ü, ä, ö) but removes spaces
+        and special characters to allow fuzzy matching.
+        """
         if not value:
             return ""
-        normalized = unicodedata.normalize("NFKD", value)
-        return "".join(ch for ch in normalized if ch.isalnum())
+        # Remove spaces and special chars but keep unicode letters
+        # Use unicodedata.category() to identify letter characters
+        simplified = "".join(
+            ch for ch in value if unicodedata.category(ch)[0] == "L" or ch.isdigit()
+        )
+        return simplified
 
     def _get_simplified_track_name(self, track: Track) -> str:
         """Return cached simplified version of a track's normalized name."""
@@ -643,6 +890,186 @@ class SyncDecisionEngine:
         simplified = self._simplify_name(base_name)
         self._simplified_track_names[track_id] = simplified
         return simplified
+
+    def _check_if_local_track(
+        self, playlist_id: int, track_id: int
+    ) -> Optional[PlaylistTrack]:
+        """Check if a track exists in the database for this playlist.
+
+        Args:
+            playlist_id: Playlist database ID
+            track_id: Track database ID
+
+        Returns:
+            PlaylistTrack object if exists, None otherwise
+        """
+        try:
+            playlist_tracks = self.db_service.get_playlist_track_associations(
+                playlist_id
+            )
+            for pt in playlist_tracks:
+                if pt.track_id == track_id:
+                    return pt
+            return None
+        except Exception as e:
+            logger.warning(
+                "Error checking if track %s is local in playlist %s: %s",
+                track_id,
+                playlist_id,
+                e,
+            )
+            return None
+
+    def _create_local_track(self, playlist_id: int, file_path: Path) -> None:
+        """Create a new local track from a file.
+
+        Args:
+            playlist_id: Playlist database ID
+            file_path: Path to the local file
+        """
+        try:
+            # Extract metadata from audio file
+            relative_path = self._to_library_relative_path(file_path)
+            track_data: Dict[str, Any] = {"file_paths": [relative_path]}
+
+            # Try to extract metadata from audio tags
+            self._extract_audio_metadata(file_path, track_data)
+
+            # Fallback to filename if no title/artist from tags
+            self._apply_filename_fallback(file_path, track_data)
+
+            # Create a brand new track (don't match to existing tracks)
+            # This ensures local files get their own track entries
+            track = self.db_service.create_track(track_data)
+
+            # Add to playlist marked as local
+            self.db_service.add_track_to_playlist(playlist_id, track.id, in_local=True)
+
+            logger.info(
+                "Created local track '%s - %s' (ID: %s) from file %s",
+                track_data.get("artist", "Unknown"),
+                track_data.get("title", "Unknown"),
+                track.id,
+                file_path.name,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to create local track from file %s: %s", file_path.name, e
+            )
+
+    def _extract_audio_metadata(
+        self, file_path: Path, track_data: Dict[str, Any]
+    ) -> None:
+        """Extract metadata from audio file tags.
+
+        Args:
+            file_path: Path to audio file
+            track_data: Dictionary to populate with metadata
+        """
+        try:
+            import mutagen
+
+            audio = mutagen.File(file_path, easy=True)
+            if not audio:
+                return
+
+            # Extract text metadata using helper
+            self._extract_text_tags(audio, track_data)
+
+            # Extract numeric metadata
+            self._extract_numeric_tags(audio, track_data)
+
+            logger.debug("Extracted metadata from %s: %s", file_path.name, track_data)
+        except Exception as e:
+            logger.warning("Failed to extract metadata from %s: %s", file_path, e)
+
+    def _extract_text_tags(self, audio: Any, track_data: Dict[str, Any]) -> None:
+        """Extract text tags from audio file.
+
+        Args:
+            audio: Mutagen audio object
+            track_data: Dictionary to populate
+        """
+        tag_mappings = {
+            "title": "title",
+            "artist": "artist",
+            "album": "album",
+            "albumartist": "album_artist",
+            "genre": "genre",
+            "isrc": "isrc",
+        }
+
+        for audio_tag, db_field in tag_mappings.items():
+            value = self._get_audio_tag(audio, audio_tag)
+            if value:
+                track_data[db_field] = value
+
+    def _extract_numeric_tags(self, audio: Any, track_data: Dict[str, Any]) -> None:
+        """Extract numeric tags (duration, year) from audio file.
+
+        Args:
+            audio: Mutagen audio object
+            track_data: Dictionary to populate
+        """
+        from contextlib import suppress
+
+        # Extract duration
+        if hasattr(audio.info, "length"):
+            track_data["duration"] = int(audio.info.length)
+
+        # Extract year from date tag
+        year_str = self._get_audio_tag(audio, "date")
+        if year_str and len(year_str) >= 4:
+            with suppress(ValueError):
+                track_data["year"] = int(year_str[:4])
+
+    def _apply_filename_fallback(
+        self, file_path: Path, track_data: Dict[str, Any]
+    ) -> None:
+        """Apply filename-based fallback for missing metadata.
+
+        Args:
+            file_path: Path to audio file
+            track_data: Dictionary to populate with metadata
+        """
+        if track_data.get("title") and track_data.get("artist"):
+            return
+
+        filename = file_path.stem
+        artist_title = self._split_filename_artist_title(filename)
+
+        if artist_title:
+            artist, title = artist_title
+            if not track_data.get("title"):
+                track_data["title"] = title
+            if not track_data.get("artist"):
+                track_data["artist"] = artist
+        else:
+            if not track_data.get("title"):
+                track_data["title"] = filename
+            if not track_data.get("artist"):
+                track_data["artist"] = "Unknown Artist"
+
+    def _get_audio_tag(self, audio: Any, tag: str) -> Optional[str]:
+        """Get tag value from audio file.
+
+        Args:
+            audio: Mutagen audio object
+            tag: Tag name
+
+        Returns:
+            Tag value or None
+        """
+        if not (hasattr(audio, "tags") and audio.tags and tag in audio.tags):
+            return None
+
+        try:
+            value = audio.tags[tag]
+            if isinstance(value, list) and value:
+                return str(value[0])
+            return str(value)
+        except Exception:
+            return None
 
     def _to_library_relative_path(self, file_path: Path) -> str:
         """Return a path relative to the music library root when possible."""

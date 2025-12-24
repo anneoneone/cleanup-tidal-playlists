@@ -3,11 +3,12 @@
 import hashlib
 import json
 import logging
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
 from .models import (
@@ -526,17 +527,57 @@ class DatabaseService:
             return session.scalar(stmt)
 
     def get_playlist_by_name(self, name: str) -> Optional[Playlist]:
-        """Get playlist by name.
+        """Get playlist by name with Unicode normalization.
+
+        Normalizes the input name to NFC (composed) form and tries both
+        exact and case-insensitive matches. This helps handle filenames
+        from macOS which uses NFD (decomposed) form.
 
         Args:
-            name: Playlist name
+            name: Playlist name (will be normalized to NFC)
 
         Returns:
             Playlist object or None if not found
         """
+        # Normalize the input name to NFC (composed form)
+        # macOS stores filenames in NFD (decomposed), so we normalize
+        normalized_name = unicodedata.normalize("NFC", name)
+
         with self.get_session() as session:
-            stmt = select(Playlist).where(Playlist.name == name)
-            return session.scalar(stmt)
+            # Try exact match with normalized name
+            stmt = select(Playlist).where(Playlist.name == normalized_name)
+            result = session.scalar(stmt)
+            if result:
+                return result
+
+            # Try case-insensitive match with normalized name
+            stmt = select(Playlist).where(
+                func.lower(Playlist.name) == func.lower(normalized_name)
+            )
+            result = session.scalar(stmt)
+            if result:
+                logger.debug(
+                    "Found playlist with case-insensitive match: '%s' → '%s'",
+                    name,
+                    result.name,
+                )
+                return result
+
+            # If still not found, try matching against all playlists
+            # with NFD normalization (in case DB has NFD names)
+            all_playlists = session.execute(select(Playlist)).scalars().all()
+            for playlist in all_playlists:
+                # Normalize both to NFC and compare
+                db_name_nfc = unicodedata.normalize("NFC", playlist.name)
+                if db_name_nfc.lower() == normalized_name.lower():
+                    logger.debug(
+                        "Found playlist with Unicode normalization: '%s' → '%s'",
+                        name,
+                        playlist.name,
+                    )
+                    return playlist
+
+            return None
 
     def get_all_playlists(self) -> List[Playlist]:
         """Get all playlists from database.
@@ -549,7 +590,10 @@ class DatabaseService:
             return list(session.scalars(stmt).all())
 
     def create_playlist(self, playlist_data: Dict[str, Any]) -> Playlist:
-        """Create a new playlist.
+        """Create a new playlist with normalized name.
+
+        Normalizes the playlist name to NFC (composed) form to ensure
+        consistency across platforms (especially macOS which uses NFD).
 
         Args:
             playlist_data: Playlist data dictionary
@@ -557,6 +601,10 @@ class DatabaseService:
         Returns:
             Created Playlist object
         """
+        # Normalize playlist name to NFC if present
+        if "name" in playlist_data:
+            playlist_data["name"] = unicodedata.normalize("NFC", playlist_data["name"])
+
         with self.get_session() as session:
             playlist = Playlist(**playlist_data)
             session.add(playlist)
@@ -568,7 +616,10 @@ class DatabaseService:
     def update_playlist(
         self, playlist_id: int, playlist_data: Dict[str, Any]
     ) -> Playlist:
-        """Update an existing playlist.
+        """Update an existing playlist with normalized name.
+
+        Normalizes the playlist name to NFC (composed) form to ensure
+        consistency across platforms.
 
         Args:
             playlist_id: Playlist database ID
@@ -577,6 +628,10 @@ class DatabaseService:
         Returns:
             Updated Playlist object
         """
+        # Normalize playlist name to NFC if present
+        if "name" in playlist_data:
+            playlist_data["name"] = unicodedata.normalize("NFC", playlist_data["name"])
+
         with self.get_session() as session:
             playlist = session.get(Playlist, playlist_id)
             if not playlist:
@@ -1181,7 +1236,7 @@ class DatabaseService:
         with self.get_session() as session:
             snapshot = SyncSnapshot(
                 snapshot_type=snapshot_type,
-                snapshot_data=json.dumps(data),
+                snapshot_data=json.dumps(data, ensure_ascii=False),
                 playlist_count=data.get("playlist_count"),
                 track_count=data.get("track_count"),
             )

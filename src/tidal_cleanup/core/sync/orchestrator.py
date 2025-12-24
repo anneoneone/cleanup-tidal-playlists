@@ -236,6 +236,9 @@ class SyncOrchestrator:
         # After scanning, cleanup playlists that were removed from Tidal
         self._cleanup_removed_tidal_playlists()
 
+        # Clean up local files that were deleted from disk
+        self._cleanup_deleted_local_files()
+
     def _execute_deduplication_step(self, result: SyncResult) -> None:
         """Execute step 3: Analyze deduplication."""
         logger.info("Step 3/5: Analyzing deduplication needs...")
@@ -345,6 +348,23 @@ class SyncOrchestrator:
                 self._delete_playlist_resources(p)
         except Exception:
             logger.exception("Cleanup of removed Tidal playlists failed")
+
+    def _cleanup_deleted_local_files(self) -> None:
+        """Clean up local tracks whose files no longer exist on disk.
+
+        This should be called after filesystem scan to remove tracks from the database
+        when their files have been deleted from the filesystem.
+        """
+        try:
+            logger.info("Cleaning up deleted local files...")
+            removed_count = self.decision_engine.cleanup_deleted_local_files()
+            if removed_count > 0:
+                logger.info(
+                    "Local file cleanup complete: removed %d deleted tracks",
+                    removed_count,
+                )
+        except Exception:
+            logger.exception("Cleanup of deleted local files failed")
 
     def _should_cleanup_playlist(self, p: Any) -> bool:
         """Return True if playlist meets cleanup criteria.
