@@ -20,6 +20,7 @@ from .commands import (
     legacy_sync,
     rekordbox,
     status,
+    sync_command,
     sync_rekordbox_command,
 )
 
@@ -55,6 +56,7 @@ def cli(ctx: Any, log_level: str, log_file: str, no_interactive: bool) -> None:
 # Register command groups and commands
 cli.add_command(init_command)
 cli.add_command(diff_command)
+cli.add_command(sync_command)
 cli.add_command(legacy_sync)
 cli.add_command(legacy_convert)
 cli.add_command(rekordbox)

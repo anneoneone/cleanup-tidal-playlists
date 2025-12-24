@@ -7,6 +7,7 @@ from .init import check_all_services, init_command
 from .legacy import TidalCleanupApp, legacy_convert, legacy_full, legacy_sync, status
 from .rekordbox import rekordbox
 from .rekordbox_sync import sync_rekordbox_command
+from .sync import sync_command
 
 __all__ = [
     "TidalCleanupApp",
@@ -21,4 +22,5 @@ __all__ = [
     "check_all_services",
     "diff_command",
     "sync_rekordbox_command",
+    "sync_command",
 ]

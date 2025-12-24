@@ -1,39 +1,35 @@
 {
+  "description": "Mapping configuration for converting playlist name emojis to Rekordbox MyTag groups and the target Rekordbox folder structure (Genre/Events).",
   "emoji_to_mytag_mapping": {
     "Genre": {
-      "🎷": "Jazz",
+      "🏃": "House Progressive",
+      "🥊": "House Ghetto",
+      "🇮🇹": "House Italo",
+      "🪇": "House Groove",
+      "🤖": "House Disco",
+      "🌀": "House Tool",
+      "☀️": "House House",
+      "🪘": "Groove",
+      "🧘": "House Chill",
+      "🎧": "House LoFi",
+      "🌃": "House Deep",
       "🧱": "Breaks",
-      "🐌": "Downbeat",
-      "🇬🇧": "UK Garage",
       "🛋️": "Lounge",
-      "🏖️": "Beach",
+      "🌚": "Ambient",
       "🎭": "Techhouse",
       "🏢": "Techno",
       "🐋": "Techno Dub",
       "⚡": "Hardgroove",
-      "🌚": "Ambient",
-      "📺": "NDW",
-      "🌴": "Jungle",
       "🎹": "Disco Synth",
       "🎈": "Disco Nu",
       "🪩": "Disco Classy",
       "🕺": "Disco",
-      "🏃🏼‍♂️": "House Progressive",
-      "🥊": "House Ghetto",
-      "🇮🇹": "House Italo",
-      "🪇": "House Groove",
-      "🌃": "House Deep",
-      "🤖": "House Disco",
-      "🌀": "House Tool",
-      "🎧": "House LoFi",
-      "🧘🏼‍♂️": "House Chill",
-      "☀️": "House House",
-      "🪘": "Groove"
-    },
-    "Party": {
-      "🎉": "Party",
-      "🎶": "Set",
-      "🎙️": "Moafunk"
+      "🎷": "Jazz",
+      "🐌": "Downbeat",
+      "🇬🇧": "UK Garage",
+      "🏖️": "Beach",
+      "📺": "NDW",
+      "🌴": "Jungle"
     },
     "Energy": {
       "⬆️": "High",
@@ -44,12 +40,57 @@
     "Status": {
       "💾": "Archived",
       "❓": "Recherche",
-      "👵🏻": "Old"
+      "👵🏻": "Old",
+      "💿": "Discogs",
+      "📀": "Discogs"
+    },
+    "Party": {
+      "🎉": "Partys",
+      "🎶": "Sets",
+      "🎙️": "Radio Moafunk"
     }
+  },
+  "folder_structure": {
+    "genre_root": "Genre",
+    "genre_uncategorized": "Uncategorized",
+    "genre_status_folders": ["Archived", "Old", "Recherche", "Discogs"],
+    "genre_default_status": "Archived",
+    "genre_categories": {
+      "Deep House": [
+        "House Deep",
+        "House Chill",
+        "House LoFi",
+        "Lounge",
+        "Ambient"
+      ],
+      "House": [
+        "House House",
+        "House Groove",
+        "House Italo",
+        "House Disco",
+        "House Progressive",
+        "House Tool",
+        "House Ghetto",
+        "Groove"
+      ],
+      "Techno": ["Techno", "Techhouse", "Hardgroove", "Techno Dub"],
+      "Disco": ["Disco", "Disco Classy", "Disco Nu", "Disco Synth"],
+      "Other Genres": [
+        "Breaks",
+        "Beach",
+        "Downbeat",
+        "Jazz",
+        "Jungle",
+        "NDW",
+        "UK Garage"
+      ]
+    },
+    "events_root": "Events",
+    "events_types": ["Partys", "Sets", "Radio Moafunk"],
+    "events_misc": "Misc"
   },
   "no_genre_tag": {
     "group": "Genre",
     "value": "NoGenre"
-  },
-  "description": "Mapping configuration for converting playlist name emojis to Rekordbox MyTag groups and values. Playlists follow the pattern: 'PLAYLIST NAME [GENRE-EMOJI] or [PARTY-EMOJI] [ENERGY-EMOJI] [STATUS-EMOJI]'. Either Genre or Party emoji must be present, while Energy and Status are optional."
+  }
 }

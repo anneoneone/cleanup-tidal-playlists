@@ -39,7 +39,15 @@ def synchronizer(mock_db, tmp_path):
         "tidal_cleanup.core.rekordbox.playlist_sync.PlaylistNameParser"
     ) as mock_parser_class:
         mock_mgr_class.return_value = Mock()
-        mock_parser_class.return_value = Mock()
+        mock_parser = Mock()
+        mock_parser.folder_structure = {
+            "genre_root": "Genre",
+            "events_root": "Events",
+            "genre_default_status": "Archived",
+        }
+        mock_parser.genre_uncategorized = "Uncategorized"
+        mock_parser.events_misc = "Misc"
+        mock_parser_class.return_value = mock_parser
 
         sync = RekordboxPlaylistSynchronizer(mock_db, mp3_root, emoji_config)
         return sync
@@ -68,10 +76,12 @@ class TestRekordboxPlaylistSynchronizer:
         jazz_metadata = Mock()
         jazz_metadata.genre_tags = ["Jazz"]
         jazz_metadata.party_tags = []
+        jazz_metadata.status_tags = []
 
         party_metadata = Mock()
         party_metadata.genre_tags = ["House"]
         party_metadata.party_tags = ["Party"]
+        party_metadata.status_tags = []
 
         synchronizer.name_parser.parse_playlist_name.side_effect = [
             jazz_metadata,
@@ -79,16 +89,17 @@ class TestRekordboxPlaylistSynchronizer:
         ]
 
         # Mock folder creation
-        mock_folder = Mock()
-        mock_folder.ID = "folder123"
-
         with patch.object(
-            synchronizer, "_get_or_create_folder", return_value=mock_folder
-        ) as mock_create:
+            synchronizer, "_get_or_create_folder_path", return_value="folder123"
+        ) as mock_create_path:
             synchronizer.ensure_folders_exist()
 
-            # Should create 3 unique folders: Jazz, House, Party
-            assert mock_create.call_count == 3
+            # Should create 2 unique folder paths with default status:
+            # Genre/Jazz/Archived and Genre/House/Archived
+            assert mock_create_path.call_count == 2
+            calls = [call.args[0] for call in mock_create_path.call_args_list]
+            assert ["Genre", "House", "Archived"] in calls
+            assert ["Genre", "Jazz", "Archived"] in calls
             mock_db.commit.assert_called_once()
 
     def test_get_or_create_folder_creates_new(self, synchronizer, mock_db):
@@ -107,7 +118,7 @@ class TestRekordboxPlaylistSynchronizer:
         result = synchronizer._get_or_create_folder("Jazz")
 
         assert result == mock_new_folder
-        mock_db.create_playlist_folder.assert_called_once_with("Jazz")
+        mock_db.create_playlist_folder.assert_called_once_with("Jazz", parent=None)
         mock_db.flush.assert_called_once()
 
     def test_get_or_create_folder_retrieves_existing(self, synchronizer, mock_db):
@@ -132,9 +143,10 @@ class TestRekordboxPlaylistSynchronizer:
         metadata = Mock()
         metadata.genre_tags = {"Jazz", "House"}  # Set, not list
         metadata.party_tags = set()
+        metadata.status_tags = set()
 
         # Mock folder in cache - "House" comes first alphabetically
-        synchronizer._folder_cache["House"] = "folder123"
+        synchronizer._folder_cache["Genre/House/Archived"] = "folder123"
 
         result = synchronizer._get_folder_for_playlist(metadata)
 
@@ -145,22 +157,26 @@ class TestRekordboxPlaylistSynchronizer:
         metadata = Mock()
         metadata.genre_tags = set()
         metadata.party_tags = {"Party"}
+        metadata.event_year = "2023"
+        metadata.status_tags = set()
 
-        synchronizer._folder_cache["Party"] = "folder456"
+        synchronizer._folder_cache["Events/Party/2023"] = "folder456"
 
         result = synchronizer._get_folder_for_playlist(metadata)
 
         assert result == "folder456"
 
     def test_get_folder_for_playlist_returns_none_without_tags(self, synchronizer):
-        """Test folder returns None without tags."""
+        """Test folder falls back to Uncategorized when no tags."""
         metadata = Mock()
         metadata.genre_tags = set()
         metadata.party_tags = set()
+        metadata.status_tags = set()
+        synchronizer._folder_cache["Genre/Uncategorized/Archived"] = "folder999"
 
         result = synchronizer._get_folder_for_playlist(metadata)
 
-        assert result is None
+        assert result == "folder999"
 
     def test_get_or_create_playlist_creates_new(self, synchronizer, mock_db):
         """Test creating a new playlist."""

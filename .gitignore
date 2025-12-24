@@ -5,6 +5,9 @@ tidal_session*.json
 # Config directory with sensitive settings
 config/
 
+# Backup directories
+backups/
+
 .vscode
 
 .DS_Store

@@ -17,6 +17,7 @@ except ImportError:
     PYREKORDBOX_AVAILABLE = False
     Rekordbox6Database = None
 
+from ...database.models import Track
 from .playlist_sync import RekordboxPlaylistSynchronizer
 
 logger = logging.getLogger(__name__)
@@ -266,7 +267,15 @@ class RekordboxService:
             return None
 
     def get_or_create_content(self, track_path: Path) -> Optional[Any]:
-        """Retrieve existing Rekordbox content or add it if missing."""
+        """Retrieve existing Rekordbox content or add it if missing.
+
+        Improved logic:
+        1) Look up by exact FolderPath
+        2) If not found, attempt a fallback lookup by Title
+           (helps reuse existing entries when the file path changed)
+        3) If still not found, add new content with extracted metadata
+           and enrich Artist/Album associations from ID3 tags if available
+        """
         if not self.db:
             logger.error("Database not available")
             return None
@@ -277,13 +286,101 @@ class RekordboxService:
                 return existing_content
 
             metadata = self._extract_track_metadata(track_path)
-            new_content = self.db.add_content(str(track_path), **metadata)
+
+            # Try reuse by ISRC or Title+Artist using ID3 tags
+            title_for_lookup: Optional[str] = metadata.get("Title")
+            artist_for_lookup: Optional[str] = None
+            isrc_for_lookup: Optional[str] = None
+
+            with suppress(Exception):
+                from mutagen.id3 import ID3
+
+                audio = ID3(str(track_path))
+                title_for_lookup = (
+                    str(audio.get("TIT2", title_for_lookup or "")).strip()
+                    or title_for_lookup
+                )
+                artist_for_lookup = str(audio.get("TPE1", "")).strip() or None
+                isrc_for_lookup = str(audio.get("TSRC", "")).strip() or None
+
+            candidate = self._find_existing_content(
+                title_for_lookup, artist_for_lookup, isrc_for_lookup
+            )
+            if candidate is not None:
+                return candidate
+
+            enrich = self._enrich_artist_album(track_path, metadata)
+
+            payload: Dict[str, Any] = {**metadata}
+            payload.update(enrich)
+
+            new_content = self.db.add_content(str(track_path), **payload)
             if new_content:
                 logger.info("Added new content to Rekordbox: %s", track_path)
             return new_content
 
         except Exception as exc:
             logger.error("Failed to add content for %s: %s", track_path, exc)
+            if self.db:
+                self.db.rollback()
+            return None
+
+    def get_or_create_content_from_track(
+        self, track: Track, track_path: Path, genre: Optional[str] = None
+    ) -> Optional[Any]:
+        """Use Tidal track metadata to create/reuse Rekordbox content.
+
+        Args:
+            track: Database `Track` instance with Tidal metadata
+            track_path: Absolute path to audio file
+
+        Returns:
+            DjmdContent instance or None
+        """
+        if not self.db:
+            logger.error("Database not available")
+            return None
+
+        try:
+            # Reuse by path first
+            existing = self.db.get_content(FolderPath=str(track_path)).first()
+            if existing:
+                return existing
+
+            # Reuse by ISRC / Title+Artist / Title
+            candidate = self._find_existing_content(
+                title=track.title,
+                artist_name=track.artist or None,
+                isrc=track.isrc or None,
+            )
+            if candidate is not None:
+                return candidate
+
+            # Build payload from Tidal metadata
+            base_meta = self._extract_track_metadata(track_path)
+            payload = self._build_payload_from_track(track, base_meta)
+            if genre:
+                payload.update(self._apply_genre(payload, genre))
+                logger.info("Applying genre '%s' to content for %s", genre, track_path)
+
+            # Ensure associations from Tidal names
+            assoc = self._enrich_artist_album_from_names(
+                artist_name=track.artist or "Unknown Artist",
+                album_name=track.album or "Unknown Album",
+                release_year=track.year,
+            )
+            payload.update(assoc)
+
+            # Add content
+            new_content = self.db.add_content(str(track_path), **payload)
+            if new_content:
+                logger.info("Added new content (Tidal-enriched): %s", track_path)
+            return new_content
+
+        except Exception as exc:
+            logger.error(
+                "Failed to add Tidal-enriched content for %s: %s", track_path, exc
+            )
             if self.db:
                 self.db.rollback()
             return None
@@ -301,7 +398,7 @@ class RekordboxService:
             return playlist
 
     def _add_track_to_playlist(self, playlist: Any, track_path: Path) -> bool:
-        """Add a single track to a playlist.
+        """Add a single track to a playlist, reusing existing content when possible.
 
         Args:
             playlist: Playlist object to add to
@@ -314,32 +411,12 @@ class RekordboxService:
             return False
 
         try:
-            # Check if track already exists in database
-            existing_content = self.db.get_content(FolderPath=str(track_path)).first()
-
-            if existing_content:
-                # Track exists, add to playlist
-                self.db.add_to_playlist(playlist, existing_content)
-                return True
-            else:
-                # Track doesn't exist, add to database with full metadata
-                logger.debug("Adding new track to database: %s", track_path)
-
-                # Extract comprehensive metadata
-                metadata = self._extract_track_metadata(track_path)
-
-                # Add content with metadata
-                new_content = self.db.add_content(str(track_path), **metadata)
-                if new_content:
-                    logger.debug(
-                        "Successfully added content with metadata, "
-                        "now adding to playlist"
-                    )
-                    self.db.add_to_playlist(playlist, new_content)
-                    return True
-                else:
-                    logger.warning("Failed to add track to database: %s", track_path)
-                    return False
+            content = self.get_or_create_content(track_path)
+            if not content:
+                logger.warning("Failed to resolve or create content: %s", track_path)
+                return False
+            self.db.add_to_playlist(playlist, content)
+            return True
 
         except Exception as e:
             logger.warning("Failed to add track %s to playlist: %s", track_path, e)
@@ -376,6 +453,178 @@ class RekordboxService:
             logger.warning("Failed to extract metadata from %s: %s", file_path, e)
 
         return metadata
+
+    def _build_payload_from_track(
+        self, track: Track, base: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Merge Tidal track fields into DjmdContent payload (low complexity)."""
+        payload: Dict[str, Any] = {**base}
+        payload.update(self._map_core_fields(track))
+        payload["Commnt"] = self._compose_comments(track, payload.get("Commnt"))
+        return payload
+
+    def _map_core_fields(self, track: Track) -> Dict[str, Any]:
+        """Map essential Tidal fields to DjmdContent columns."""
+        core: Dict[str, Any] = {"Title": track.title}
+        if track.year:
+            core["ReleaseYear"] = int(track.year)
+        elif track.album_release_date:
+            core["ReleaseYear"] = int(track.album_release_date.year)
+        if track.track_number is not None:
+            core["TrackNo"] = int(track.track_number)
+        if track.volume_number is not None:
+            core["DiscNo"] = int(track.volume_number)
+        if track.isrc:
+            core["ISRC"] = track.isrc
+        if track.version:
+            core["Subtitle"] = track.version
+        return core
+
+    def _compose_comments(self, track: Track, existing: Optional[str]) -> str:
+        """Compose comments string from Tidal fields and existing comments."""
+        parts: List[str] = []
+        if existing:
+            parts.append(str(existing))
+        if track.album_upc:
+            parts.append(f"Tidal UPC: {track.album_upc}")
+        if track.audio_quality:
+            parts.append(f"Tidal quality: {track.audio_quality}")
+        if track.audio_modes:
+            parts.append(f"Tidal mode: {track.audio_modes}")
+        if track.popularity is not None:
+            parts.append(f"Tidal popularity: {track.popularity}")
+        if track.explicit is not None:
+            parts.append(f"Explicit: {bool(track.explicit)}")
+        return " | ".join(parts) if parts else ""
+
+    def _apply_genre(self, payload: Dict[str, Any], genre: str) -> Dict[str, Any]:
+        """Add genre to payload, using GenreID/Name when available."""
+        updates: Dict[str, Any] = {"Genre": genre}
+        if self.db and hasattr(self.db, "get_genre") and hasattr(self.db, "add_genre"):
+            with suppress(Exception):
+                if self.db is not None:
+                    entry = self.db.get_genre(Name=genre).first()
+                    if entry is None:
+                        entry = self.db.add_genre(name=genre)
+                    if entry and hasattr(entry, "ID"):
+                        updates["GenreID"] = entry.ID
+                    if entry and hasattr(entry, "Name"):
+                        updates["GenreName"] = entry.Name
+        else:
+            updates["GenreName"] = genre
+        return updates
+
+    def _enrich_artist_album_from_names(
+        self, artist_name: str, album_name: str, release_year: Optional[int]
+    ) -> Dict[str, Any]:
+        """Ensure Artist/Album associations from provided names."""
+        result: Dict[str, Any] = {}
+        if self.db is None:
+            return result
+
+        with suppress(Exception):
+            artist = self.db.get_artist(Name=artist_name).first()
+            if artist is None:
+                artist = self.db.add_artist(name=artist_name)
+            artist_id = getattr(artist, "ID", None)
+            if artist_id:
+                result["ArtistID"] = artist_id
+
+            album = self.db.get_album(Name=album_name).first()
+            if album is None:
+                album = self.db.add_album(name=album_name)
+            album_id = getattr(album, "ID", None)
+            if album_id:
+                result["AlbumID"] = album_id
+
+        if release_year is not None:
+            result["ReleaseYear"] = int(release_year)
+        return result
+
+    def _find_existing_content(
+        self,
+        title: Optional[str],
+        artist_name: Optional[str],
+        isrc: Optional[str],
+    ) -> Optional[Any]:
+        """Find existing content by ISRC or Title+Artist, then Title only."""
+        if not self.db:
+            return None
+
+        # ISRC is the strongest identifier when present
+        if isrc:
+            with suppress(Exception):
+                by_isrc = self.db.get_content(ISRC=isrc).first()
+                if by_isrc:
+                    logger.info("Reusing content by ISRC: %s", isrc)
+                    return by_isrc
+
+        # Title + Artist via associations
+        if title and artist_name:
+            with suppress(Exception):
+                artist = self.db.get_artist(Name=artist_name).first()
+                if artist:
+                    content = self.db.get_content(
+                        Title=title, ArtistID=artist.ID
+                    ).first()
+                    if content:
+                        logger.info(
+                            "Reusing content by Title+Artist: %s - %s",
+                            title,
+                            artist_name,
+                        )
+                        return content
+
+        # Title only as a weaker fallback
+        if title:
+            with suppress(Exception):
+                by_title = self.db.get_content(Title=title).first()
+                if by_title:
+                    logger.info("Reusing content by Title: %s", title)
+                    return by_title
+
+        return None
+
+    def _enrich_artist_album(
+        self, track_path: Path, metadata: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Create or reuse Artist/Album and return association IDs.
+
+        Returns a dict containing optional keys: ArtistID, AlbumID, ReleaseYear
+        """
+        artist_id: Optional[str] = None
+        album_id: Optional[str] = None
+        release_year = metadata.get("ReleaseYear") or None
+
+        with suppress(Exception):
+            from mutagen.id3 import ID3
+
+            audio = ID3(str(track_path))
+            artist_name = str(audio.get("TPE1", "")).strip() or "Unknown Artist"
+            album_name = str(audio.get("TALB", "")).strip() or "Unknown Album"
+            year_str = str(audio.get("TDRC", "")).strip()
+            if year_str and not release_year:
+                release_year = int(year_str[:4])
+
+            if self.db is not None:
+                artist = self.db.get_artist(Name=artist_name).first()
+                if artist is None:
+                    artist = self.db.add_artist(name=artist_name)
+                artist_id = getattr(artist, "ID", None)
+
+                album = self.db.get_album(Name=album_name).first()
+                if album is None:
+                    album = self.db.add_album(name=album_name)
+                album_id = getattr(album, "ID", None)
+
+        result: Dict[str, Any] = {}
+        if artist_id:
+            result["ArtistID"] = artist_id
+        if album_id:
+            result["AlbumID"] = album_id
+        if release_year is not None:
+            result["ReleaseYear"] = release_year
+        return result
 
     def _extract_direct_metadata(  # noqa: C901
         self, audio_file: Any, metadata: Dict[str, Any]
