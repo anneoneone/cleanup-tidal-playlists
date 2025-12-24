@@ -51,8 +51,28 @@ class RekordboxPlaylistSynchronizer:
         # Supported audio extensions
         self.audio_extensions = {".mp3", ".flac", ".wav", ".aac", ".m4a"}
 
-        # Cache for folders (folder_name -> folder_id)
+        # Cache for folders (path_key -> folder_id)
         self._folder_cache: Dict[str, str] = {}
+
+        # Cache commonly used folder structure values
+        folder_structure = self.name_parser.folder_structure
+        self._genre_root = folder_structure.get("genre_root", "Genre")
+        self._events_root = folder_structure.get("events_root", "Events")
+        self._genre_uncategorized = getattr(
+            self.name_parser,
+            "genre_uncategorized",
+            folder_structure.get("genre_uncategorized", "Uncategorized"),
+        )
+        self._events_misc = getattr(
+            self.name_parser, "events_misc", folder_structure.get("events_misc", "Misc")
+        )
+        self._genre_default_status = folder_structure.get(
+            "genre_default_status", "Archived"
+        )
+        genre_cats: Any = folder_structure.get("genre_categories", {})
+        self._genre_categories: Dict[str, Any] = (
+            genre_cats if isinstance(genre_cats, dict) else {}
+        )
 
     def ensure_folders_exist(self) -> None:
         """Pre-create all genre/party folders by scanning all playlists.
@@ -60,7 +80,7 @@ class RekordboxPlaylistSynchronizer:
         This should be called once before syncing multiple playlists to avoid redundant
         folder creation checks during each playlist sync.
         """
-        logger.info("Pre-creating genre/party folders...")
+        logger.info("Pre-creating genre/event folders...")
 
         # Scan all playlist folders
         if not self.mp3_playlists_root.exists():
@@ -69,7 +89,7 @@ class RekordboxPlaylistSynchronizer:
             )
             return
 
-        all_folder_names: Set[str] = set()
+        all_folder_paths: Set[Tuple[str, ...]] = set()
 
         # Iterate through all playlist directories
         for playlist_dir in self.mp3_playlists_root.iterdir():
@@ -80,24 +100,26 @@ class RekordboxPlaylistSynchronizer:
                 # Parse the playlist name
                 metadata = self.name_parser.parse_playlist_name(playlist_dir.name)
 
-                # Collect all genre and party tags
-                all_folder_names.update(metadata.genre_tags)
-                all_folder_names.update(metadata.party_tags)
+                segments = self._get_folder_path_segments(metadata)
+                if segments:
+                    all_folder_paths.add(tuple(segments))
 
             except Exception as e:
                 logger.debug("Could not parse playlist '%s': %s", playlist_dir.name, e)
                 continue
 
         # Create all folders
-        if all_folder_names:
-            logger.info("Creating %d genre/party folders...", len(all_folder_names))
-            for folder_name in sorted(all_folder_names):
-                folder = self._get_or_create_folder(folder_name)
-                self._folder_cache[folder_name] = str(folder.ID)
-                logger.info("  ✓ Folder '%s' (ID: %s)", folder_name, folder.ID)
+        if all_folder_paths:
+            logger.info(
+                "Creating %d genre/event folder paths...", len(all_folder_paths)
+            )
+            for path in sorted(["/".join(p) for p in all_folder_paths]):
+                segments = path.split("/")
+                folder_id = self._get_or_create_folder_path(segments)
+                logger.info("  ✓ Folder '%s' (ID: %s)", path, folder_id)
 
         self.db.commit()
-        logger.info("Pre-created %d folders", len(all_folder_names))
+        logger.info("Pre-created %d folder paths", len(all_folder_paths))
 
     def sync_playlist(self, playlist_name: str) -> Dict[str, Any]:
         """Synchronize a playlist from MP3 folder to Rekordbox database.
@@ -475,53 +497,113 @@ class RekordboxPlaylistSynchronizer:
         Returns:
             Folder ID or None for root folder
         """
-        # Determine folder name from tags
-        folder_name = None
+        segments = self._get_folder_path_segments(metadata)
 
-        # Prioritize genre tags, then party tags
-        if metadata.genre_tags:
-            folder_name = sorted(metadata.genre_tags)[0]  # Use first alphabetically
-        elif metadata.party_tags:
-            folder_name = sorted(metadata.party_tags)[0]
-
-        # If no genre/party tag, place in root
-        if not folder_name:
+        if not segments:
             logger.debug(
-                f"No genre/party tags for '{metadata.playlist_name}', using root"
+                f"No genre/event tags for '{metadata.playlist_name}', using root"
             )
             return None
 
-        # Check cache first
-        if folder_name in self._folder_cache:
-            folder_id = self._folder_cache[folder_name]
+        path_key = "/".join(segments)
+
+        if path_key in self._folder_cache:
+            folder_id = self._folder_cache[path_key]
             logger.debug(
-                f"Using cached folder '{folder_name}' (ID: {folder_id}) "
+                f"Using cached folder path '{path_key}' (ID: {folder_id}) "
                 f"for playlist '{metadata.playlist_name}'"
             )
             return folder_id
 
-        # Fallback: create folder if not in cache
-        folder = self._get_or_create_folder(folder_name)
-        folder_id = str(folder.ID)
-        self._folder_cache[folder_name] = folder_id
-
+        folder_id = self._get_or_create_folder_path(segments)
         logger.info(
             f"Playlist '{metadata.playlist_name}' will be placed in "
-            f"folder '{folder_name}' (ID: {folder_id})"
+            f"folder path '{path_key}' (ID: {folder_id})"
         )
         return folder_id
 
-    def _get_or_create_folder(self, folder_name: str) -> Any:
+    def _get_folder_path_segments(self, metadata: PlaylistMetadata) -> List[str]:
+        """Build folder path segments for the playlist."""
+
+        def _get_genre_category(genre: str) -> str:
+            if isinstance(self._genre_categories, dict):
+                for category, genres in self._genre_categories.items():
+                    if genre in genres:
+                        return category
+            return "Other Genres" if self._genre_categories else genre
+
+        # Genre-first
+        if metadata.genre_tags:
+            genre = sorted(metadata.genre_tags)[0]
+            status = (
+                sorted(metadata.status_tags)[0]
+                if metadata.status_tags
+                else self._genre_default_status
+            )
+            category = _get_genre_category(genre)
+            return [str(self._genre_root), str(category), str(status)]
+
+        # Events/party
+        if metadata.party_tags:
+            event = sorted(metadata.party_tags)[0]
+            year = metadata.event_year or self._events_misc
+            return [str(self._events_root), str(event), str(year)]
+
+        # Fallback to Uncategorized genre with default status
+        return [
+            str(self._genre_root),
+            str(self._genre_uncategorized),
+            str(self._genre_default_status),
+        ]
+
+    def _get_or_create_folder_path(self, segments: List[str]) -> str:
+        """Create a folder path hierarchy and return the leaf folder ID.
+
+        Args:
+            segments: List of folder names to create
+
+        Returns:
+            The ID of the leaf folder
+        """
+        parent_id: Optional[str] = None
+        path_parts: List[str] = []
+
+        for segment in segments:
+            path_parts.append(segment)
+            path_key = "/".join(path_parts)
+
+            if path_key in self._folder_cache:
+                parent_id = self._folder_cache[path_key]
+                continue
+
+            folder = self._get_or_create_folder(segment, parent_id)
+            parent_id = str(folder.ID)
+            self._folder_cache[path_key] = parent_id
+
+        if parent_id is None:
+            raise PlaylistSyncError("Failed to create folder path")
+
+        return parent_id
+
+    def _get_or_create_folder(
+        self, folder_name: str, parent_id: Optional[str] = None
+    ) -> Any:
         """Get existing folder or create new one.
 
         Args:
             folder_name: Folder name
+            parent_id: Optional parent folder ID
 
         Returns:
             DjmdPlaylist instance with Attribute=1 (folder)
         """
         # Try to find existing folder
-        folder = self.db.get_playlist(Name=folder_name, Attribute=1).first()
+        query = self.db.get_playlist(Name=folder_name, Attribute=1)
+
+        if parent_id:
+            query = query.filter(db6.DjmdPlaylist.ParentID == parent_id)
+
+        folder = query.first()
 
         if folder:
             logger.debug("Found existing folder: %s", folder_name)
@@ -529,7 +611,7 @@ class RekordboxPlaylistSynchronizer:
 
         # Create new folder
         logger.info("Creating new folder: %s", folder_name)
-        folder = self.db.create_playlist_folder(folder_name)
+        folder = self.db.create_playlist_folder(folder_name, parent=parent_id)
         self.db.flush()
 
         return folder

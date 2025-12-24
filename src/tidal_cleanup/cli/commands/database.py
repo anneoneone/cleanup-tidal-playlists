@@ -7,7 +7,7 @@ tracking, conflict resolution, and deduplication.
 import logging
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import click
 from rich.console import Console
@@ -35,6 +35,43 @@ from ..display import display_db_sync_result
 
 console = Console()
 logger = logging.getLogger(__name__)
+
+
+def _display_folder_tree(
+    console: Console, tree: Dict[str, Any], prefix: str = "", is_last: bool = True
+) -> None:
+    """Display folder tree structure recursively.
+
+    Args:
+        console: Rich console for output
+        tree: Dictionary with 'name', 'playlists' list, and 'children' dict
+        prefix: Current line prefix for tree formatting
+        is_last: Whether this is the last item at current level
+    """
+    # Display current folder
+    branch = "└── " if is_last else "├── "
+    folder_name = tree.get("name", "Root")
+    playlists = tree.get("playlists", [])
+    children = tree.get("children", {})
+
+    if folder_name != "Root":
+        console.print(f"{prefix}{branch}📁 [cyan]{folder_name}[/cyan]")
+        new_prefix = prefix + ("    " if is_last else "│   ")
+    else:
+        new_prefix = ""
+
+    # Display playlists in this folder
+    all_items = list(playlists) + list(children.keys())
+    for i, playlist in enumerate(playlists):
+        is_last_item = i == len(all_items) - 1
+        item_branch = "└── " if is_last_item else "├── "
+        console.print(f"{new_prefix}{item_branch}🎵 {playlist}")
+
+    # Display subfolders
+    child_items = list(children.items())
+    for i, (_child_name, child_tree) in enumerate(child_items):
+        is_last_child = (i == len(child_items) - 1) and not playlists
+        _display_folder_tree(console, child_tree, new_prefix, is_last_child)
 
 
 def setup_progress_reporter(progress: bool, verbose: bool) -> None:
@@ -94,6 +131,24 @@ def db() -> None:
     help="Skip deduplication analysis",
 )
 @click.option(
+    "--sync-rekordbox",
+    is_flag=True,
+    help="Sync database playlists to Rekordbox after execution",
+)
+@click.option(
+    "--only-rekordbox",
+    is_flag=True,
+    help=(
+        "Skip all sync steps and only sync database to Rekordbox "
+        "(implies --sync-rekordbox)"
+    ),
+)
+@click.option(
+    "--emoji-config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to emoji-to-MyTag mapping config for Rekordbox folder placement",
+)
+@click.option(
     "--progress/--no-progress",
     default=True,
     help="Show progress bars (requires tqdm)",
@@ -115,11 +170,72 @@ def db() -> None:
         "Available stages: fetch, scan, dedup, decisions, execution"
     ),
 )
+def _sync_to_rekordbox(
+    config: Config,
+    db_service: DatabaseService,
+    emoji_config: Path,
+    dry_run: bool,
+    only_rekordbox: bool,
+    console: Console,
+) -> None:
+    """Sync database playlists to Rekordbox."""
+    console.print("\n[bold cyan]📤 Syncing to Rekordbox...[/bold cyan]")
+    try:
+        from ...core.rekordbox import RekordboxService
+        from ...core.rekordbox.snapshot_service import RekordboxSnapshotService
+
+        rekordbox_service = RekordboxService(config=config)
+        if rekordbox_service.db is None:
+            console.print(
+                "[yellow]⚠️  Rekordbox database not available, skipping sync[/yellow]"
+            )
+            return
+
+        rekordbox_snapshot = RekordboxSnapshotService(
+            rekordbox_service=rekordbox_service,
+            db_service=db_service,
+            config=config,
+            emoji_config_path=emoji_config,
+        )
+
+        rb_result = rekordbox_snapshot.sync_database_to_rekordbox(
+            playlist_name=None, dry_run=dry_run
+        )
+
+        console.print(
+            f"  [green]✓ Synced {rb_result['playlists_processed']} "
+            f"playlists to Rekordbox ({rb_result['playlists_created']} "
+            f"created, {rb_result['tracks_added']} tracks added)[/green]"
+        )
+
+        # Display folder tree structure
+        if rb_result.get("folder_tree"):
+            console.print("\n[bold cyan]📁 Folder Structure:[/bold cyan]")
+            _display_folder_tree(console, rb_result["folder_tree"])
+
+        if dry_run:
+            msg = "\n  [yellow]⚠️  DRY RUN - No changes made " "to Rekordbox[/yellow]"
+            console.print(msg)
+    except ImportError:
+        console.print(
+            "[yellow]⚠️  pyrekordbox not installed, " "skipping Rekordbox sync[/yellow]"
+        )
+    except Exception as e:
+        logger.exception("Rekordbox sync failed")
+        console.print(f"  [red]✗ Rekordbox sync failed: {e}[/red]")
+        if not only_rekordbox:
+            # Only re-raise if we did full sync; for rekordbox-only just warn
+            raise click.ClickException(str(e))
+
+
 def db_sync(
     dry_run: bool,
     no_fetch: bool,
     no_scan: bool,
     no_dedup: bool,
+    sync_rekordbox: bool,
+    only_rekordbox: bool,
+    emoji_config: Path,
     progress: bool,
     verbose: bool,
     stage_until: str,
@@ -132,6 +248,7 @@ def db_sync(
     3. Analyze deduplication needs
     4. Generate sync decisions (download, create, etc.)
     5. Execute decisions with conflict resolution
+    6. (Optional) Sync playlists to Rekordbox
 
     Examples:
         # Full sync with progress
@@ -139,6 +256,12 @@ def db_sync(
 
         # Dry run to see what would happen
         tidal-cleanup db sync --dry-run
+
+        # Sync and update Rekordbox
+        tidal-cleanup db sync --sync-rekordbox
+
+        # Only sync database to Rekordbox (skip Tidal/filesystem steps)
+        tidal-cleanup db sync --only-rekordbox
 
         # Sync without re-fetching Tidal data
         tidal-cleanup db sync --no-fetch
@@ -149,24 +272,55 @@ def db_sync(
     config = Config()
     db_service = DatabaseService(db_path=config.database_path)
 
+    # If only_rekordbox is set, skip all sync steps
+    if only_rekordbox:
+        summary = _handle_rekordbox_only_mode(dry_run)
+        sync_rekordbox = True
+    else:
+        summary = _execute_full_sync(
+            config,
+            db_service,
+            no_fetch,
+            no_scan,
+            no_dedup,
+            dry_run,
+            progress,
+            verbose,
+            stage_until,
+        )
+
+    # Step 6: Sync to Rekordbox (optional or only step)
+    if sync_rekordbox and summary.get("success", False):
+        _sync_to_rekordbox(
+            config, db_service, emoji_config, dry_run, only_rekordbox, console
+        )
+
+
+def _handle_rekordbox_only_mode(dry_run: bool) -> Dict[str, bool]:
+    """Handle the rekordbox-only sync mode."""
+    console.print("[bold cyan]📤 Syncing database to Rekordbox only...[/bold cyan]")
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE - No changes will be made[/yellow]\n")
+    return {"success": True}
+
+
+def _execute_full_sync(
+    config: Config,
+    db_service: DatabaseService,
+    no_fetch: bool,
+    no_scan: bool,
+    no_dedup: bool,
+    dry_run: bool,
+    progress: bool,
+    verbose: bool,
+    stage_until: str,
+) -> Dict[str, Any]:
+    """Execute the full sync workflow."""
     # Setup progress tracking (for future use)
     setup_progress_reporter(progress, verbose)
 
-    # Initialize and authenticate Tidal services
-    tidal_session = None
-    tidal_download_service = TidalDownloadService(config)
-
-    if not no_fetch:
-        console.print("[cyan]Connecting to Tidal API...[/cyan]")
-        tidal_api_service = TidalApiService(config.tidal_token_file)
-        tidal_api_service.connect()
-        tidal_session = tidal_api_service.session
-        console.print("[green]✓[/green] Connected to Tidal API\n")
-
-    # Authenticate download service (needed for execution stage)
-    console.print("[cyan]Initializing Tidal downloader...[/cyan]")
-    tidal_download_service.connect()
-    console.print("[green]✓[/green] Tidal downloader ready\n")
+    # Initialize services
+    tidal_session, tidal_download_service = _initialize_tidal_services(config, no_fetch)
 
     # Create orchestrator
     orchestrator = SyncOrchestrator(
@@ -203,10 +357,34 @@ def db_sync(
             if len(result.errors) > 10:
                 console.print(f"  ... and {len(result.errors) - 10} more")
 
+        return summary
+
     except Exception as e:
         logger.exception("Sync failed")
         console.print(f"\n[red]✗ Sync failed: {e}[/red]")
         raise click.ClickException(str(e))
+
+
+def _initialize_tidal_services(
+    config: Config, no_fetch: bool
+) -> tuple[Any, TidalDownloadService]:
+    """Initialize and authenticate Tidal services."""
+    tidal_session = None
+    tidal_download_service = TidalDownloadService(config)
+
+    if not no_fetch:
+        console.print("[cyan]Connecting to Tidal API...[/cyan]")
+        tidal_api_service = TidalApiService(config.tidal_token_file)
+        tidal_api_service.connect()
+        tidal_session = tidal_api_service.session
+        console.print("[green]✓[/green] Connected to Tidal API\n")
+
+    # Authenticate download service (needed for execution stage)
+    console.print("[cyan]Initializing Tidal downloader...[/cyan]")
+    tidal_download_service.connect()
+    console.print("[green]✓[/green] Tidal downloader ready\n")
+
+    return tidal_session, tidal_download_service
 
 
 @db.command(name="fetch")

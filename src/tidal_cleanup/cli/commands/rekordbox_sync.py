@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import click
@@ -34,8 +35,13 @@ console = Console()
     is_flag=True,
     help="Keep tracks that exist only in Rekordbox playlists",
 )
+@click.option(
+    "--emoji-config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to emoji-to-MyTag mapping config (defaults to project config)",
+)
 def sync_rekordbox_command(
-    playlist: Optional[str], dry_run: bool, no_prune: bool
+    playlist: Optional[str], dry_run: bool, no_prune: bool, emoji_config: Optional[Path]
 ) -> None:
     """Sync database playlists to the local Rekordbox collection."""
     config = Config()
@@ -44,7 +50,12 @@ def sync_rekordbox_command(
     if rekordbox_service is None or rekordbox_service.db is None:
         raise click.ClickException("Rekordbox service is not available")
 
-    sync_service = RekordboxSnapshotService(rekordbox_service, db_service, config)
+    sync_service = RekordboxSnapshotService(
+        rekordbox_service,
+        db_service,
+        config,
+        emoji_config_path=emoji_config,
+    )
     summary = sync_service.sync_database_to_rekordbox(
         playlist_name=playlist,
         dry_run=dry_run,

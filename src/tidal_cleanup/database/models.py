@@ -469,3 +469,35 @@ class SyncSnapshot(Base):
             f"<SyncSnapshot(id={self.id}, type='{self.snapshot_type}', "
             f"created_at='{self.created_at}')>"
         )
+
+
+class RekordboxFolder(Base):
+    """Tracks Rekordbox folder IDs to avoid recreating them on every sync."""
+
+    __tablename__ = "rekordbox_folders"
+
+    # Primary key
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Folder path (e.g., "Genre/House/Archived")
+    folder_path: Mapped[str] = mapped_column(
+        String(500), unique=True, nullable=False, index=True
+    )
+
+    # Rekordbox folder ID
+    rekordbox_folder_id: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    def __repr__(self) -> str:
+        """String representation of RekordboxFolder."""
+        return (
+            f"<RekordboxFolder(id={self.id}, path='{self.folder_path}', "
+            f"rekordbox_id='{self.rekordbox_folder_id}')>"
+        )

@@ -10,7 +10,15 @@ from typing import Any, Dict, List, Optional, cast
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
-from .models import Base, Playlist, PlaylistTrack, SyncOperation, SyncSnapshot, Track
+from .models import (
+    Base,
+    Playlist,
+    PlaylistTrack,
+    RekordboxFolder,
+    SyncOperation,
+    SyncSnapshot,
+    Track,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1551,3 +1559,74 @@ class DatabaseService:
                 },
                 "database_path": str(self.db_path),
             }
+
+    # ---------------------------------------------------------------------
+    # Rekordbox Folder Management
+    # ---------------------------------------------------------------------
+
+    def get_rekordbox_folder_id(self, folder_path: str) -> Optional[str]:
+        """Get cached Rekordbox folder ID for a folder path.
+
+        Args:
+            folder_path: Folder path (e.g., "Genre/House/Archived")
+
+        Returns:
+            Rekordbox folder ID if cached, None otherwise
+        """
+        with self.get_session() as session:
+            folder = (
+                session.query(RekordboxFolder)
+                .filter(RekordboxFolder.folder_path == folder_path)
+                .first()
+            )
+            return folder.rekordbox_folder_id if folder else None
+
+    def set_rekordbox_folder_id(
+        self, folder_path: str, rekordbox_folder_id: str
+    ) -> RekordboxFolder:
+        """Cache Rekordbox folder ID for a folder path.
+
+        Args:
+            folder_path: Folder path (e.g., "Genre/House/Archived")
+            rekordbox_folder_id: Rekordbox folder ID
+
+        Returns:
+            RekordboxFolder instance
+        """
+        with self.get_session() as session:
+            folder = (
+                session.query(RekordboxFolder)
+                .filter(RekordboxFolder.folder_path == folder_path)
+                .first()
+            )
+
+            if folder:
+                folder.rekordbox_folder_id = rekordbox_folder_id
+                folder.updated_at = datetime.now(timezone.utc)
+            else:
+                folder = RekordboxFolder(
+                    folder_path=folder_path, rekordbox_folder_id=rekordbox_folder_id
+                )
+                session.add(folder)
+
+            session.commit()
+            session.refresh(folder)
+            return folder
+
+    def clear_rekordbox_folder_cache(self, folder_path: Optional[str] = None) -> int:
+        """Clear cached Rekordbox folder IDs.
+
+        Args:
+            folder_path: Optional specific folder path to clear.
+                        If None, clears all cached folders.
+
+        Returns:
+            Number of folders cleared
+        """
+        with self.get_session() as session:
+            query = session.query(RekordboxFolder)
+            if folder_path:
+                query = query.filter(RekordboxFolder.folder_path == folder_path)
+            count = query.delete()
+            session.commit()
+            return count
