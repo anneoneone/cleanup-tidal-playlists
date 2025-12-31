@@ -188,33 +188,50 @@ class RekordboxSnapshotService:
         self._ensure_root_folders(dry_run)
 
         for playlist in playlists:
+            self._sync_single_playlist(
+                playlist=playlist,
+                summary=summary,
+                folder_tree=folder_tree,
+                dry_run=dry_run,
+                prune_extra=prune_extra,
+            )
 
-            try:
-                stats = self._sync_playlist(
-                    playlist, dry_run=dry_run, prune=prune_extra
-                )
-                summary.add_playlist_stats(stats)
-
-                # Build folder tree for display
-                self._add_to_folder_tree(folder_tree, playlist)
-
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.exception(
-                    "Failed to sync playlist '%s' to Rekordbox", playlist.name
-                )
-                summary.errors.append(f"{playlist.name}: {exc}")
-                if not dry_run:
-                    self._db.rollback()
-
-        if not dry_run:
-            self._db.commit()
-        else:
-            # Ensure nothing sticks if the caller calls dry-run repeatedly
+        # Final commit for dry-run cleanup
+        if dry_run:
             self._db.rollback()
 
         result = summary.to_dict()
         result["folder_tree"] = folder_tree
         return result
+
+    def _sync_single_playlist(
+        self,
+        playlist: Playlist,
+        summary: RekordboxSyncSummary,
+        folder_tree: Dict[str, Any],
+        dry_run: bool,
+        prune_extra: bool,
+    ) -> None:
+        """Sync one playlist with isolated error handling and commit."""
+        try:
+            stats = self._sync_playlist(playlist, dry_run=dry_run, prune=prune_extra)
+            summary.add_playlist_stats(stats)
+
+            # Build folder tree for display
+            self._add_to_folder_tree(folder_tree, playlist)
+
+            # Commit per playlist to avoid rolling back all playlists on a single error
+            if not dry_run:
+                self._db.commit()
+
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to sync playlist '%s' to Rekordbox", playlist.name)
+            summary.errors.append(f"{playlist.name}: {exc}")
+            if not dry_run:
+                try:
+                    self._db.rollback()
+                except Exception as rollback_exc:
+                    logger.error("Rollback failed: %s", rollback_exc)
 
     # ------------------------------------------------------------------
     # Cleanup helpers
@@ -373,26 +390,45 @@ class RekordboxSnapshotService:
             dry_run,
             metadata,
         )
+        self._finalize_playlist_sync(
+            playlist,
+            rb_playlist,
+            retained_content_ids,
+            stats,
+            prune,
+            dry_run,
+        )
 
-        if not dry_run and rb_playlist and prune:
+        return stats
+
+    def _finalize_playlist_sync(
+        self,
+        playlist: Playlist,
+        rb_playlist: Optional[Any],
+        retained_content_ids: Set[str],
+        stats: PlaylistSyncStats,
+        prune: bool,
+        dry_run: bool,
+    ) -> None:
+        if dry_run or not rb_playlist:
+            return
+
+        if prune:
             stats.tracks_removed += self._remove_extra_tracks(
                 rb_playlist, retained_content_ids
             )
 
-        if not dry_run and rb_playlist:
-            final_index = self._build_track_index(
-                self.rekordbox_service.refresh_playlist(rb_playlist)
-            )
-            final_count = len(final_index.by_id)
-            self.db_service.update_playlist(
-                playlist.id,
-                {
-                    "track_count_rekordbox": final_count,
-                    "last_synced_at": datetime.now(timezone.utc),
-                },
-            )
-
-        return stats
+        final_index = self._build_track_index(
+            self.rekordbox_service.refresh_playlist(rb_playlist)
+        )
+        final_count = len(final_index.by_id)
+        self.db_service.update_playlist(
+            playlist.id,
+            {
+                "track_count_rekordbox": final_count,
+                "last_synced_at": datetime.now(timezone.utc),
+            },
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -539,14 +575,12 @@ class RekordboxSnapshotService:
         metadata: Any,
     ) -> Optional[Any]:
         parent_folder_id = self._get_folder_for_metadata(metadata, dry_run=dry_run)
+        clean_name, legacy_name, raw_name = self._build_playlist_names(
+            metadata, playlist
+        )
 
-        # Get clean display name with energy; append status only when non-default
-        clean_name = self._get_clean_display_name(metadata, include_status=True)
-        legacy_name = self._get_clean_display_name(metadata, include_status=False)
-
-        # Try to find existing playlist
         rb_playlist = self._find_existing_rekordbox_playlist(
-            playlist, clean_name, legacy_name, parent_folder_id, dry_run
+            playlist, clean_name, legacy_name, raw_name, parent_folder_id, dry_run
         )
         if rb_playlist:
             return rb_playlist
@@ -555,6 +589,27 @@ class RekordboxSnapshotService:
             stats.created = True
             return None
 
+        return self._create_playlist_with_retry(
+            clean_name, parent_folder_id, metadata, playlist, stats
+        )
+
+    def _build_playlist_names(
+        self, metadata: Any, playlist: Playlist
+    ) -> tuple[str, str, str]:
+        """Compute clean/legacy/raw playlist names once."""
+        clean = self._get_clean_display_name(metadata, include_status=True)
+        legacy = self._get_clean_display_name(metadata, include_status=False)
+        raw = getattr(metadata, "raw_name", None) or playlist.name
+        return clean, legacy, raw
+
+    def _create_playlist_with_retry(
+        self,
+        clean_name: str,
+        parent_folder_id: Optional[str],
+        metadata: Any,
+        playlist: Playlist,
+        stats: PlaylistSyncStats,
+    ) -> Optional[Any]:
         try:
             rb_playlist = self._db.create_playlist(clean_name, parent=parent_folder_id)
             self._db.flush()
@@ -570,12 +625,11 @@ class RekordboxSnapshotService:
                     clean_name,
                 )
                 self.db_service.clear_rekordbox_folder_cache()
-                # Retry with fresh cache
-                parent_folder_id = self._get_folder_for_metadata(
+                refreshed_parent = self._get_folder_for_metadata(
                     metadata, dry_run=False
                 )
                 rb_playlist = self._db.create_playlist(
-                    clean_name, parent=parent_folder_id
+                    clean_name, parent=refreshed_parent
                 )
                 self._db.flush()
                 stats.created = True
@@ -591,37 +645,73 @@ class RekordboxSnapshotService:
         playlist: Playlist,
         clean_name: str,
         legacy_name: str,
+        raw_name: str,
         parent_folder_id: Optional[str],
         dry_run: bool,
     ) -> Optional[Any]:
         """Find existing Rekordbox playlist by ID, name, or legacy name."""
-        # Try by stored ID first
+        # Try by stored ID first (most reliable)
         if playlist.rekordbox_playlist_id:
             rb_playlist = self._get_playlist_by_id(playlist.rekordbox_playlist_id)
             if rb_playlist:
+                logger.info("Found existing playlist by stored ID: %s", clean_name)
                 return self._update_existing_playlist(
                     rb_playlist, clean_name, parent_folder_id, dry_run
                 )
 
-        # Try by current name
-        rb_playlist = self._get_playlist_by_name(clean_name)
+        # Try by current name IN TARGET FOLDER (preferred)
+        rb_playlist = self._get_playlist_by_name_and_parent(
+            clean_name, parent_folder_id
+        )
         if rb_playlist and not dry_run:
+            logger.info("Found existing playlist in target folder: %s", clean_name)
             self.db_service.set_playlist_rekordbox_id(playlist.id, str(rb_playlist.ID))
             return self._update_existing_playlist(
                 rb_playlist, clean_name, parent_folder_id, dry_run
             )
 
         # Fallback: migrate legacy playlists created without status in the name
+        # Only move when already in the same folder; avoid pulling from another
+        # status folder
         if legacy_name != clean_name:
             legacy_rb_playlist = self._get_playlist_by_name(legacy_name)
             if legacy_rb_playlist and not dry_run:
-                self.db_service.set_playlist_rekordbox_id(
-                    playlist.id, str(legacy_rb_playlist.ID)
-                )
-                legacy_rb_playlist = self._update_existing_playlist(
-                    legacy_rb_playlist, clean_name, parent_folder_id, dry_run
-                )
-                return legacy_rb_playlist
+                legacy_parent = getattr(legacy_rb_playlist, "ParentID", None)
+                if legacy_parent == parent_folder_id:
+                    logger.info(
+                        "Found legacy playlist '%s' in target folder, updating name",
+                        legacy_name,
+                    )
+                    self.db_service.set_playlist_rekordbox_id(
+                        playlist.id, str(legacy_rb_playlist.ID)
+                    )
+                    legacy_rb_playlist = self._update_existing_playlist(
+                        legacy_rb_playlist, clean_name, parent_folder_id, dry_run
+                    )
+                    return legacy_rb_playlist
+
+        # Final fallback: match by raw database name (may contain emojis)
+        if raw_name and raw_name != clean_name:
+            rb_by_raw = self._get_playlist_by_name(raw_name)
+            if rb_by_raw and not dry_run:
+                raw_parent = getattr(rb_by_raw, "ParentID", None)
+                if raw_parent != parent_folder_id:
+                    logger.warning(
+                        (
+                            "Found raw name playlist '%s' in different folder "
+                            "(parent=%s), moving to parent=%s"
+                        ),
+                        raw_name,
+                        raw_parent,
+                        parent_folder_id,
+                    )
+                    self.db_service.set_playlist_rekordbox_id(
+                        playlist.id, str(rb_by_raw.ID)
+                    )
+                    rb_by_raw = self._update_existing_playlist(
+                        rb_by_raw, clean_name, parent_folder_id, dry_run
+                    )
+                    return rb_by_raw
 
         return None
 
@@ -655,6 +745,26 @@ class RekordboxSnapshotService:
             query = self._db.get_playlist(Name=name, Attribute=0)
             return query.first()
         except Exception:
+            return None
+
+    def _get_playlist_by_name_and_parent(
+        self, name: str, parent_id: Optional[str]
+    ) -> Optional[Any]:
+        """Get playlist by name AND parent folder (more specific lookup)."""
+        try:
+            query = self._db.get_playlist(Name=name, Attribute=0)
+            if PYREKORDBOX_AVAILABLE and db6 is not None:
+                if parent_id:
+                    query = query.filter(db6.DjmdPlaylist.ParentID == parent_id)
+                else:
+                    # Root playlists have ParentID == "root"
+                    query = query.filter(db6.DjmdPlaylist.ParentID == "root")
+            result = query.first()
+            if result:
+                logger.debug("Found playlist '%s' in parent %s", name, parent_id)
+            return result
+        except Exception as exc:
+            logger.debug("Failed to lookup playlist by name and parent: %s", exc)
             return None
 
     def _get_clean_display_name(
@@ -956,14 +1066,24 @@ class RekordboxSnapshotService:
             and self._genre_uncategorized not in genre_tags
         ):
             genre = sorted(genre_tags)[0]
+            has_explicit_status = bool(getattr(metadata, "status_tags", None))
             status = (
                 sorted(metadata.status_tags)[0]
-                if getattr(metadata, "status_tags", None)
+                if has_explicit_status
                 else self._genre_default_status
             )
             # Include genre category in path - always include status folder
             category = self._get_genre_category(genre)
             segments = [self._genre_root, category, status]
+            logger.info(
+                "Genre playlist '%s': genre=%s, status=%s (%s), category=%s, path=%s",
+                getattr(metadata, "playlist_name", "unknown"),
+                genre,
+                status,
+                "explicit" if has_explicit_status else "default",
+                category,
+                " > ".join(segments),
+            )
             return segments
 
         if getattr(metadata, "party_tags", None):
@@ -983,57 +1103,160 @@ class RekordboxSnapshotService:
     ) -> Optional[str]:
         segments = self._get_folder_path_segments(metadata)
         if not segments:
+            logger.debug("No folder path segments for playlist metadata")
             return None
-        return self._resolve_folder_path(segments, create=not dry_run)
+
+        playlist_name = getattr(metadata, "playlist_name", "unknown")
+        logger.debug(
+            "Resolving folder path for playlist '%s': %s",
+            playlist_name,
+            " > ".join(segments),
+        )
+
+        folder_id = self._resolve_folder_path(segments, create=not dry_run)
+        if folder_id:
+            logger.debug(
+                "Folder path resolved for '%s': %s -> ID=%s",
+                playlist_name,
+                " > ".join(segments),
+                folder_id,
+            )
+        else:
+            logger.warning(
+                "Failed to resolve folder path for '%s': %s",
+                playlist_name,
+                " > ".join(segments),
+            )
+        return folder_id
+
+    def _get_cached_folder_if_valid(
+        self, path_key: str, parent_id: Optional[str]
+    ) -> Optional[str]:
+        """Return cached folder ID if it still points to a valid folder."""
+        cached_id = self.db_service.get_rekordbox_folder_id(path_key)
+        if not cached_id:
+            return None
+        try:
+            result = self._db.get_playlist(ID=cached_id)
+            folder = result.first() if hasattr(result, "first") else result
+            if folder and getattr(folder, "Attribute", None) == 1:
+                logger.debug(
+                    "Using cached folder ID %s for path '%s'", cached_id, path_key
+                )
+                return cached_id
+            logger.warning(
+                "Cached folder ID %s is invalid for path '%s', clearing cache",
+                cached_id,
+                path_key,
+            )
+        except Exception as cache_exc:
+            logger.warning(
+                "Failed to validate cached folder ID %s: %s", cached_id, cache_exc
+            )
+
+        self.db_service.clear_rekordbox_folder_cache(path_key)
+        return None
+
+    def _get_or_create_folder_segment(
+        self,
+        segment: str,
+        parent_id: Optional[str],
+        path_key: str,
+        create: bool,
+    ) -> Optional[Any]:
+        """Fetch or create a folder for a single path segment."""
+        folder = self._find_folder(segment, parent_id)
+        if folder:
+            return folder
+
+        if not create:
+            logger.warning(
+                "Folder '%s' not found and create=False (path: %s)", segment, path_key
+            )
+            return None
+
+        target_parent = parent_id or None
+        try:
+            logger.info(
+                "Creating folder '%s' with parent=%s (path: %s)",
+                segment,
+                target_parent,
+                path_key,
+            )
+            folder = self._db.create_playlist_folder(segment, parent=target_parent)
+            self._db.flush()
+            logger.info(
+                "Created folder '%s' at path '%s' with ID=%s",
+                segment,
+                path_key,
+                folder.ID,
+            )
+            return folder
+        except Exception as create_exc:
+            logger.error(
+                "Failed to create folder '%s' with parent=%s (path: %s): %s",
+                segment,
+                target_parent,
+                path_key,
+                create_exc,
+                exc_info=True,
+            )
+            return None
 
     def _resolve_folder_path(
         self, segments: Sequence[str], create: bool = True
     ) -> Optional[str]:
         parent_id: Optional[str] = None
         path_parts: List[str] = []
+        logger.info(
+            "Resolving folder path with %d segments: %s (create=%s)",
+            len(segments),
+            " > ".join(segments),
+            create,
+        )
 
-        for segment in segments:
+        for idx, segment in enumerate(segments):
             path_parts.append(segment)
             path_key = "/".join(path_parts)
+            logger.debug(
+                "Segment %d/%d: '%s' (path: %s, parent: %s)",
+                idx + 1,
+                len(segments),
+                segment,
+                path_key,
+                parent_id,
+            )
 
             # Check database cache first
-            cached_id = self.db_service.get_rekordbox_folder_id(path_key)
+            cached_id = self._get_cached_folder_if_valid(path_key, parent_id)
             if cached_id:
-                # Validate cached folder still exists
-                try:
-                    folder = self._db.get_playlist(ID=cached_id).first()
-                    if (
-                        folder and getattr(folder, "Attribute", None) == 1
-                    ):  # Is a folder
-                        parent_id = cached_id
-                        continue
-                    else:
-                        # Cached ID is invalid, clear it from cache
-                        logger.debug(
-                            "Cached folder ID %s is invalid, clearing cache", cached_id
-                        )
-                        self.db_service.clear_rekordbox_folder_cache(path_key)
-                except Exception:
-                    # Cached ID lookup failed, clear it
-                    logger.debug("Failed to validate cached folder ID %s", cached_id)
-                    self.db_service.clear_rekordbox_folder_cache(path_key)
+                parent_id = cached_id
+                continue
 
-            folder = self._find_folder(segment, parent_id)
-            if not folder and not create:
-                return None
-
-            if not folder and create:
-                target_parent = parent_id or None
-                folder = self._db.create_playlist_folder(segment, parent=target_parent)
-                self._db.flush()
-
+            folder = self._get_or_create_folder_segment(
+                segment, parent_id, path_key, create
+            )
             if not folder:
+                logger.error(
+                    "Folder creation failed for '%s' at path '%s'", segment, path_key
+                )
                 return None
 
             parent_id = str(folder.ID)
             # Cache in database for future syncs
             self.db_service.set_rekordbox_folder_id(path_key, parent_id)
+            logger.debug(
+                "Folder chain step %d complete: '%s' -> ID=%s",
+                idx + 1,
+                path_key,
+                parent_id,
+            )
 
+        logger.info(
+            "Folder path resolved successfully: %s -> parent_id=%s",
+            " > ".join(segments),
+            parent_id,
+        )
         return parent_id
 
     def _find_folder(self, name: str, parent_id: Optional[str]) -> Optional[Any]:
