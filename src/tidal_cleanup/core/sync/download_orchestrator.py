@@ -199,6 +199,11 @@ class DownloadOrchestrator:
                 result.add_error(f"Track {decision.track_id} not found in database")
                 return
 
+            if not track.tidal_id:
+                result.downloads_failed += 1
+                result.add_error(f"Track {track.id} has no tidal_id; skipping download")
+                return
+
             # Mark as downloading
             self._update_track_status(track, DownloadStatus.DOWNLOADING)
 

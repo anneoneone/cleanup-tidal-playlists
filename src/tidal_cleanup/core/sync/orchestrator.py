@@ -154,11 +154,16 @@ class SyncOrchestrator:
             db_service, playlists_root=playlists_root
         )
         self.dedup_logic = DeduplicationLogic(db_service)
+        additional_roots: list[Path] = []
+        if config.bandcamp_playlists_directory:
+            additional_roots.append(config.bandcamp_playlists_directory)
+
         self.decision_engine = SyncDecisionEngine(
             db_service,
             music_root=config.mp3_directory,
             target_format=config.target_audio_format,
             dedup_logic=self.dedup_logic,
+            additional_playlist_roots=additional_roots or None,
         )
         self.download_orchestrator = DownloadOrchestrator(
             db_service=db_service,

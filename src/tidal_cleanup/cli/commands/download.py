@@ -189,6 +189,11 @@ def download(
                 db_service,
                 music_root=target_root,
                 target_format=target_format_normalized,
+                additional_playlist_roots=(
+                    [config.bandcamp_playlists_directory]
+                    if config.bandcamp_playlists_directory
+                    else None
+                ),
             )
             decisions = decision_engine.analyze_all_playlists()
 

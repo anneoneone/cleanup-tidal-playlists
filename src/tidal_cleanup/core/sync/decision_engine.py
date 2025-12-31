@@ -12,7 +12,13 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
-from ...database.models import DownloadStatus, Playlist, PlaylistTrack, Track
+from ...database.models import (
+    DownloadStatus,
+    Playlist,
+    PlaylistSource,
+    PlaylistTrack,
+    Track,
+)
 from ...database.service import DatabaseService
 
 if TYPE_CHECKING:  # pragma: no cover - type checking only
@@ -118,18 +124,24 @@ class SyncDecisionEngine:
         music_root: Path | str,
         target_format: Optional[str] = None,
         dedup_logic: Optional["DeduplicationLogic"] = None,
+        additional_playlist_roots: Optional[list[Path]] = None,
     ):
         """Initialize the decision engine.
 
         Args:
-            db_service: Database service instance
-            music_root: Root directory for music files (contains Playlists/)
-            target_format: Desired audio format/extension for downloads (default mp3)
-            dedup_logic: Optional deduplication logic instance for future use
+            db_service: Database service instance.
+            music_root: Root directory for music files (contains Playlists/).
+            target_format: Desired audio format/extension for downloads (default mp3).
+            dedup_logic: Optional deduplication logic instance for future use.
+            additional_playlist_roots: Optional extra playlist roots (e.g., Bandcamp) to
+                consider when resolving playlist directories and file existence.
         """
         self.db_service = db_service
         self.music_root = Path(music_root)
         self.playlists_root = self.music_root / "Playlists"
+        extra_roots = additional_playlist_roots or []
+        self.playlist_roots = [self.playlists_root] + list(extra_roots)
+        self.bandcamp_root = next((root for root in extra_roots if root), None)
         normalized_format = (target_format or "mp3").lower().replace(".", "")
         self.target_format = normalized_format
         self.target_extension = f".{normalized_format}"
@@ -242,10 +254,10 @@ class SyncDecisionEngine:
         Returns:
             Number of tracks removed
         """
-        playlist_dir = self.playlists_root / playlist.name
+        playlist_dir = self._resolve_playlist_dir(playlist)
         removed_count = 0
 
-        if not playlist_dir.exists():
+        if not playlist_dir:
             # Entire playlist directory missing - clean up local-only tracks
             logger.info(
                 "Playlist directory missing: %s - cleaning up local tracks",
@@ -266,6 +278,19 @@ class SyncDecisionEngine:
                 removed_count += self._remove_local_track(playlist, pt)
 
         return removed_count
+
+    def _resolve_playlist_dir(self, playlist: Playlist) -> Optional[Path]:
+        """Find the playlist directory, respecting playlist source."""
+        if playlist.source == PlaylistSource.LOCAL.value and self.bandcamp_root:
+            candidate = self.bandcamp_root / playlist.name
+            if candidate.exists():
+                return candidate
+
+        for root in self.playlist_roots:
+            candidate = root / playlist.name
+            if candidate.exists():
+                return candidate
+        return None
 
     def _remove_local_only_tracks(self, playlist: Playlist) -> int:
         """Remove all local-only tracks from a playlist.
@@ -305,8 +330,16 @@ class SyncDecisionEngine:
         # Check if any of the track's files exist in THIS playlist directory
         # file_paths contains relative paths from music_root
         for file_path_str in track.file_paths:
-            # Build full path from relative path
-            full_path = str(self.music_root / file_path_str)
+            file_path = Path(file_path_str)
+
+            # Absolute path support for non-music_root locations (e.g., Bandcamp)
+            if file_path.is_absolute():
+                if file_path.exists():
+                    return False
+                continue
+
+            # Build full path from relative path under the main music root
+            full_path = str(self.music_root / file_path)
 
             # Check if this file exists on disk
             if full_path in disk_files:
@@ -404,6 +437,17 @@ class SyncDecisionEngine:
                 playlist_track_id=playlist_track.id,
                 target_path=str(existing_path),
                 reason="Track exists in playlist directory",
+                priority=0,
+            )
+
+        # Local/Bandcamp tracks (no tidal_id) should never trigger downloads
+        if not track.tidal_id:
+            return DecisionResult(
+                action=SyncAction.NO_ACTION,
+                track_id=track.id,
+                playlist_id=playlist.id,
+                playlist_track_id=playlist_track.id,
+                reason="Local-only track (no tidal_id)",
                 priority=0,
             )
 
@@ -741,7 +785,9 @@ class SyncDecisionEngine:
         self, playlist: Playlist, playlist_tracks: List[PlaylistTrack]
     ) -> Dict[str, Set[int]]:
         """Map playlist file paths that are still referenced in Tidal."""
-        playlist_dir = self.playlists_root / playlist.name
+        playlist_dir = self._resolve_playlist_dir(playlist)
+        if not playlist_dir:
+            return {}
         active_paths: Dict[str, Set[int]] = {}
 
         for pt in playlist_tracks:

@@ -8,6 +8,7 @@ import click
 from rich.console import Console
 
 from ...config import Config
+from ...core.local.bandcamp_snapshot_service import BandcampSnapshotService
 from ...core.rekordbox.snapshot_service import RekordboxSnapshotService
 from ...core.sync.decision_engine import SyncDecisionEngine
 from ...core.tidal.snapshot_service import TidalSnapshotService
@@ -55,16 +56,16 @@ def _sync_tidal_stage(db_service: DatabaseService, playlist: Optional[str]) -> b
 
 
 def _cleanup_local_files_stage(db_service: DatabaseService, config: Config) -> None:
-    """Execute local files cleanup stage.
-
-    Args:
-        db_service: Database service instance
-        config: Application configuration
-    """
+    """Execute local files cleanup stage."""
     console.print("\n[bold blue]🧹 Cleaning up deleted local files...[/bold blue]")
     decision_engine = SyncDecisionEngine(
         db_service=db_service,
         music_root=config.mp3_directory,
+        additional_playlist_roots=(
+            [config.bandcamp_playlists_directory]
+            if config.bandcamp_playlists_directory
+            else None
+        ),
     )
     removed_count = decision_engine.cleanup_deleted_local_files()
     if removed_count > 0:
@@ -74,6 +75,36 @@ def _cleanup_local_files_stage(db_service: DatabaseService, config: Config) -> N
         )
     else:
         console.print("  [dim]✓ No deleted files to clean up[/dim]")
+
+
+def _sync_bandcamp_stage(
+    db_service: DatabaseService,
+    bandcamp_dir: Path,
+    playlist: Optional[str],
+) -> bool:
+    """Execute Bandcamp/local playlist sync stage."""
+    console.print("\n[bold blue]🎵 Syncing Bandcamp/local playlists...[/bold blue]")
+
+    service = BandcampSnapshotService(db_service=db_service, root_dir=bandcamp_dir)
+    result = service.sync_filesystem_to_db(playlist_name=playlist)
+
+    if result.get("playlists_seen", 0) == 0:
+        console.print("  [dim]\u2713 No Bandcamp playlists found[/dim]")
+        return False
+
+    console.print(
+        "  [green]\u2713 Processed "
+        f"{result['playlists_seen']} playlists; "
+        f"{result['tracks_added_or_updated']} tracks added/updated; "
+        f"{result['tracks_removed']} removed[/green]"
+    )
+
+    if created := result.get("playlists_created", 0):
+        console.print(f"  [yellow]\u2192 {created} playlists created[/yellow]")
+    if merged := result.get("playlists_merged", 0):
+        console.print(f"  [yellow]\u2192 {merged} playlists merged with Tidal[/yellow]")
+
+    return True
 
 
 def _sync_rekordbox_stage(
@@ -119,7 +150,7 @@ def _sync_rekordbox_stage(
     return True
 
 
-@click.command("sync")
+@click.command("sync")  # noqa: C901
 @click.option(
     "--playlist",
     "-p",
@@ -129,6 +160,11 @@ def _sync_rekordbox_stage(
     "--emoji-config",
     type=click.Path(exists=True, path_type=Path),
     help="Path to emoji-to-MyTag mapping config for Rekordbox folder placement",
+)
+@click.option(
+    "--bandcamp-dir",
+    type=click.Path(path_type=Path),
+    help="Root directory containing Bandcamp/local playlists",
 )
 @click.option(
     "--skip-tidal",
@@ -148,16 +184,18 @@ def _sync_rekordbox_stage(
 def sync_command(
     playlist: Optional[str],
     emoji_config: Optional[Path],
+    bandcamp_dir: Optional[Path],
     skip_tidal: bool,
     skip_rekordbox: bool,
     dry_run: bool,
-) -> None:
-    """Unified sync: Tidal → Database → Cleanup → Rekordbox.
+) -> None:  # noqa: C901
+    """Unified sync: Tidal/Bandcamp → Database → Cleanup → Rekordbox.
 
     This command performs a complete sync workflow:
     1. Sync Tidal playlists to local database
-    2. Clean up deleted local files
-    3. Sync database playlists to Rekordbox with emoji-based folder placement
+    2. Sync Bandcamp/local playlists from filesystem to database (if configured)
+    3. Clean up deleted local files
+    4. Sync database playlists to Rekordbox with emoji-based folder placement
 
     Use --skip-tidal or --skip-rekordbox to run only part of the workflow.
     """
@@ -168,6 +206,7 @@ def sync_command(
         db_service = init_db(config=config)
 
         tidal_synced = False
+        bandcamp_synced = False
         rekordbox_synced = False
 
         # Step 1: Sync Tidal to database
@@ -176,11 +215,22 @@ def sync_command(
         else:
             console.print("[dim]⏭️  Skipping Tidal sync[/dim]")
 
-        # Step 2 (new): Clean up deleted local files
+        # Step 2: Sync Bandcamp/local playlists to database
+        bandcamp_root = bandcamp_dir or config.bandcamp_playlists_directory
+        if bandcamp_root:
+            bandcamp_synced = _sync_bandcamp_stage(
+                db_service=db_service, bandcamp_dir=bandcamp_root, playlist=playlist
+            )
+        else:
+            console.print(
+                "[dim]⏭️  Skipping Bandcamp sync (no directory configured)[/dim]"
+            )
+
+        # Step 3: Clean up deleted local files
         if tidal_synced:
             _cleanup_local_files_stage(db_service, config)
 
-        # Step 3: Sync database to Rekordbox
+        # Step 4: Sync database to Rekordbox
         if not skip_rekordbox:
             rekordbox_synced = _sync_rekordbox_stage(
                 db_service, config, emoji_config, playlist, dry_run
@@ -190,10 +240,16 @@ def sync_command(
 
         # Summary
         console.print("\n[bold green]✅ Sync complete![/bold green]")
-        if tidal_synced and rekordbox_synced:
+        if tidal_synced and bandcamp_synced and rekordbox_synced:
+            console.print("  Tidal + Bandcamp → Database → Cleanup → Rekordbox")
+        elif tidal_synced and rekordbox_synced:
             console.print("  Tidal → Database → Cleanup → Rekordbox")
+        elif bandcamp_synced and rekordbox_synced:
+            console.print("  Bandcamp → Database → Cleanup → Rekordbox")
         elif tidal_synced:
             console.print("  Tidal → Database → Cleanup")
+        elif bandcamp_synced:
+            console.print("  Bandcamp → Database")
         elif rekordbox_synced:
             console.print("  Database → Rekordbox")
 

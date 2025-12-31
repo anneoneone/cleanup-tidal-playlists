@@ -7,7 +7,7 @@ tracking, conflict resolution, and deduplication.
 import logging
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import click
 from rich.console import Console
@@ -15,6 +15,7 @@ from rich.table import Table
 
 from ...config import Config
 from ...core.filesystem import FilesystemScanner
+from ...core.local.bandcamp_snapshot_service import BandcampSnapshotService
 from ...core.sync import (
     DecisionResult,
     DeduplicationLogic,
@@ -149,6 +150,11 @@ def db() -> None:
     help="Path to emoji-to-MyTag mapping config for Rekordbox folder placement",
 )
 @click.option(
+    "--bandcamp-dir",
+    type=click.Path(path_type=Path),
+    help="Root directory containing Bandcamp/local playlists",
+)
+@click.option(
     "--progress/--no-progress",
     default=True,
     help="Show progress bars (requires tqdm)",
@@ -177,7 +183,8 @@ def db_sync(
     no_dedup: bool,
     sync_rekordbox: bool,
     only_rekordbox: bool,
-    emoji_config: Path,
+    emoji_config: Optional[Path],
+    bandcamp_dir: Optional[Path],
     progress: bool,
     verbose: bool,
     stage_until: str,
@@ -202,6 +209,9 @@ def db_sync(
         # Sync and update Rekordbox
         tidal-cleanup db sync --sync-rekordbox
 
+        # Sync with additional Bandcamp/local playlists
+        tidal-cleanup db sync --bandcamp-dir /path/to/Playlists
+
         # Only sync database to Rekordbox (skip Tidal/filesystem steps)
         tidal-cleanup db sync --only-rekordbox
 
@@ -212,6 +222,10 @@ def db_sync(
         tidal-cleanup db sync --verbose
     """
     config = Config()
+    target_stage = SyncStage(stage_until)
+
+    if bandcamp_dir:
+        config.bandcamp_playlists_directory = bandcamp_dir
     db_service = DatabaseService(db_path=config.database_path)
 
     # If only_rekordbox is set, skip all sync steps
@@ -219,6 +233,13 @@ def db_sync(
         summary = _handle_rekordbox_only_mode(dry_run)
         sync_rekordbox = True
     else:
+        if (
+            not no_scan
+            and config.bandcamp_playlists_directory
+            and target_stage != SyncStage.FETCH
+        ):
+            _sync_bandcamp_playlists(config, db_service)
+
         summary = _execute_full_sync(
             config,
             db_service,
@@ -228,7 +249,7 @@ def db_sync(
             dry_run,
             progress,
             verbose,
-            stage_until,
+            target_stage,
         )
 
     # Step 6: Sync to Rekordbox (optional or only step)
@@ -241,7 +262,7 @@ def db_sync(
 def _sync_to_rekordbox(
     config: Config,
     db_service: DatabaseService,
-    emoji_config: Path,
+    emoji_config: Optional[Path],
     dry_run: bool,
     only_rekordbox: bool,
     console: Console,
@@ -304,6 +325,34 @@ def _handle_rekordbox_only_mode(dry_run: bool) -> Dict[str, bool]:
     return {"success": True}
 
 
+def _sync_bandcamp_playlists(config: Config, db_service: DatabaseService) -> None:
+    """Import Bandcamp/local playlists into the database."""
+    bandcamp_dir = config.bandcamp_playlists_directory
+    if not bandcamp_dir:
+        console.print("[dim]⏭️  Skipping Bandcamp sync (no directory configured)[/dim]")
+        return
+
+    console.print("\n[bold cyan]🎵 Syncing Bandcamp/local playlists...[/bold cyan]")
+    service = BandcampSnapshotService(db_service=db_service, root_dir=bandcamp_dir)
+    stats = service.sync_filesystem_to_db()
+
+    if stats.get("playlists_seen", 0) == 0:
+        console.print("  [dim]✓ No Bandcamp playlists found[/dim]")
+        return
+
+    console.print(
+        "  [green]✓ Processed "
+        f"{stats.get('playlists_seen', 0)} playlists; "
+        f"{stats.get('tracks_added_or_updated', 0)} tracks added/updated; "
+        f"{stats.get('tracks_removed', 0)} removed[/green]"
+    )
+
+    if created := stats.get("playlists_created", 0):
+        console.print(f"  [yellow]→ {created} playlists created[/yellow]")
+    if merged := stats.get("playlists_merged", 0):
+        console.print(f"  [yellow]→ {merged} playlists merged with existing[/yellow]")
+
+
 def _execute_full_sync(
     config: Config,
     db_service: DatabaseService,
@@ -313,7 +362,7 @@ def _execute_full_sync(
     dry_run: bool,
     progress: bool,
     verbose: bool,
-    stage_until: str,
+    stage_until: SyncStage,
 ) -> Dict[str, Any]:
     """Execute the full sync workflow."""
     # Setup progress tracking (for future use)
@@ -337,13 +386,11 @@ def _execute_full_sync(
         console.print("[yellow]DRY RUN MODE - No changes will be made[/yellow]\n")
 
     try:
-        stop_stage = SyncStage(stage_until)
-
         result = orchestrator.sync_all(
             fetch_tidal=not no_fetch,
             scan_filesystem=not no_scan,
             analyze_deduplication=not no_dedup,
-            stop_after_stage=stop_stage,
+            stop_after_stage=stage_until,
         )
 
         # Display results
@@ -629,7 +676,15 @@ def db_decisions(limit: int, action: str, hide_no_action: bool) -> None:
     console.print("\n[bold cyan]📋 Generating sync decisions...[/bold cyan]\n")
 
     try:
-        engine = SyncDecisionEngine(db_service, music_root=config.mp3_directory)
+        engine = SyncDecisionEngine(
+            db_service,
+            music_root=config.mp3_directory,
+            additional_playlist_roots=(
+                [config.bandcamp_playlists_directory]
+                if config.bandcamp_playlists_directory
+                else None
+            ),
+        )
         decisions = engine.analyze_all_playlists()
         playlist_lookup = {
             playlist.id: playlist.name for playlist in db_service.get_all_playlists()

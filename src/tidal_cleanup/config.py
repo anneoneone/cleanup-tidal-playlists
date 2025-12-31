@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Optional
 
 try:
     from dotenv import load_dotenv
@@ -51,6 +52,9 @@ class Config:
             )
         )
 
+        # Bandcamp/local playlist directory (optional)
+        self.bandcamp_playlists_directory: Optional[Path] = self._get_bandcamp_dir()
+
         # Database settings
         default_db_path = str(Path.home() / ".tidal-cleanup" / "sync.db")
         self.database_path = Path(
@@ -67,6 +71,16 @@ class Config:
 
         # Ensure database directory exists
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _get_bandcamp_dir() -> Optional[Path]:
+        """Resolve Bandcamp/local playlists directory from env or default."""
+        raw_dir = os.getenv("TIDAL_CLEANUP_BANDCAMP_PLAYLISTS_DIR", "").strip()
+        if raw_dir:
+            return Path(raw_dir).expanduser()
+
+        default_dir = Path("/Volumes/HDD1TB/Music/DJing/Bandcamp/Playlists/PLAYLISTS")
+        return default_dir if default_dir.exists() else None
 
 
 def get_config() -> Config:
