@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from ...database.models import DownloadStatus, Playlist, PlaylistTrack, Track
 from ...database.service import DatabaseService
@@ -969,7 +969,12 @@ class SyncDecisionEngine:
         try:
             import mutagen
 
-            audio = mutagen.File(file_path, easy=True)
+            mutagen_file: Callable[..., Any] | None = getattr(mutagen, "File", None)
+            if mutagen_file is None:
+                logger.warning("mutagen.File not available; skipping tag extraction")
+                return
+
+            audio = mutagen_file(file_path, easy=True)
             if not audio:
                 return
 
