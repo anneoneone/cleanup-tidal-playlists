@@ -253,6 +253,8 @@ class ConflictResolver:
             List of resolved decisions
         """
         resolved_decisions = []
+        duplicate_count = 0
+        conflicting_count = 0
 
         for conflict in conflicts:
             decisions = conflict.metadata.get("decisions", [])
@@ -262,7 +264,7 @@ class ConflictResolver:
                 if decisions:
                     resolved_decisions.append(decisions[0])
                     conflict.resolution = ConflictResolution.USE_EXISTING
-                    logger.info("Resolved duplicate decision: kept first decision")
+                    duplicate_count += 1
 
             elif conflict.conflict_type == ConflictType.CONFLICTING_ACTIONS:
                 # ! REMOVE MAGIC NUMBERS!
@@ -281,9 +283,13 @@ class ConflictResolver:
                 )
                 resolved_decisions.append(highest_priority)
                 conflict.resolution = ConflictResolution.USE_EXISTING
-                logger.info(
-                    f"Resolved conflicting actions: chose {highest_priority.action}"
-                )
+                conflicting_count += 1
+
+        # Log summary of resolutions
+        if duplicate_count > 0:
+            logger.info(f"Resolved {duplicate_count} duplicate decisions")
+        if conflicting_count > 0:
+            logger.info(f"Resolved {conflicting_count} conflicting action decisions")
 
         return resolved_decisions
 

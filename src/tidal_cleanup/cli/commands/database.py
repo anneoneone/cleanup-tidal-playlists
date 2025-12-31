@@ -170,64 +170,6 @@ def db() -> None:
         "Available stages: fetch, scan, dedup, decisions, execution"
     ),
 )
-def _sync_to_rekordbox(
-    config: Config,
-    db_service: DatabaseService,
-    emoji_config: Path,
-    dry_run: bool,
-    only_rekordbox: bool,
-    console: Console,
-) -> None:
-    """Sync database playlists to Rekordbox."""
-    console.print("\n[bold cyan]📤 Syncing to Rekordbox...[/bold cyan]")
-    try:
-        from ...core.rekordbox import RekordboxService
-        from ...core.rekordbox.snapshot_service import RekordboxSnapshotService
-
-        rekordbox_service = RekordboxService(config=config)
-        if rekordbox_service.db is None:
-            console.print(
-                "[yellow]⚠️  Rekordbox database not available, skipping sync[/yellow]"
-            )
-            return
-
-        rekordbox_snapshot = RekordboxSnapshotService(
-            rekordbox_service=rekordbox_service,
-            db_service=db_service,
-            config=config,
-            emoji_config_path=emoji_config,
-        )
-
-        rb_result = rekordbox_snapshot.sync_database_to_rekordbox(
-            playlist_name=None, dry_run=dry_run
-        )
-
-        console.print(
-            f"  [green]✓ Synced {rb_result['playlists_processed']} "
-            f"playlists to Rekordbox ({rb_result['playlists_created']} "
-            f"created, {rb_result['tracks_added']} tracks added)[/green]"
-        )
-
-        # Display folder tree structure
-        if rb_result.get("folder_tree"):
-            console.print("\n[bold cyan]📁 Folder Structure:[/bold cyan]")
-            _display_folder_tree(console, rb_result["folder_tree"])
-
-        if dry_run:
-            msg = "\n  [yellow]⚠️  DRY RUN - No changes made " "to Rekordbox[/yellow]"
-            console.print(msg)
-    except ImportError:
-        console.print(
-            "[yellow]⚠️  pyrekordbox not installed, " "skipping Rekordbox sync[/yellow]"
-        )
-    except Exception as e:
-        logger.exception("Rekordbox sync failed")
-        console.print(f"  [red]✗ Rekordbox sync failed: {e}[/red]")
-        if not only_rekordbox:
-            # Only re-raise if we did full sync; for rekordbox-only just warn
-            raise click.ClickException(str(e))
-
-
 def db_sync(
     dry_run: bool,
     no_fetch: bool,
@@ -294,6 +236,64 @@ def db_sync(
         _sync_to_rekordbox(
             config, db_service, emoji_config, dry_run, only_rekordbox, console
         )
+
+
+def _sync_to_rekordbox(
+    config: Config,
+    db_service: DatabaseService,
+    emoji_config: Path,
+    dry_run: bool,
+    only_rekordbox: bool,
+    console: Console,
+) -> None:
+    """Sync database playlists to Rekordbox."""
+    console.print("\n[bold cyan]📤 Syncing to Rekordbox...[/bold cyan]")
+    try:
+        from ...core.rekordbox import RekordboxService
+        from ...core.rekordbox.snapshot_service import RekordboxSnapshotService
+
+        rekordbox_service = RekordboxService(config=config)
+        if rekordbox_service.db is None:
+            console.print(
+                "[yellow]⚠️  Rekordbox database not available, skipping sync[/yellow]"
+            )
+            return
+
+        rekordbox_snapshot = RekordboxSnapshotService(
+            rekordbox_service=rekordbox_service,
+            db_service=db_service,
+            config=config,
+            emoji_config_path=emoji_config,
+        )
+
+        rb_result = rekordbox_snapshot.sync_database_to_rekordbox(
+            playlist_name=None, dry_run=dry_run
+        )
+
+        console.print(
+            f"  [green]✓ Synced {rb_result['playlists_processed']} "
+            f"playlists to Rekordbox ({rb_result['playlists_created']} "
+            f"created, {rb_result['tracks_added']} tracks added)[/green]"
+        )
+
+        # Display folder tree structure
+        if rb_result.get("folder_tree"):
+            console.print("\n[bold cyan]📁 Folder Structure:[/bold cyan]")
+            _display_folder_tree(console, rb_result["folder_tree"])
+
+        if dry_run:
+            msg = "\n  [yellow]⚠️  DRY RUN - No changes made " "to Rekordbox[/yellow]"
+            console.print(msg)
+    except ImportError:
+        console.print(
+            "[yellow]⚠️  pyrekordbox not installed, " "skipping Rekordbox sync[/yellow]"
+        )
+    except Exception as e:
+        logger.exception("Rekordbox sync failed")
+        console.print(f"  [red]✗ Rekordbox sync failed: {e}[/red]")
+        if not only_rekordbox:
+            # Only re-raise if we did full sync; for rekordbox-only just warn
+            raise click.ClickException(str(e))
 
 
 def _handle_rekordbox_only_mode(dry_run: bool) -> Dict[str, bool]:

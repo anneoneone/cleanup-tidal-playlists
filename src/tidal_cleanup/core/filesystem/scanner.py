@@ -366,19 +366,33 @@ class FilesystemScanner:
         relative_path: Optional[str],
     ) -> Optional[tuple[Any, str]]:
         """Use normalized name matching based on artist/title."""
-        for artist_variant in self._generate_artist_variations(artist):
-            normalized_name = DatabaseService._normalize_track_name(
-                title, artist_variant
-            )
-            candidate = self._match_in_playlist_map(
-                normalized_name, playlist_tracks_map, relative_path
-            )
-            if candidate:
-                return candidate, normalized_name
+        title_clean = title.strip()
 
-            track = self.db_service.find_track_by_normalized_name(normalized_name)
-            if track:
-                return track, normalized_name
+        for artist_variant in self._generate_artist_variations(artist):
+            artist_clean = artist_variant.strip()
+            # Try the same normalization used when importing from Tidal first,
+            # then fall back to the stricter DatabaseService normalization so
+            # we can match existing rows regardless of how they were written.
+            normalized_candidates = [
+                f"{artist_clean.lower()} - {title_clean.lower()}",
+            ]
+
+            alt_normalized = DatabaseService._normalize_track_name(
+                title_clean, artist_clean
+            )
+            if alt_normalized not in normalized_candidates:
+                normalized_candidates.append(alt_normalized)
+
+            for normalized_name in normalized_candidates:
+                candidate = self._match_in_playlist_map(
+                    normalized_name, playlist_tracks_map, relative_path
+                )
+                if candidate:
+                    return candidate, normalized_name
+
+                track = self.db_service.find_track_by_normalized_name(normalized_name)
+                if track:
+                    return track, normalized_name
         return None
 
     def _match_in_playlist_map(
