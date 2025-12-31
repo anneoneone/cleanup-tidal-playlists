@@ -272,7 +272,11 @@ class PlaylistNameParser:
             flags=re.UNICODE,
         )
 
-        clean_name = emoji_pattern.sub("", playlist_name).strip()
+        clean_name = emoji_pattern.sub("", playlist_name)
+        # Remove zero-width joiners and variation selectors that can linger
+        clean_name = re.sub(r"[\u200d\ufe0e\ufe0f]", "", clean_name)
+        # Collapse multiple spaces and trim
+        clean_name = re.sub(r"\s+", " ", clean_name).strip()
 
         return clean_name
 
