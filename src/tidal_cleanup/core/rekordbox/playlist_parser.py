@@ -148,7 +148,7 @@ class PlaylistNameParser:
             event_year=event_year,
         )
 
-        logger.info(
+        logger.debug(
             f"Parsed playlist '{playlist_name}': "
             f"Genre={genre_tags}, Party={party_tags}, "
             f"Energy={energy_tags}, Status={status_tags}, Year={event_year}"

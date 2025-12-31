@@ -85,10 +85,19 @@ class DatabaseService:
 
             import importlib
 
-            alembic_config_module = cast(Any, importlib.import_module("alembic.config"))
-            alembic_command_module = cast(
-                Any, importlib.import_module("alembic.command")
-            )
+            try:
+                alembic_config_module = cast(
+                    Any, importlib.import_module("alembic.config")
+                )
+                alembic_command_module = cast(
+                    Any, importlib.import_module("alembic.command")
+                )
+            except ModuleNotFoundError:
+                logger.warning(
+                    "Alembic is not installed; attempting manual migration stamp"
+                )
+                self._manual_stamp(alembic_dir)
+                return
 
             alembic_cfg = alembic_config_module.Config(str(alembic_ini))
             alembic_cfg.set_main_option("script_location", str(alembic_dir))
@@ -101,6 +110,87 @@ class DatabaseService:
         except Exception as e:
             logger.error("Failed to stamp migrations: %s", e)
             logger.warning("Database may need manual migration")
+
+    def _manual_stamp(self, alembic_dir: Path) -> None:
+        """Stamp alembic_version manually when Alembic is missing.
+
+        This creates alembic_version and sets it to the detected head revision so the
+        first run records a migration state instead of warning on every start.
+        """
+        head_revision = self._compute_head_revision(alembic_dir / "versions")
+        if head_revision is None:
+            logger.warning(
+                "Could not determine Alembic head revision; manual stamp skipped"
+            )
+            return
+
+        create_table_sql = text(
+            """
+            CREATE TABLE IF NOT EXISTS alembic_version (
+                version_num VARCHAR(32) NOT NULL,
+                CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+            )
+            """
+        )
+
+        with self.engine.begin() as connection:
+            connection.execute(create_table_sql)
+            connection.execute(text("DELETE FROM alembic_version"))
+            connection.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:rev)"),
+                {"rev": head_revision},
+            )
+
+        logger.info("Manually stamped database at revision %s", head_revision)
+
+    @staticmethod
+    def _extract_revision_field(content: str, field_name: str) -> Optional[str]:
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith(f"{field_name} ="):
+                continue
+            parts = stripped.split("=", 1)
+            if len(parts) != 2:
+                continue
+            value = parts[1].strip().strip("'\"")
+            if value in {"", "None", "null"}:
+                return None
+            return value
+        return None
+
+    def _compute_head_revision(self, versions_dir: Path) -> Optional[str]:
+        """Infer the current Alembic head without importing Alembic."""
+        if not versions_dir.exists():
+            return None
+
+        revisions = set()
+        down_revisions = set()
+
+        for path in versions_dir.glob("*.py"):
+            try:
+                content = path.read_text()
+            except OSError as exc:
+                logger.debug("Skipping %s: %s", path, exc)
+                continue
+
+            revision = self._extract_revision_field(content, "revision")
+            down_revision = self._extract_revision_field(content, "down_revision")
+
+            if revision:
+                revisions.add(revision)
+            if down_revision:
+                down_revisions.add(down_revision)
+
+        heads = revisions - down_revisions
+        if not heads:
+            return None
+
+        if len(heads) > 1:
+            logger.warning(
+                "Multiple Alembic heads detected; selecting the last sorted head"
+            )
+
+        return sorted(heads)[-1]
 
     def run_migrations(self) -> None:
         """Run Alembic migrations to upgrade database to latest version."""
@@ -127,10 +217,19 @@ class DatabaseService:
 
             import importlib
 
-            alembic_config_module = cast(Any, importlib.import_module("alembic.config"))
-            alembic_command_module = cast(
-                Any, importlib.import_module("alembic.command")
-            )
+            try:
+                alembic_config_module = cast(
+                    Any, importlib.import_module("alembic.config")
+                )
+                alembic_command_module = cast(
+                    Any, importlib.import_module("alembic.command")
+                )
+            except ModuleNotFoundError:
+                logger.warning(
+                    "Alembic is not installed; skipping migrations. "
+                    "Install 'alembic' to apply database upgrades."
+                )
+                return
 
             alembic_cfg = alembic_config_module.Config(str(alembic_ini))
 

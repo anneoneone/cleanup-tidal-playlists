@@ -204,7 +204,7 @@ class RekordboxSnapshotService:
         result["folder_tree"] = folder_tree
         return result
 
-    def _sync_single_playlist(
+    def _sync_single_playlist(  # noqa: C901
         self,
         playlist: Playlist,
         summary: RekordboxSyncSummary,
@@ -214,24 +214,54 @@ class RekordboxSnapshotService:
     ) -> None:
         """Sync one playlist with isolated error handling and commit."""
         try:
-            stats = self._sync_playlist(playlist, dry_run=dry_run, prune=prune_extra)
-            summary.add_playlist_stats(stats)
-
-            # Build folder tree for display
-            self._add_to_folder_tree(folder_tree, playlist)
-
-            # Commit per playlist to avoid rolling back all playlists on a single error
-            if not dry_run:
-                self._db.commit()
-
+            stats = self._run_playlist_sync_stage(playlist, dry_run, prune_extra)
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception("Failed to sync playlist '%s' to Rekordbox", playlist.name)
-            summary.errors.append(f"{playlist.name}: {exc}")
-            if not dry_run:
-                try:
-                    self._db.rollback()
-                except Exception as rollback_exc:
-                    logger.error("Rollback failed: %s", rollback_exc)
+            self._handle_playlist_error(playlist, summary, exc, stage="sync")
+            return
+
+        try:
+            summary.add_playlist_stats(stats)
+        except Exception as exc:  # pragma: no cover
+            self._handle_playlist_error(playlist, summary, exc, stage="summary")
+            return
+
+        try:
+            self._add_to_folder_tree(folder_tree, playlist)
+        except Exception as exc:  # pragma: no cover
+            self._handle_playlist_error(playlist, summary, exc, stage="folder-tree")
+            return
+
+        if dry_run:
+            return
+
+        try:
+            self._coerce_pending_primary_keys()
+            self._db.commit()
+        except Exception as exc:  # pragma: no cover
+            self._handle_playlist_error(playlist, summary, exc, stage="commit")
+            try:
+                self._db.rollback()
+            except Exception as rollback_exc:  # pragma: no cover
+                logger.error("Rollback failed: %s", rollback_exc)
+
+    def _run_playlist_sync_stage(
+        self, playlist: Playlist, dry_run: bool, prune_extra: bool
+    ) -> PlaylistSyncStats:
+        """Run the core playlist sync and return stats."""
+        return self._sync_playlist(playlist, dry_run=dry_run, prune=prune_extra)
+
+    def _handle_playlist_error(
+        self,
+        playlist: Playlist,
+        summary: RekordboxSyncSummary,
+        exc: Exception,
+        stage: str,
+    ) -> None:
+        """Record and log playlist-specific errors with stage context."""
+        logger.exception(
+            "Failed to sync playlist '%s' at stage '%s'", playlist.name, stage
+        )
+        summary.errors.append(f"{playlist.name} ({stage}): {exc}")
 
     # ------------------------------------------------------------------
     # Cleanup helpers
@@ -346,9 +376,110 @@ class RekordboxSnapshotService:
     def _commit_with_error_handling(self, error_message: str) -> None:
         """Commit database changes with error logging."""
         try:
+            self._coerce_pending_primary_keys()
             self._db.commit()
         except Exception:
             logger.warning(error_message)
+
+    def _coerce_pending_primary_keys(self) -> None:  # noqa: C901
+        """Force pyrekordbox PK/FK fields to strings to avoid mixed-type sorting."""
+        if not PYREKORDBOX_AVAILABLE or db6 is None:
+            return
+
+        try:
+            session = getattr(self._db, "session", None)
+            if session is None:
+                return
+
+            def _to_str(value: Any) -> Any:
+                if isinstance(value, int):
+                    return str(value)
+                return value
+
+            def _coerce_mapper_primary_keys(obj: Any) -> None:
+                """Coerce any integer primary key values to strings via the mapper."""
+                mapper = getattr(obj, "__mapper__", None)
+                if not mapper:
+                    return
+
+                self._ensure_mapper_sortkey(mapper)
+
+                for col in mapper.primary_key:
+                    attr = col.key
+                    value = getattr(obj, attr, None)
+                    if value is None:
+                        continue
+                    if isinstance(value, int):
+                        try:
+                            setattr(obj, attr, str(value))
+                        except Exception:
+                            logger.debug("Failed to coerce %s.%s", obj, attr)
+
+            def _coerce_obj(obj: Any) -> None:
+                _coerce_mapper_primary_keys(obj)
+
+                if isinstance(obj, db6.DjmdPlaylist):
+                    obj.ID = _to_str(obj.ID)
+                    obj.ParentID = _to_str(obj.ParentID)
+                elif isinstance(obj, db6.DjmdSongPlaylist):
+                    obj.ID = _to_str(obj.ID)
+                    obj.PlaylistID = _to_str(obj.PlaylistID)
+                    obj.ContentID = _to_str(obj.ContentID)
+                elif isinstance(obj, db6.DjmdContent):
+                    obj.ID = _to_str(obj.ID)
+                    obj.MasterSongID = _to_str(obj.MasterSongID)
+                    obj.MasterDBID = _to_str(obj.MasterDBID)
+                    obj.ArtistID = _to_str(obj.ArtistID)
+                    obj.AlbumID = _to_str(obj.AlbumID)
+                    obj.GenreID = _to_str(obj.GenreID)
+                    obj.RemixerID = _to_str(obj.RemixerID)
+                    obj.LabelID = _to_str(obj.LabelID)
+                    obj.OrgArtistID = _to_str(obj.OrgArtistID)
+                    obj.KeyID = _to_str(obj.KeyID)
+                    obj.ColorID = _to_str(obj.ColorID)
+                    obj.ComposerID = _to_str(obj.ComposerID)
+                    obj.Lyricist = _to_str(obj.Lyricist)
+                elif isinstance(
+                    obj, (db6.DjmdArtist, db6.DjmdAlbum, db6.DjmdGenre, db6.DjmdLabel)
+                ):
+                    obj.ID = _to_str(obj.ID)
+
+            for obj in (
+                list(session.new)
+                + list(session.dirty)
+                + list(session.deleted)
+                + list(session.identity_map.values())
+            ):
+                _coerce_obj(obj)
+        except Exception as exc:
+            logger.debug("Primary key coercion skipped: %s", exc)
+
+    def _ensure_mapper_sortkey(self, mapper: Any) -> None:
+        """Patch mapper sort key to compare identity values as strings.
+
+        SQLAlchemy sorts states by primary key values during flush; mixed int/str
+        identity values from pyrekordbox objects can raise TypeError. We coerce to
+        strings for sort key generation to keep ordering stable.
+        """
+        if getattr(mapper, "_tidal_sortkey_patched", False):
+            return
+
+        def _string_identity_sortkey(state: Any) -> tuple[Any, ...]:
+            key = state.key or getattr(state, "identity_key", lambda: None)()
+            if not key:
+                return ()
+            _, ident, _ = key
+            try:
+                return tuple(str(value) for value in ident)
+            except Exception:
+                return ()
+
+        try:
+            mapper._persistent_sortkey_fn = _string_identity_sortkey
+            mapper._tidal_sortkey_patched = True
+        except Exception:
+            # Best-effort; fallback to default behavior
+            mapper._tidal_sortkey_patched = True
 
     def _delete_rekordbox_orphan(self, rb_pl: Any, dry_run: bool) -> None:
         """Delete a single orphan playlist from Rekordbox."""
@@ -615,7 +746,7 @@ class RekordboxSnapshotService:
             self._db.flush()
             stats.created = True
             self.db_service.set_playlist_rekordbox_id(playlist.id, str(rb_playlist.ID))
-            logger.info("Created Rekordbox playlist '%s'", clean_name)
+            logger.debug("Created Rekordbox playlist '%s'", clean_name)
             return rb_playlist
         except ValueError as e:
             # If parent folder doesn't exist or is invalid, clear cache and retry
@@ -1000,7 +1131,7 @@ class RekordboxSnapshotService:
 
         genre: str = str(sorted(cleaned)[0])
         playlist_name = getattr(metadata, "playlist_name", "")
-        logger.info("Derived genre '%s' from playlist '%s'", genre, playlist_name)
+        logger.debug("Derived genre '%s' from playlist '%s'", genre, playlist_name)
         return genre
 
     def _remove_extra_tracks(self, playlist: Any, allowed_content_ids: Set[str]) -> int:
@@ -1075,7 +1206,7 @@ class RekordboxSnapshotService:
             # Include genre category in path - always include status folder
             category = self._get_genre_category(genre)
             segments = [self._genre_root, category, status]
-            logger.info(
+            logger.debug(
                 "Genre playlist '%s': genre=%s, status=%s (%s), category=%s, path=%s",
                 getattr(metadata, "playlist_name", "unknown"),
                 genre,
@@ -1208,7 +1339,7 @@ class RekordboxSnapshotService:
     ) -> Optional[str]:
         parent_id: Optional[str] = None
         path_parts: List[str] = []
-        logger.info(
+        logger.debug(
             "Resolving folder path with %d segments: %s (create=%s)",
             len(segments),
             " > ".join(segments),
@@ -1252,7 +1383,7 @@ class RekordboxSnapshotService:
                 parent_id,
             )
 
-        logger.info(
+        logger.debug(
             "Folder path resolved successfully: %s -> parent_id=%s",
             " > ".join(segments),
             parent_id,

@@ -315,7 +315,7 @@ class RekordboxService:
         with suppress(Exception):
             existing = self.db.get_content(FolderPath=str(track_path)).first()
             if existing:
-                logger.info("Reusing content by path: %s", track_path)
+                logger.debug("Reusing content by path: %s", track_path)
                 return existing
         return None
 
@@ -344,7 +344,7 @@ class RekordboxService:
 
         if genre:
             payload.update(self._apply_genre(payload, genre))
-            logger.info("Applying genre '%s' to content for %s", genre, track_path)
+            logger.debug("Applying genre '%s' to content for %s", genre, track_path)
 
         assoc = self._enrich_artist_album_from_names(
             artist_name=track.artist or "Unknown Artist",
@@ -367,10 +367,28 @@ class RekordboxService:
         if not self.db:
             return None
 
+        if not track_path.is_absolute():
+            track_path = track_path.resolve()
+
+        if not track_path.exists():
+            logger.warning("Skipping %s add; file missing: %s", log_prefix, track_path)
+            return None
+
+        allowed_ext = {".mp3", ".m4a", ".flac", ".wav", ".aiff", ".aif"}
+        if track_path.suffix.lower() not in allowed_ext:
+            logger.warning(
+                "Skipping %s add; unsupported file type: %s", log_prefix, track_path
+            )
+            return None
+
+        sanitized = self._sanitize_content_payload(payload)
+        if "Title" not in sanitized or not sanitized["Title"]:
+            sanitized["Title"] = minimal_title or track_path.stem
+
         try:
-            new_content = self.db.add_content(str(track_path), **payload)
+            new_content = self.db.add_content(str(track_path), **sanitized)
             if new_content:
-                logger.info("Added %s: %s", log_prefix, track_path)
+                logger.debug("Added %s: %s", log_prefix, track_path)
             return new_content
         except Exception as exc:
             logger.error("Failed to add %s for %s: %s", log_prefix, track_path, exc)
@@ -388,6 +406,142 @@ class RekordboxService:
 
         logger.warning("Fallback add_content failed for %s", track_path)
         return None
+
+    def _sanitize_content_payload(  # noqa: C901
+        self, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Filter and coerce payload to match pyrekordbox DjmdContent expectations."""
+        try:
+            from pyrekordbox.db6 import tables
+
+            valid_keys = set(tables.DjmdContent.columns())
+        except Exception:
+            # Minimal set we rely on; prevents passing unexpected kwargs
+            valid_keys = {
+                "Title",
+                "ArtistID",
+                "AlbumID",
+                "GenreID",
+                "BPM",
+                "Length",
+                "TrackNo",
+                "BitRate",
+                "BitDepth",
+                "Commnt",
+                "FileType",
+                "Rating",
+                "ReleaseYear",
+                "RemixerID",
+                "LabelID",
+                "OrgArtistID",
+                "KeyID",
+                "StockDate",
+                "ColorID",
+                "DJPlayCount",
+                "ImagePath",
+                "MasterDBID",
+                "MasterSongID",
+                "AnalysisDataPath",
+                "SearchStr",
+                "FileSize",
+                "DiscNo",
+                "ComposerID",
+                "Subtitle",
+                "SampleRate",
+                "DisableQuantize",
+                "Analysed",
+                "ReleaseDate",
+                "DateCreated",
+                "ContentLink",
+                "Tag",
+                "ModifiedByRBM",
+                "HotCueAutoLoad",
+                "DeliveryControl",
+                "DeliveryComment",
+                "CueUpdated",
+                "AnalysisUpdated",
+                "TrackInfoUpdated",
+                "Lyricist",
+                "ISRC",
+                "SamplerTrackInfo",
+                "SamplerPlayOffset",
+                "SamplerGain",
+                "VideoAssociate",
+                "LyricStatus",
+                "ServiceID",
+                "OrgFolderPath",
+                "Reserved1",
+                "Reserved2",
+                "Reserved3",
+                "Reserved4",
+                "ExtInfo",
+            }
+
+        int_fields = {
+            "BPM",
+            "Length",
+            "TrackNo",
+            "BitRate",
+            "BitDepth",
+            "Rating",
+            "ReleaseYear",
+            "FileSize",
+            "DiscNo",
+            "SampleRate",
+            "DisableQuantize",
+            "Analysed",
+            "SamplerTrackInfo",
+            "SamplerPlayOffset",
+            "LyricStatus",
+            "ServiceID",
+        }
+
+        float_fields = {"SamplerGain"}
+        max_len_255 = {
+            "Title",
+            "FolderPath",
+            "FileNameL",
+            "FileNameS",
+            "Commnt",
+            "Subtitle",
+            "ImagePath",
+            "AnalysisDataPath",
+            "SearchStr",
+            "OrgFolderPath",
+        }
+
+        sanitized: Dict[str, Any] = {}
+        for key, value in payload.items():
+            if key not in valid_keys:
+                continue
+
+            if value is None:
+                continue
+
+            if key in int_fields:
+                try:
+                    sanitized[key] = int(value)
+                except (TypeError, ValueError):
+                    logger.debug("Dropping %s; expected int, got %s", key, value)
+                continue
+
+            if key in float_fields:
+                try:
+                    sanitized[key] = float(value)
+                except (TypeError, ValueError):
+                    logger.debug("Dropping %s; expected float, got %s", key, value)
+                continue
+
+            if isinstance(value, (str, Path)):
+                val_str = str(value)
+                if key in max_len_255 and len(val_str) > 255:
+                    val_str = val_str[:255]
+                sanitized[key] = val_str
+                continue
+
+            sanitized[key] = value
+
+        return sanitized
 
     def get_or_create_content_from_track(
         self, track: Track, track_path: Path, genre: Optional[str] = None
@@ -609,7 +763,7 @@ class RekordboxService:
             with suppress(Exception):
                 by_isrc = self.db.get_content(ISRC=isrc).first()
                 if by_isrc:
-                    logger.info("Reusing content by ISRC: %s", isrc)
+                    logger.debug("Reusing content by ISRC: %s", isrc)
                     return by_isrc
 
         # Title + Artist via associations
@@ -621,7 +775,7 @@ class RekordboxService:
                         Title=title, ArtistID=artist.ID
                     ).first()
                     if content:
-                        logger.info(
+                        logger.debug(
                             "Reusing content by Title+Artist: %s - %s",
                             title,
                             artist_name,
@@ -633,7 +787,7 @@ class RekordboxService:
             with suppress(Exception):
                 by_title = self.db.get_content(Title=title).first()
                 if by_title:
-                    logger.info("Reusing content by Title: %s", title)
+                    logger.debug("Reusing content by Title: %s", title)
                     return by_title
 
         return None
