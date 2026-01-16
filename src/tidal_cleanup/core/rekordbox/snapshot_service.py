@@ -302,7 +302,11 @@ class RekordboxSnapshotService:
                 )
 
         # Pass 2: Remove Rekordbox orphan playlists (not in DB, not on disk)
-        self._prune_rekordbox_orphans(fs_playlists, db_playlists, dry_run)
+        # DISABLED: This was causing playlists to be deleted and recreated instead of updated
+        # The orphan detection runs BEFORE sync, so it can't know which playlists will be
+        # matched by name/ID during the sync process. This led to false positives.
+        # Orphan cleanup should be done manually or via a separate explicit command.
+        # self._prune_rekordbox_orphans(fs_playlists, db_playlists, dry_run)
 
     def _remove_playlist_from_rekordbox_and_db(self, playlist: Playlist) -> None:
         """Remove a playlist from both Rekordbox and our database."""
@@ -358,7 +362,13 @@ class RekordboxSnapshotService:
     def _collect_rekordbox_orphans(
         self, fs_playlists: set[str], db_playlists: set[str]
     ) -> list[Any]:
-        """Collect Rekordbox playlists that don't exist in DB or filesystem."""
+        """Collect Rekordbox playlists that don't exist in DB or filesystem.
+
+        NOTE: This method has known issues with false positives during sync operations.
+        Playlist names may differ between DB (clean names with status emojis) and
+        Rekordbox (display names), causing valid playlists to be marked as orphans.
+        Consider using explicit cleanup commands instead of automatic orphan detection.
+        """
         if not PYREKORDBOX_AVAILABLE or db6 is None:
             return []
 
@@ -368,10 +378,34 @@ class RekordboxSnapshotService:
         orphans = []
         for rb_pl in rb_playlists:
             name = getattr(rb_pl, "Name", "")
+            # Check exact name match first
             if name and name not in fs_playlists and name not in db_playlists:
-                orphans.append(rb_pl)
+                # Additional check: see if any DB playlist would generate this name
+                # when cleaned (to avoid false positives with emoji transformations)
+                is_potential_match = any(
+                    self._is_potential_name_match(name, db_pl.name)
+                    for db_pl in self.db_service.get_all_playlists()
+                )
+                if not is_potential_match:
+                    orphans.append(rb_pl)
 
         return orphans
+
+    def _is_potential_name_match(self, rekordbox_name: str, db_name: str) -> bool:
+        """Check if a Rekordbox playlist name could match a DB playlist name.
+
+        This accounts for emoji transformations and status additions that happen during
+        playlist name cleaning.
+        """
+        # Simple fuzzy matching: check if core names are similar
+        # Remove common suffixes like Up, Low, Medium, Old, and emojis
+        import re
+
+        rb_core = re.sub(r"[↗️↘️⏸️📀🕺🪩🎙️⚡❓🇮🇹🪇🪘☀️⏸]", "", rekordbox_name).strip()
+        db_core = re.sub(r"[↗️↘️⏸️📀🕺🪩🎙️⚡❓🇮🇹🪇🪘☀️⏸]", "", db_name).strip()
+
+        # Check if the core names match (case-insensitive)
+        return rb_core.lower() == db_core.lower()
 
     def _commit_with_error_handling(self, error_message: str) -> None:
         """Commit database changes with error logging."""
