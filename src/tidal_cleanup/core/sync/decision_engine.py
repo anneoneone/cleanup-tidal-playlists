@@ -698,6 +698,8 @@ class SyncDecisionEngine:
     def _list_audio_files(self, playlist_dir: Path) -> List[Path]:
         """Return audio files in a playlist directory."""
         files: List[Path] = []
+        if not playlist_dir.is_dir():
+            return files
         for item in playlist_dir.iterdir():
             if item.is_file() and item.suffix.lower() in self.SUPPORTED_EXTENSIONS:
                 files.append(item)

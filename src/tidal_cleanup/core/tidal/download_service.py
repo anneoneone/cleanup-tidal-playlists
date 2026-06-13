@@ -349,6 +349,24 @@ class TidalDownloadService:
                 else downloaded_path
             )
 
+            # tidal-dl-ng sometimes reports a path whose extension does not
+            # match the file actually written to disk (e.g. ".flac" reported
+            # while an ".m4a" is downloaded). Resolve to the real file so
+            # downstream conversion does not fail on a non-existent path.
+            if not actual_path.exists():
+                resolved = self._resolve_downloaded_file(actual_path)
+                if resolved is None:
+                    raise TidalDownloadError(
+                        f"Download reported success for track {track_id} but no "
+                        f"file was found at {actual_path} or matching siblings"
+                    )
+                logger.info(
+                    "Reported path %s missing; using actual file %s",
+                    actual_path,
+                    resolved,
+                )
+                actual_path = resolved
+
             logger.info("Successfully downloaded track to %s", actual_path)
             return actual_path
 
@@ -357,6 +375,33 @@ class TidalDownloadService:
         except Exception as e:
             logger.error("Failed to download track %d: %s", track_id, e)
             raise TidalDownloadError(f"Track download failed: {e}")
+
+    # Audio extensions tidal-dl-ng may actually write, in preference order.
+    _AUDIO_EXTENSIONS: tuple[str, ...] = (".flac", ".m4a", ".mp3", ".wav")
+
+    def _resolve_downloaded_file(self, reported_path: Path) -> Path | None:
+        """Find the real downloaded file when the reported path is wrong.
+
+        tidal-dl-ng occasionally returns a path whose extension differs from
+        the file it actually wrote. Look for a sibling file with the same
+        stem and a known audio extension.
+
+        Args:
+            reported_path: The (possibly non-existent) path returned by the
+                downloader.
+
+        Returns:
+            The matching on-disk file, or None if nothing matches.
+        """
+        parent = reported_path.parent
+        stem = reported_path.stem
+        if not parent.is_dir():
+            return None
+        for ext in self._AUDIO_EXTENSIONS:
+            candidate = parent / f"{stem}{ext}"
+            if candidate.is_file():
+                return candidate
+        return None
 
     def _download_playlist_tracks(
         self, playlist: TidalPlaylist, target_dir: Path
