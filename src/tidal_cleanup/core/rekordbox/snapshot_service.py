@@ -274,7 +274,6 @@ class RekordboxSnapshotService:
             return
 
         fs_playlists = {p.name for p in playlists_root.iterdir() if p.is_dir()}
-        db_playlists = {p.name for p in self.db_service.get_all_playlists()}
 
         # Pass 1: Remove DB playlists whose folders are missing
         missing_from_fs = [
@@ -301,12 +300,9 @@ class RekordboxSnapshotService:
                     "Failed to commit after pruning missing playlists"
                 )
 
-        # Pass 2: Remove Rekordbox orphan playlists (not in DB, not on disk)
-        # DISABLED: This was causing playlists to be deleted and recreated instead of updated
-        # The orphan detection runs BEFORE sync, so it can't know which playlists will be
-        # matched by name/ID during the sync process. This led to false positives.
-        # Orphan cleanup should be done manually or via a separate explicit command.
-        # self._prune_rekordbox_orphans(fs_playlists, db_playlists, dry_run)
+        # Pass 2 (prune Rekordbox orphan playlists) is disabled. It ran before the
+        # sync matched playlists by name/ID, so valid playlists were flagged as
+        # orphans and deleted and recreated. Clean up orphans manually instead.
 
     def _remove_playlist_from_rekordbox_and_db(self, playlist: Playlist) -> None:
         """Remove a playlist from both Rekordbox and our database."""

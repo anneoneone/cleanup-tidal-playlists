@@ -350,7 +350,7 @@ class DatabaseService:
                 LIMIT 1
                 """
             )
-            track_id = session.execute(
+            track_id: Optional[int] = session.execute(
                 query, {"file_path": file_path}
             ).scalar_one_or_none()
             if track_id is None:
