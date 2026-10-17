@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Critical**: Fixed bug where playlists were deleted and recreated on every sync instead of being updated in-place
+  - Disabled automatic orphan detection during sync operations (was causing false positives)
+  - Orphan pruning ran before name matching, incorrectly marking valid playlists as orphans
+  - Playlists are now properly matched by ID/name and updated instead of recreated
+  - Added fuzzy name matching to handle emoji transformations between DB and Rekordbox names
+
 ### Added
 
 - Modern project management structure with pyproject.toml
