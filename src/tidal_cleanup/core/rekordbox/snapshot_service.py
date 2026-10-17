@@ -645,13 +645,22 @@ class RekordboxSnapshotService:
         resolved_paths: dict[int, Optional[Path]] = {}
         genre = self._derive_genre_from_metadata(metadata)
 
-        for association in playlist_tracks:
+        # Sort tracks chronologically (earliest first) for consistent ordering
+        sorted_tracks = self._sort_tracks_by_date(playlist_tracks)
+
+        for association in sorted_tracks:
             track = association.track
             if track is None:
                 stats.tracks_skipped += 1
                 continue
 
             resolved_paths[track.id] = self._resolve_track_path(track, association)
+
+            # Set local file creation date if not already set
+            self._ensure_local_track_date(
+                track, association, resolved_paths[track.id], dry_run
+            )
+
             self._process_track_for_sync(
                 playlist,
                 track,
@@ -1144,6 +1153,97 @@ class RekordboxSnapshotService:
             and hasattr(content, "GenreName")
         ):
             content.GenreName = genre_entry.Name
+
+    def _sort_tracks_by_date(self, playlist_tracks: Sequence[Any]) -> List[Any]:
+        """Sort playlist tracks chronologically by effective added date.
+
+        Sorting logic (earliest first):
+        1. Prefer added_to_tidal (most reliable, from Tidal API)
+        2. Fall back to added_to_local (for local-only tracks)
+        3. Fall back to track.created_at (last resort)
+        4. Use Unix epoch if no date available
+
+        Args:
+            playlist_tracks: Sequence of PlaylistTrack associations
+
+        Returns:
+            List of PlaylistTrack associations sorted by date (earliest first)
+        """
+
+        def get_effective_date(association: Any) -> datetime:
+            """Extract effective date for sorting."""
+            # Prefer Tidal added date
+            if association.added_to_tidal:
+                return association.added_to_tidal  # type: ignore[no-any-return]
+
+            # Fall back to local added date
+            if association.added_to_local:
+                return association.added_to_local  # type: ignore[no-any-return]
+
+            # Last resort: track creation date
+            if association.track and association.track.created_at:
+                return association.track.created_at  # type: ignore[no-any-return]
+
+            # Absolute fallback: Unix epoch (will sort to start)
+            return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+        def as_utc(value: datetime) -> datetime:
+            # SQLite returns naive datetimes (stored as UTC); aware and naive
+            # values cannot be compared.
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+        return sorted(
+            playlist_tracks, key=lambda assoc: as_utc(get_effective_date(assoc))
+        )
+
+    def _ensure_local_track_date(
+        self,
+        track: Track,
+        association: Any,
+        resolved_path: Optional[Path],
+        dry_run: bool,
+    ) -> None:
+        """Set local file creation date if not already set.
+
+        For tracks without a Tidal added_to_tidal timestamp (local-only tracks),
+        use the file creation timestamp as the added_to_local date.
+
+        Args:
+            track: Track object
+            association: PlaylistTrack association
+            resolved_path: Resolved file path
+            dry_run: If True, skip database updates
+        """
+        # Only process local tracks without Tidal date
+        if association.added_to_tidal or association.added_to_local:
+            return
+
+        # Need a file path to get creation date
+        if not resolved_path or not resolved_path.exists():
+            return
+
+        try:
+            # Get file creation time (birth time on macOS, ctime on Linux)
+            stat = resolved_path.stat()
+            # macOS has st_birthtime, Linux uses st_ctime (change time)
+            creation_time = getattr(stat, "st_birthtime", stat.st_ctime)
+            creation_datetime = datetime.fromtimestamp(creation_time, tz=timezone.utc)
+
+            if not dry_run:
+                # Update association with local file creation date
+                association.added_to_local = creation_datetime
+                logger.debug(
+                    "Set local date for track '%s': %s",
+                    track.title,
+                    creation_datetime.isoformat(),
+                )
+
+        except Exception as e:
+            logger.debug(
+                "Could not get file creation date for '%s': %s",
+                resolved_path,
+                e,
+            )
 
     def _derive_genre_from_metadata(self, metadata: Any) -> Optional[str]:
         """Pick a genre tag from playlist metadata, ignoring energy/status/events."""

@@ -1,6 +1,6 @@
 """Tests for TidalStateFetcher service."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -441,6 +441,32 @@ class TestFetchPlaylistTracks:
         # Note: get_playlist_tracks returns Track objects, not PlaylistTrack
         playlist_tracks = db_service.get_playlist_tracks(db_playlist.id)
         assert len(playlist_tracks) == 2
+
+    def test_fetch_tracks_stores_tidal_added_date(self, tidal_fetcher, db_service):
+        """Test tracks keep the date they were added to the Tidal playlist."""
+        db_playlist = db_service.create_playlist(
+            {"tidal_id": "playlist-dates", "name": "Dated Playlist"}
+        )
+        artist = create_mock_artist(100, "Artist")
+        dated = create_mock_track(2001, "Dated", artist)
+        dated.user_date_added = datetime(2023, 5, 1, 12, 0, tzinfo=timezone.utc)
+        undated = create_mock_track(2002, "Undated", artist)
+        tidal_playlist = create_mock_playlist(
+            playlist_id="playlist-dates",
+            name="Dated Playlist",
+            tracks=[dated, undated],
+        )
+
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
+        tidal_fetcher._fetch_playlist_tracks(tidal_playlist, db_playlist)
+
+        added = {
+            assoc.track.title: assoc.added_to_tidal
+            for assoc in db_service.get_playlist_track_associations(db_playlist.id)
+        }
+        # SQLite returns naive datetimes in UTC
+        assert added["Dated"] == datetime(2023, 5, 1, 12, 0)
+        assert added["Undated"] >= before
 
 
 class TestFetchAllPlaylists:

@@ -417,6 +417,9 @@ class TidalStateFetcher:
                     # Convert Tidal track to database format
                     track_data = self._convert_tidal_track(tidal_track)
 
+                    # Extract when track was added to playlist
+                    added_at = getattr(tidal_track, "user_date_added", None)
+
                     # Check if track exists
                     existing = self.db_service.get_track_by_tidal_id(
                         track_data["tidal_id"]
@@ -432,8 +435,13 @@ class TidalStateFetcher:
                         stats["created"] += 1
 
                     # Add track to playlist (or update position) and mark as in_tidal
+                    # Pass added_at timestamp for chronological sorting
                     self.db_service.add_track_to_playlist(
-                        db_playlist.id, db_track.id, position=position, in_tidal=True
+                        db_playlist.id,
+                        db_track.id,
+                        position=position,
+                        in_tidal=True,
+                        added_at=added_at,
                     )
 
                 except Exception as e:

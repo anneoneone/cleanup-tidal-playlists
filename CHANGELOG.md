@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Database service now accepts optional `added_at` timestamp when adding tracks to playlists
+  - Enables accurate chronological sorting based on when tracks were added to Tidal playlists
+  - Backward compatible: defaults to current time if not provided
+- Tidal state fetcher now extracts `user_date_added` timestamp from Tidal API
+  - Tracks when each track was added to a Tidal playlist
+  - Stored in `PlaylistTrack.added_to_tidal` for chronological sorting
+- Rekordbox sync now sorts playlist tracks chronologically (earliest first)
+  - Uses Tidal `added_at` timestamp when available
+  - Falls back to local file creation time for local-only tracks
+  - Ensures consistent playback order across syncs
 - Modern project management structure with pyproject.toml
 - Comprehensive pre-commit hooks with 15+ quality checks
 - GitHub Actions CI/CD pipeline with matrix testing

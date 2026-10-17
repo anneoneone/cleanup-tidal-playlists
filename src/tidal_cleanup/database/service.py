@@ -793,6 +793,7 @@ class DatabaseService:
         in_tidal: bool = False,
         in_local: bool = False,
         in_rekordbox: bool = False,
+        added_at: Optional[datetime] = None,
     ) -> PlaylistTrack:
         """Add track to playlist (or update if already exists).
 
@@ -803,6 +804,7 @@ class DatabaseService:
             in_tidal: Whether track is in Tidal
             in_local: Whether track is downloaded locally
             in_rekordbox: Whether track is in Rekordbox
+            added_at: When track was added (uses current time if None)
 
         Returns:
             PlaylistTrack object
@@ -822,7 +824,12 @@ class DatabaseService:
                 if in_tidal:
                     playlist_track.in_tidal = bool(True)
                     if not playlist_track.added_to_tidal:
-                        playlist_track.added_to_tidal = datetime.now(timezone.utc)
+                        # Use provided timestamp or current time
+                        playlist_track.added_to_tidal = (
+                            added_at
+                            if added_at is not None
+                            else datetime.now(timezone.utc)
+                        )
                 if in_local:
                     playlist_track.in_local = bool(True)
                     if not playlist_track.added_to_local:
@@ -842,7 +849,12 @@ class DatabaseService:
                     in_tidal=in_tidal,
                     in_local=in_local,
                     in_rekordbox=in_rekordbox,
-                    added_to_tidal=now if in_tidal else None,
+                    # Use provided timestamp for Tidal tracks, current time otherwise
+                    added_to_tidal=(
+                        (added_at if added_at is not None else now)
+                        if in_tidal
+                        else None
+                    ),
                     added_to_local=now if in_local else None,
                     added_to_rekordbox=now if in_rekordbox else None,
                 )
