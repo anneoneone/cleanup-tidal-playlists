@@ -260,6 +260,11 @@ class Playlist(Base):
         String(255), nullable=True
     )
 
+    # True while the playlist exists on Tidal (set by each full Tidal refresh)
+    in_tidal: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+
     # Sync state (unified Tidal-Filesystem sync)
     sync_status: Mapped[str] = mapped_column(
         String(20),
@@ -301,8 +306,7 @@ class Playlist(Base):
     def __repr__(self) -> str:
         """String representation of Playlist."""
         return (
-            f"<Playlist(id={self.id}, name='{self.name}', "
-            f"tidal_id='{self.tidal_id}')>"
+            f"<Playlist(id={self.id}, name='{self.name}', tidal_id='{self.tidal_id}')>"
         )
 
 

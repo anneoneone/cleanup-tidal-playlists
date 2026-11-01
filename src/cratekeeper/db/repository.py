@@ -5,10 +5,12 @@ Every function takes the caller's session, so a step decides its own unit of wor
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .models import Playlist, PlaylistTrack, Run, RunKind, RunStatus, Track
@@ -97,6 +99,121 @@ def mark_interrupted_runs(session: Session) -> int:
         run.finished_at = utc_now()
         run.error = run.error or "Interrupted: the process stopped during the run"
     return len(runs)
+
+
+# ---------------------------------------------------------------- playlists/tracks
+
+
+def normalized_track_name(title: str, artist: str) -> str:
+    """Return the v1 matching key: artist without "feat.", title without brackets."""
+    artist_part = re.sub(
+        r"\s*(feat\.?|featuring|ft\.?)\s+.*", "", artist, flags=re.IGNORECASE
+    )
+    title_part = re.sub(r"\s*\([^)]*\)\s*", "", title)
+    title_part = re.sub(r"\s*\[[^\]]*\]\s*", "", title_part)
+    return f"{artist_part.lower().strip()} - {title_part.lower().strip()}"
+
+
+def name_key(value: str) -> str:
+    """Return the key used to compare playlist names (NFC, case-folded)."""
+    return unicodedata.normalize("NFC", value).casefold().strip()
+
+
+def all_playlists(session: Session) -> Sequence[Playlist]:
+    """Return all playlists ordered by name."""
+    return session.scalars(select(Playlist).order_by(Playlist.name)).all()
+
+
+def playlist_by_tidal_id(session: Session, tidal_id: str) -> Optional[Playlist]:
+    """Return the playlist with this Tidal ID."""
+    return session.scalars(
+        select(Playlist).where(Playlist.tidal_id == tidal_id)
+    ).first()
+
+
+def playlist_by_name(
+    session: Session, name: str, *, without_tidal_id: bool = False
+) -> Optional[Playlist]:
+    """Find a playlist by name, ignoring Unicode form and case."""
+    key = name_key(name)
+    stmt = select(Playlist).order_by(Playlist.id)
+    if without_tidal_id:
+        stmt = stmt.where(Playlist.tidal_id.is_(None))
+    for playlist in session.scalars(stmt):
+        if name_key(playlist.name) == key:
+            return playlist
+    return None
+
+
+def track_by_tidal_id(session: Session, tidal_id: str) -> Optional[Track]:
+    """Return the track with this Tidal ID."""
+    return session.scalars(select(Track).where(Track.tidal_id == tidal_id)).first()
+
+
+def track_by_stored_path(session: Session, stored_path: str) -> Optional[Track]:
+    """Return the track that has ``stored_path`` in its file paths."""
+    track_id = session.execute(
+        text(
+            "SELECT tracks.id FROM tracks, json_each(tracks.file_paths) AS f "
+            "WHERE f.value = :path LIMIT 1"
+        ),
+        {"path": stored_path},
+    ).scalar_one_or_none()
+    return session.get(Track, track_id) if track_id is not None else None
+
+
+def playlist_rows(session: Session, playlist_id: int) -> dict[int, PlaylistTrack]:
+    """Return the playlist's rows keyed by track ID."""
+    rows = session.scalars(
+        select(PlaylistTrack).where(PlaylistTrack.playlist_id == playlist_id)
+    ).all()
+    return {row.track_id: row for row in rows}
+
+
+def ensure_row(
+    session: Session,
+    rows: dict[int, PlaylistTrack],
+    playlist: Playlist,
+    track: Track,
+) -> PlaylistTrack:
+    """Return the playlist's row for ``track``, creating it if needed."""
+    row = rows.get(track.id)
+    if row is None:
+        row = PlaylistTrack(
+            playlist_id=playlist.id,
+            track_id=track.id,
+            in_tidal=False,
+            in_local=False,
+            in_bandcamp=False,
+            in_rekordbox=False,
+        )
+        session.add(row)
+        rows[track.id] = row
+    return row
+
+
+def add_file_path(track: Track, stored_path: str) -> bool:
+    """Add ``stored_path`` to the track's file paths.
+
+    Returns True if it was new.
+    """
+    paths = list(track.file_paths or [])
+    if stored_path in paths:
+        return False
+    track.file_paths = [*paths, stored_path]
+    return True
+
+
+def remove_file_path(track: Track, stored_path: str) -> bool:
+    """Remove ``stored_path`` from the track's file paths.
+
+    Returns True if removed.
+    """
+    paths = list(track.file_paths or [])
+    if stored_path not in paths:
+        return False
+    track.file_paths = [p for p in paths if p != stored_path]
+    return True
 
 
 # ------------------------------------------------------------------------- counts

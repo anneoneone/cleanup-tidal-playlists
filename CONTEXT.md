@@ -21,6 +21,10 @@ _Avoid_: local playlists, local-only tracks
 The folder on disk that holds the audio files for **Tidal** tracks, with one sub-folder per **Playlist**. A Playlist keeps its sub-folder when it is renamed.
 _Avoid_: mp3 directory, library
 
+**Local playlist**:
+A **Music folder** sub-folder that belongs to no **Tidal** playlist (e.g. a party or radio set put together by hand). All its files are **Local tracks**.
+_Avoid_: local-only playlist, custom playlist
+
 **Local track**:
 An audio file in a **Playlist**'s **Music folder** sub-folder that matches no **Tidal** track. It belongs to that Playlist like any other **Track**.
 _Avoid_: local-only track, orphan file
