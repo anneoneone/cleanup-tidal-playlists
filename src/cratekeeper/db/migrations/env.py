@@ -6,9 +6,9 @@ The caller passes an open connection in ``config.attributes["connection"]``
 configures logging, so it cannot touch a real database by accident.
 """
 
+from alembic import context
 from sqlalchemy import create_engine, pool
 
-from alembic import context
 from cratekeeper.db.models import Base
 
 config = context.config

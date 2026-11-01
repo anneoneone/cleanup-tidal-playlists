@@ -8,9 +8,8 @@ Create Date: 2025-12-11 00:00:00.000000
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-from sqlalchemy import JSON, String, text
-
 from alembic import op
+from sqlalchemy import JSON, String, text
 
 # revision identifiers, used by Alembic.
 revision: str = "remove_symlinks"

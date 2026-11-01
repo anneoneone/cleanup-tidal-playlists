@@ -175,9 +175,10 @@ def _copy_sqlite(source: Path, target: Path) -> None:
     ``sqlite3.connect`` as a context manager does not close the connection, so
     both are closed explicitly: an open handle would break a later restore.
     """
-    with closing(sqlite3.connect(source)) as src, closing(
-        sqlite3.connect(target)
-    ) as dst:
+    with (
+        closing(sqlite3.connect(source)) as src,
+        closing(sqlite3.connect(target)) as dst,
+    ):
         src.backup(dst)
 
 

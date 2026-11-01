@@ -9,14 +9,13 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, event, inspect, pool
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, event, inspect, pool
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base
 
