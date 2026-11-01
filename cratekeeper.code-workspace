@@ -1,7 +1,7 @@
 {
 	"folders": [
 		{
-			"name": "Tidal Cleanup",
+			"name": "Cratekeeper",
 			"path": "."
 		}
 	],
@@ -326,7 +326,7 @@
 				"label": "Run Main",
 				"type": "shell",
 				"command": "python",
-				"args": ["-m", "tidal_cleanup"],
+				"args": ["-m", "cratekeeper"],
 				"group": "build",
 				"presentation": {
 					"echo": true,
@@ -356,10 +356,10 @@
 		"version": "0.2.0",
 		"configurations": [
 			{
-				"name": "Run Tidal Cleanup",
+				"name": "Run Cratekeeper",
 				"type": "debugpy",
 				"request": "launch",
-				"module": "tidal_cleanup",
+				"module": "cratekeeper",
 				"console": "integratedTerminal",
 				"cwd": "${workspaceFolder}",
 				"env": {
