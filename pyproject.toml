@@ -73,6 +73,9 @@ cratekeeper = [
     "db/migrations/script.py.mako",
     "db/migrations/*.py",
     "db/migrations/versions/*.py",
+    # Built web UI (`make ui`); not in git
+    "web/dist/*",
+    "web/dist/assets/*",
 ]
 
 [tool.black]
