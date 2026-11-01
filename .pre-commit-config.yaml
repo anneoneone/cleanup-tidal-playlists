@@ -54,10 +54,14 @@ repos:
     hooks:
       - id: mypy
         pass_filenames: false
-        args: [src/tidal_cleanup, --python-version=3.12]
+        args: [src/tidal_cleanup, src/cratekeeper, --python-version=3.12]
         additional_dependencies:
           - types-requests
           - sqlalchemy>=2.0.0
+          - alembic>=1.13.0
+          - pydantic>=2.0.0
+          - tomli-w>=1.2.0
+          - rich>=12.0.0
         exclude: ^(tests/|scripts/|spikes/.*|alembic/.*)$
 
   # Docstring formatting

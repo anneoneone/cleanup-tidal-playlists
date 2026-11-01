@@ -45,7 +45,7 @@ clean:
 # Code quality
 lint:
 	flake8 src/ tests/
-	mypy --package tidal_cleanup --config-file=pyproject.toml
+	mypy --package tidal_cleanup --package cratekeeper --config-file=pyproject.toml
 	bandit -r src/
 
 # Run the exact same checks as the CI/CD pipeline
@@ -54,7 +54,7 @@ pipeline-check:
 	black --check --diff src/ tests/
 	isort --check-only --diff src/ tests/
 	flake8 src/ tests/
-	mypy --package tidal_cleanup --config-file=pyproject.toml
+	mypy --package tidal_cleanup --package cratekeeper --config-file=pyproject.toml
 	@echo "✅ All pipeline checks passed!"
 
 format:

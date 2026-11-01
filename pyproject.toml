@@ -35,6 +35,7 @@ dependencies = [
     "tidal-dl-ng>=0.31.4",
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
+    "tomli-w>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -73,6 +74,13 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 tidal_cleanup = ["py.typed"]
+cratekeeper = [
+    "py.typed",
+    "defaults/*.json",
+    "db/migrations/script.py.mako",
+    "db/migrations/*.py",
+    "db/migrations/versions/*.py",
+]
 
 # Black configuration
 [tool.black]
@@ -100,7 +108,7 @@ exclude = '''
 profile = "black"
 multi_line_output = 3
 line_length = 88
-known_first_party = ["tidal_cleanup"]
+known_first_party = ["tidal_cleanup", "cratekeeper"]
 known_third_party = [
     "tidalapi",
     "pydantic",
@@ -201,6 +209,10 @@ module = ["alembic.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = ["cratekeeper.db.migrations.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
 module = [
     "src.tidal_cleanup.database.file_scanner_service",
     "tidal_cleanup.database.file_scanner_service",
@@ -214,6 +226,7 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--cov=src/tidal_cleanup",
+    "--cov=src/cratekeeper",
     "--cov-report=term-missing",
     "--cov-report=html",
     "--cov-report=xml",
@@ -226,7 +239,7 @@ python_functions = ["test_*"]
 
 # Coverage configuration
 [tool.coverage.run]
-source = ["src/tidal_cleanup"]
+source = ["src/tidal_cleanup", "src/cratekeeper"]
 omit = ["*/tests/*", "*/test_*", "setup.py"]
 
 [tool.coverage.report]
