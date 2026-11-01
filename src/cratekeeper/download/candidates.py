@@ -63,7 +63,7 @@ def find_candidates(
     key = repo.name_key(playlist_name) if playlist_name else None
     seen: set[int] = set()
     result: list[DownloadCandidate] = []
-    for _row, track, playlist in session.execute(stmt).tuples():
+    for _row, track, playlist in session.execute(stmt):
         if track.id in seen:
             continue
         if key is not None and repo.name_key(playlist.name) != key:

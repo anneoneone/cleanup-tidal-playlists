@@ -73,6 +73,68 @@ def _write_flac(
     return path
 
 
+_EMPTY_PLAYLIST_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<MASTER_PLAYLIST Version="1.0.0" AutomaticSync="0">'
+    '<PRODUCT Name="rekordbox" Version="6.8.0" Company="AlphaTheta"/>'
+    "<PLAYLISTS/></MASTER_PLAYLIST>\n"
+)
+
+
+def _build_rekordbox_library(folder: Path) -> Path:
+    """Create an empty, unencrypted Rekordbox library that pyrekordbox can open."""
+    from datetime import datetime
+
+    from pyrekordbox.db6 import tables
+    from sqlalchemy import MetaData, create_engine
+    from sqlalchemy.orm import Session
+
+    folder.mkdir(parents=True, exist_ok=True)
+    db_path = folder / "master.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    metadata = MetaData()
+    for table in tables.Base.metadata.sorted_tables:
+        copy = table.to_metadata(metadata)
+        for column in copy.columns:  # the real schema allows NULL here
+            if not column.primary_key:
+                column.nullable = True
+    metadata.create_all(engine)
+    now = datetime.now()
+
+    def filled(row: Any) -> Any:
+        for column in row.__table__.columns:
+            if getattr(row, column.key) is None and type(column.type).__name__ == (
+                "DateTime"
+            ):
+                setattr(row, column.key, now)
+        return row
+
+    with Session(engine) as session:
+        session.add(
+            filled(tables.AgentRegistry(registry_id="localUpdateCount", int_1=1))
+        )
+        session.add(filled(tables.DjmdMenuItems(ID="1", Class=0, Name="TRACK")))
+        session.add(filled(tables.DjmdDevice(ID="dev1", MasterDBID="m1", Name="test")))
+        session.commit()
+    engine.dispose()
+    (folder / "masterPlaylists6.xml").write_text(_EMPTY_PLAYLIST_XML)
+    return db_path
+
+
+@pytest.fixture(autouse=True)
+def rekordbox_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pretend Rekordbox is not running (tests flip this to test the guard)."""
+    import cratekeeper.rekordbox.connection as connection
+
+    monkeypatch.setattr(connection, "get_rekordbox_pid", lambda: 0)
+
+
+@pytest.fixture
+def rekordbox_library(tmp_path: Path) -> Path:
+    """Return the path of a fresh, empty Rekordbox ``master.db``."""
+    return _build_rekordbox_library(tmp_path / "rekordbox")
+
+
 @pytest.fixture
 def make_mp3() -> AudioMaker:
     """Return a function that writes a tagged MP3 file."""

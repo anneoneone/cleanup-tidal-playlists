@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -145,7 +145,7 @@ def _has_tables(path: Path) -> bool:
     if not path.exists() or path.stat().st_size == 0:
         return False
     try:
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn:
             row = conn.execute(
                 "SELECT count(*) FROM sqlite_master WHERE type='table'"
             ).fetchone()
