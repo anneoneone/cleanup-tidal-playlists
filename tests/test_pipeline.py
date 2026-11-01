@@ -83,8 +83,8 @@ def test_full_sync_then_apply_then_restore(
     again = run_job(app, lambda ctx: sync(app, ctx, SyncOptions(offline=True)))
     assert again.plan.is_empty
 
-    db_backup = next(b for b in list_backups(app.home) if b.kind == "db")
-    run_job(app, lambda ctx: restore(app, ctx, db_backup.id))
+    first_refresh = [b for b in list_backups(app.home) if b.kind == "db"][-1]
+    run_job(app, lambda ctx: restore(app, ctx, first_refresh.id))
     with app.db.session() as s:
         assert repo.library_counts(s)["playlists"] == 0
 

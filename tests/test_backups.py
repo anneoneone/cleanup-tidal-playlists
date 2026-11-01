@@ -40,7 +40,7 @@ def test_full_backup_contains_library_files(
     assert info.kind == "full"
     assert set(info.files) >= {"cratekeeper.db", "master.db", "masterPlaylists6.xml"}
     assert list_backups(home)[0].id == info.id
-    assert info.id.endswith("before-apply")
+    assert info.id.endswith("-00-before-apply")
 
 
 def test_retention_is_per_kind(
@@ -91,7 +91,9 @@ def test_restore_refuses_while_rekordbox_runs(
         restore_backup(home, db, info.id)
 
 
-@pytest.mark.parametrize("bad_id", ["../etc", "20260101-000000-../../x", "nope"])
+@pytest.mark.parametrize(
+    "bad_id", ["../etc", "20260101-000000-00-../../x", "20260101-000000-x", "nope"]
+)
 def test_invalid_ids_are_rejected(home: Home, bad_id: str) -> None:
     with pytest.raises(BackupError):
         get_backup(home, bad_id)
@@ -104,3 +106,8 @@ def test_missing_library_aborts_full_backup(
     with pytest.raises(BackupError, match="not found"):
         create_backup(home, db, "x", location)
     assert list_backups(home) == []
+
+
+def test_ids_sort_in_creation_order_within_one_second(home: Home, db: Database) -> None:
+    ids = [create_backup(home, db, f"b{i}").id for i in range(3)]
+    assert [b.id for b in list_backups(home)] == list(reversed(ids))

@@ -26,7 +26,7 @@ from .rekordbox.connection import XML_NAME, RekordboxLocation, require_closed
 logger = logging.getLogger(__name__)
 
 BackupKind = Literal["full", "db"]
-_ID = re.compile(r"^\d{8}-\d{6}(-\d+)?-[a-z0-9-]+$")
+_ID = re.compile(r"^\d{8}-\d{6}-\d{2}-[a-z0-9-]+$")
 REKORDBOX_FILES = ("master.db", "master.db-wal", "master.db-shm", "local.db", XML_NAME)
 DB_FILE = "cratekeeper.db"
 
@@ -158,15 +158,21 @@ def restore_backup(
 
 
 def _new_folder(home: Home, label: str) -> Path:
+    """Return a new folder named ``<time>-<NN>-<label>``.
+
+    The counter keeps IDs unique within one second and makes string order equal creation
+    order.
+    """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:40] or "backup"
-    folder = home.backups_dir / f"{stamp}-{slug}"
-    counter = 1
-    while folder.exists():
-        folder = home.backups_dir / f"{stamp}-{counter}-{slug}"
+    taken = [p.name for p in home.backups_dir.glob(f"{stamp}-*")]
+    counter = len(taken)
+    while True:
+        folder = home.backups_dir / f"{stamp}-{counter:02d}-{slug}"
+        if not folder.exists():
+            folder.mkdir()
+            return folder
         counter += 1
-    folder.mkdir()
-    return folder
 
 
 def _copy_sqlite(source: Path, target: Path) -> None:
