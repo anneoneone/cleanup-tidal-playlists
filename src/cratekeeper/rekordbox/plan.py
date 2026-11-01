@@ -6,9 +6,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 DELETE_GROUP = "delete"
+
+# Fields with defaults are always sent, so the API schema marks them required.
+_OUTPUT = ConfigDict(json_schema_serialization_defaults_required=True)
 
 
 class ChangeKind(str, Enum):
@@ -29,6 +32,8 @@ class Change(BaseModel):
 
     Fields that do not apply to the kind stay empty.
     """
+
+    model_config = _OUTPUT
 
     kind: ChangeKind
     summary: str
@@ -51,6 +56,8 @@ class PlanGroup(BaseModel):
     Applied as one unit.
     """
 
+    model_config = _OUTPUT
+
     key: str
     title: str
     playlist_id: Optional[int] = None
@@ -70,6 +77,8 @@ class PlanGroup(BaseModel):
 class PlaylistLink(BaseModel):
     """A Playlist that already matches its Rekordbox playlist (bookkeeping only)."""
 
+    model_config = _OUTPUT
+
     playlist_id: int
     rekordbox_playlist_id: str
     member_track_ids: list[int] = Field(default_factory=list)
@@ -81,6 +90,8 @@ class Plan(BaseModel):
 
     Applying it is only allowed while the fingerprint matches.
     """
+
+    model_config = _OUTPUT
 
     created_at: datetime
     fingerprint: str

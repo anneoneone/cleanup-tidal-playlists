@@ -238,8 +238,14 @@ def _router() -> APIRouter:  # noqa: C901 - one place lists every route
     @router.get("/auth/tidal", response_model=TidalLoginOut)
     def get_tidal_login(core: Core) -> TidalLoginOut:
         state, error = core.auth.login_state()
+        start = core.auth.pending_login()
         return TidalLoginOut(
-            logged_in=core.auth.has_stored_login(), state=state, error=error
+            logged_in=core.auth.has_stored_login(),
+            state=state,
+            error=error,
+            url=start.url if start else None,
+            user_code=start.user_code if start else None,
+            expires_at=start.expires_at if start else None,
         )
 
     @router.post("/auth/tidal", response_model=TidalLoginOut)

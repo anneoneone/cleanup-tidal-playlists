@@ -142,10 +142,12 @@ def test_login_flow_writes_private_file_and_persists_refresh(tmp_path: Path) -> 
     start = auth.start_login()
     assert start.url == "https://link.tidal.com/ABCDE"
     assert auth.login_state() == ("pending", None)
+    assert auth.pending_login() == start
 
     sessions[0].future.set_result(None)
 
     assert auth.wait_for_login(1) == "done"
+    assert auth.pending_login() is None
     assert json.loads(file.read_text())["access_token"] == "a1"
     assert stat.S_IMODE(file.stat().st_mode) == 0o600
     session = auth.session()

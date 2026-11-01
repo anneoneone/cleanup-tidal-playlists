@@ -55,6 +55,7 @@ class TidalAuth:
         self._session: Any = None
         self._saved_tokens: Optional[tuple[str, str]] = None
         self._pending: Any = None
+        self._start: Optional[LoginStart] = None
         self._state: LoginState = "idle"
         self._error: Optional[str] = None
 
@@ -107,23 +108,30 @@ class TidalAuth:
         with self._lock:
             session = self._factory()
             link, future = session.login_oauth()
-            self._pending = (session, future)
-            self._state = "pending"
-            self._error = None
-            future.add_done_callback(lambda f: self._finish_login(session, f))
             url = getattr(link, "verification_uri_complete", "") or ""
             if url and not url.startswith("http"):
                 url = f"https://{url}"
-            return LoginStart(
+            start = LoginStart(
                 url=url,
                 user_code=str(getattr(link, "user_code", "")),
                 expires_at=time.time() + float(getattr(link, "expires_in", 300)),
             )
+            self._pending = (session, future)
+            self._start = start
+            self._state = "pending"
+            self._error = None
+            future.add_done_callback(lambda f: self._finish_login(session, f))
+            return start
 
     def login_state(self) -> tuple[LoginState, Optional[str]]:
         """Return the state of the last login attempt and its error, if any."""
         with self._lock:
             return self._state, self._error
+
+    def pending_login(self) -> Optional[LoginStart]:
+        """Return the link and code of the login in progress, if any."""
+        with self._lock:
+            return self._start
 
     def wait_for_login(self, timeout: Optional[float] = None) -> LoginState:
         """Block until the pending login finishes (CLI)."""
@@ -152,6 +160,7 @@ class TidalAuth:
                 logger.warning("Tidal login failed: %s", self._error)
             finally:
                 self._pending = None
+                self._start = None
 
     def _read_file(self) -> dict[str, Any]:
         try:

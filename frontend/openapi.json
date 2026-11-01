@@ -226,7 +226,18 @@
         },
         "required": [
           "kind",
-          "summary"
+          "summary",
+          "track_id",
+          "file_path",
+          "content_id",
+          "song_id",
+          "name",
+          "old_name",
+          "folder",
+          "old_folder",
+          "genre",
+          "playlist_id",
+          "rekordbox_playlist_id"
         ],
         "title": "Change",
         "type": "object"
@@ -448,7 +459,13 @@
         "required": [
           "created_at",
           "fingerprint",
-          "rekordbox_db"
+          "rekordbox_db",
+          "scope",
+          "groups",
+          "links",
+          "new_folders",
+          "unchanged_playlists",
+          "warnings"
         ],
         "title": "Plan",
         "type": "object"
@@ -526,7 +543,14 @@
         },
         "required": [
           "key",
-          "title"
+          "title",
+          "playlist_id",
+          "rekordbox_playlist_id",
+          "target_name",
+          "folder",
+          "selected_by_default",
+          "changes",
+          "member_track_ids"
         ],
         "title": "PlanGroup",
         "type": "object"
@@ -693,7 +717,9 @@
         },
         "required": [
           "playlist_id",
-          "rekordbox_playlist_id"
+          "rekordbox_playlist_id",
+          "member_track_ids",
+          "content_ids"
         ],
         "title": "PlaylistLink",
         "type": "object"

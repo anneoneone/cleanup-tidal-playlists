@@ -15,7 +15,7 @@ import shutil
 import sqlite3
 from contextlib import closing
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -82,7 +82,7 @@ def create_backup(
         id=folder.name,
         kind=kind,
         label=label,
-        created_at=datetime.now().isoformat(timespec="seconds"),
+        created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         rekordbox_dir=str(rekordbox.db_dir) if rekordbox else None,
         files=files,
         size_bytes=sum((folder / f).stat().st_size for f in files),

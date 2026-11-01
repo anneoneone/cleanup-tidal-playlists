@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,7 @@ def test_full_backup_contains_library_files(
     assert set(info.files) >= {"cratekeeper.db", "master.db", "masterPlaylists6.xml"}
     assert list_backups(home)[0].id == info.id
     assert info.id.endswith("-00-before-apply")
+    assert datetime.fromisoformat(info.created_at).utcoffset() == timedelta(0)
 
 
 def test_retention_is_per_kind(

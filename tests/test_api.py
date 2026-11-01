@@ -209,6 +209,16 @@ def test_tidal_login_endpoints(
         "ABC",
     )
 
+    # After a page reload the UI gets the same link back.
+    monkeypatch.setattr(core.auth, "login_state", lambda: ("pending", None))
+    monkeypatch.setattr(core.auth, "pending_login", lambda: start)
+    again = client.get("/api/auth/tidal").json()
+    assert (again["state"], again["url"], again["user_code"]) == (
+        "pending",
+        "https://link.tidal.com/ABC",
+        "ABC",
+    )
+
 
 def test_backups_list_and_restore(client: TestClient, core: App) -> None:
     offline_sync(client, core)
@@ -223,15 +233,22 @@ def test_backups_list_and_restore(client: TestClient, core: App) -> None:
     assert missing.status_code == 404
 
 
+def test_plan_lists_are_required_in_the_schema(client: TestClient) -> None:
+    schemas = client.get("/api/openapi.json").json()["components"]["schemas"]
+    assert {"groups", "warnings", "new_folders"} <= set(schemas["Plan"]["required"])
+    assert "changes" in schemas["PlanGroup"]["required"]
+
+
 def test_ui_fallback(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    core: App, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert "make ui" in client.get("/").text
     dist = tmp_path / "dist"
+    monkeypatch.setattr(api_module, "web_dist", lambda: dist)
+    unbuilt = TestClient(create_app(core, 8765, extra_hosts={"testserver"}))
+    assert "make ui" in unbuilt.get("/").text
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text("<html>app</html>")
     (dist / "assets" / "app.js").write_text("console.log(1)")
-    monkeypatch.setattr(api_module, "web_dist", lambda: dist)
     app = TestClient(create_app(App.open(), 8765, extra_hosts={"testserver"}))
     assert app.get("/playlists/3").text == "<html>app</html>"
     assert app.get("/assets/app.js").text == "console.log(1)"
