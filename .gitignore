@@ -184,3 +184,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Cratekeeper web UI
+src/cratekeeper/web/dist/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/

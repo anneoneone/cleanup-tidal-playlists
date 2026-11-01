@@ -24,6 +24,7 @@ from typing import IO, Any, Optional
 logger = logging.getLogger(__name__)
 
 MAX_EVENTS = 5000
+TERMINAL_EVENTS = frozenset({"finished", "failed", "cancelled"})
 PROGRESS_INTERVAL = 0.1  # seconds between progress events of one step
 
 

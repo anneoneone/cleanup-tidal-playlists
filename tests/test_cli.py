@@ -81,3 +81,15 @@ def test_status_hints_at_migrate(configured: Path, isolated_home: Path) -> None:
     home_db = Home.resolve().db_file
     home_db.unlink(missing_ok=True)
     assert "cratekeeper migrate" in invoke("status").output
+
+
+def test_ui_refuses_a_busy_port(configured: Path) -> None:
+    import socket
+
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+        result = CliRunner().invoke(cli, ["ui", "--port", str(port), "--no-browser"])
+    assert result.exit_code == 1
+    assert "already in use" in result.output

@@ -1,0 +1,333 @@
+"""The local web server: JSON API under ``/api`` plus the built web UI."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from collections.abc import AsyncIterator, Iterable
+from importlib import resources
+from pathlib import Path
+from typing import Annotated, Any, Optional
+
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from pydantic import ValidationError
+
+from ..app import App
+from ..backups import BackupError, get_backup, list_backups
+from ..db import repository as repo
+from ..db.models import RunKind, RunStatus
+from ..jobs import TERMINAL_EVENTS, JobBusyError, JobEvent
+from ..pipeline import SyncOptions, apply, load_plan, restore, sync
+from ..settings import Settings
+from .schemas import (
+    ApplyIn,
+    BackupOut,
+    CancelOut,
+    JobOut,
+    PlanOut,
+    PlaylistDetailOut,
+    PlaylistOut,
+    RunOut,
+    SettingsOut,
+    StatusOut,
+    SyncIn,
+    TidalLoginOut,
+)
+from .security import LocalOnlyGuard
+from .views import (
+    backup_out,
+    job_out,
+    playlist_detail_out,
+    playlists_out,
+    run_out,
+    status_out,
+)
+
+logger = logging.getLogger(__name__)
+
+KEEPALIVE_SECONDS = 15.0
+_NO_UI = """<!doctype html><title>Cratekeeper</title>
+<body style="font-family:system-ui;margin:3rem;max-width:40rem">
+<h1>Cratekeeper</h1><p>The web UI is not built yet. Run <code>make ui</code> in the
+repository, then start <code>cratekeeper ui</code> again. The API is running at
+<a href="/api/docs">/api/docs</a>.</p></body>"""
+
+
+def web_dist() -> Path:
+    """Return the folder with the built web UI."""
+    return Path(str(resources.files("cratekeeper") / "web" / "dist"))
+
+
+def create_app(
+    core: App,
+    port: int,
+    extra_origins: Iterable[str] = (),
+    extra_hosts: Iterable[str] = (),
+) -> FastAPI:
+    """Build the FastAPI app around one :class:`App`."""
+    api = FastAPI(
+        title="Cratekeeper",
+        docs_url="/api/docs",
+        openapi_url="/api/openapi.json",
+        redoc_url=None,
+    )
+    api.middleware("http")(LocalOnlyGuard(port, extra_origins, extra_hosts))
+    api.state.core = core
+    api.include_router(_router(), prefix="/api")
+    _mount_ui(api)
+    return api
+
+
+def _core(request: Request) -> App:
+    core: App = request.app.state.core
+    return core
+
+
+Core = Annotated[App, Depends(_core)]
+
+
+def _start(core: App, kind: str, label: str, fn: Any) -> JobOut:
+    try:
+        job = core.runner.start(kind, fn, label=label)
+    except JobBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return job_out(job)
+
+
+def _router() -> APIRouter:  # noqa: C901 - one place lists every route
+    router = APIRouter()
+
+    @router.get("/status", response_model=StatusOut)
+    def get_status(core: Core) -> StatusOut:
+        return status_out(core)
+
+    @router.get("/playlists", response_model=list[PlaylistOut])
+    def get_playlists(core: Core) -> list[PlaylistOut]:
+        return playlists_out(core)
+
+    @router.get("/playlists/{playlist_id}", response_model=PlaylistDetailOut)
+    def get_playlist(core: Core, playlist_id: int) -> PlaylistDetailOut:
+        detail = playlist_detail_out(core, playlist_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Playlist not found")
+        return detail
+
+    @router.post("/sync", response_model=JobOut, status_code=202)
+    def post_sync(core: Core, body: SyncIn) -> JobOut:
+        options = SyncOptions(**body.model_dump())
+        label = f"Sync {body.playlist}" if body.playlist else "Sync"
+        return _start(core, "sync", label, lambda ctx: sync(core, ctx, options))
+
+    @router.get("/jobs/current", response_model=Optional[JobOut])
+    def get_current_job(core: Core) -> Optional[JobOut]:
+        job = core.runner.current()
+        return job_out(job) if job is not None else None
+
+    @router.get("/jobs/{job_id}", response_model=JobOut)
+    def get_job(core: Core, job_id: str) -> JobOut:
+        job = core.runner.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job_out(job)
+
+    @router.get("/jobs/{job_id}/events")
+    async def job_events(
+        core: Core, job_id: str, request: Request, after: int = 0
+    ) -> StreamingResponse:
+        job = core.runner.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return StreamingResponse(
+            _event_stream(job, request, after),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @router.post("/jobs/{job_id}/cancel", response_model=CancelOut)
+    def cancel_job(core: Core, job_id: str) -> CancelOut:
+        return CancelOut(cancelled=core.runner.cancel(job_id))
+
+    @router.get("/runs", response_model=list[RunOut])
+    def get_runs(core: Core, limit: int = 50, offset: int = 0) -> list[RunOut]:
+        with core.db.session() as session:
+            runs = repo.list_runs(session, limit=min(limit, 200), offset=offset)
+            return [run_out(r) for r in runs]
+
+    @router.get("/runs/{run_id}", response_model=RunOut)
+    def get_run(core: Core, run_id: int) -> RunOut:
+        with core.db.session() as session:
+            run = repo.get_run(session, run_id)
+            if run is None:
+                raise HTTPException(status_code=404, detail="Run not found")
+            return run_out(run)
+
+    @router.get("/plans/{run_id}", response_model=PlanOut)
+    def get_plan(core: Core, run_id: int) -> PlanOut:
+        try:
+            plan = load_plan(core, run_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        with core.db.session() as session:
+            applied_by = next(
+                (
+                    r.id
+                    for r in repo.list_runs(session, limit=200)
+                    if r.kind == RunKind.APPLY.value
+                    and r.plan_run_id == run_id
+                    and r.status == RunStatus.SUCCEEDED.value
+                ),
+                None,
+            )
+        return PlanOut(run_id=run_id, plan=plan, applied_by_run=applied_by)
+
+    @router.post("/plans/{run_id}/apply", response_model=JobOut, status_code=202)
+    def post_apply(core: Core, run_id: int, body: ApplyIn) -> JobOut:
+        try:
+            plan = load_plan(core, run_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        unknown = set(body.groups) - {g.key for g in plan.groups}
+        if unknown:
+            raise HTTPException(
+                status_code=422, detail=f"Unknown groups: {sorted(unknown)}"
+            )
+        if not body.groups:
+            raise HTTPException(status_code=422, detail="No groups selected")
+        groups = set(body.groups)
+        return _start(
+            core, "apply", "Apply", lambda ctx: apply(core, ctx, run_id, groups)
+        )
+
+    @router.get("/settings", response_model=SettingsOut)
+    def get_settings(core: Core) -> SettingsOut:
+        return _settings_out(core)
+
+    @router.put("/settings", response_model=SettingsOut)
+    def put_settings(core: Core, values: dict[str, Any]) -> SettingsOut:
+        try:
+            settings = Settings.model_validate(
+                {k: v for k, v in values.items() if v not in (None, "")}
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors()) from exc
+        settings.save(core.home)
+        core.reload_settings()
+        return _settings_out(core)
+
+    @router.get("/settings/tag-mapping")
+    def get_tag_mapping(core: Core) -> dict[str, Any]:
+        path = core.settings.tag_mapping_path(core.home)
+        mapping: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        return mapping
+
+    @router.put("/settings/tag-mapping")
+    def put_tag_mapping(core: Core, mapping: dict[str, Any]) -> dict[str, Any]:
+        groups = mapping.get("emoji_to_mytag_mapping")
+        folders = mapping.get("folder_structure")
+        if not isinstance(groups, dict) or not isinstance(folders, dict):
+            raise HTTPException(
+                status_code=422,
+                detail="Mapping needs 'emoji_to_mytag_mapping' and 'folder_structure'",
+            )
+        target = core.settings.tag_mapping or core.home.tag_mapping_file
+        target.write_text(json.dumps(mapping, indent=2, ensure_ascii=False) + "\n")
+        return mapping
+
+    @router.get("/auth/tidal", response_model=TidalLoginOut)
+    def get_tidal_login(core: Core) -> TidalLoginOut:
+        state, error = core.auth.login_state()
+        return TidalLoginOut(
+            logged_in=core.auth.has_stored_login(), state=state, error=error
+        )
+
+    @router.post("/auth/tidal", response_model=TidalLoginOut)
+    def start_tidal_login(core: Core) -> TidalLoginOut:
+        start = core.auth.start_login()
+        return TidalLoginOut(
+            logged_in=core.auth.has_stored_login(),
+            state="pending",
+            url=start.url,
+            user_code=start.user_code,
+            expires_at=start.expires_at,
+        )
+
+    @router.get("/backups", response_model=list[BackupOut])
+    def get_backups(core: Core) -> list[BackupOut]:
+        return [backup_out(b) for b in list_backups(core.home)]
+
+    @router.post("/backups/{backup_id}/restore", response_model=JobOut, status_code=202)
+    def post_restore(core: Core, backup_id: str) -> JobOut:
+        try:
+            get_backup(core.home, backup_id)
+        except BackupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _start(
+            core, "restore", "Restore", lambda ctx: restore(core, ctx, backup_id)
+        )
+
+    return router
+
+
+def _settings_out(core: App) -> SettingsOut:
+    values = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in core.settings.model_dump().items()
+    }
+    return SettingsOut(
+        values=values,
+        tag_mapping_in_use=str(core.settings.tag_mapping_path(core.home)),
+        config_file=str(core.home.config_file),
+    )
+
+
+async def _event_stream(job: Any, request: Request, after: int) -> AsyncIterator[str]:
+    """Send job events as SSE; ends after the job's last event."""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[JobEvent] = asyncio.Queue()
+
+    def push(event: JobEvent) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, event)
+
+    backlog, unsubscribe = job.subscribe(push, after_seq=after)
+    try:
+        for event in backlog:
+            yield _sse(event)
+            if event.kind in TERMINAL_EVENTS:
+                return
+        while True:
+            if await request.is_disconnected():
+                return
+            try:
+                event = await asyncio.wait_for(queue.get(), KEEPALIVE_SECONDS)
+            except TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            yield _sse(event)
+            if event.kind in TERMINAL_EVENTS:
+                return
+    finally:
+        unsubscribe()
+
+
+def _sse(event: JobEvent) -> str:
+    return (
+        f"id: {event.seq}\nevent: {event.kind}\ndata: {json.dumps(event.to_dict())}\n\n"
+    )
+
+
+def _mount_ui(api: FastAPI) -> None:
+    dist = web_dist()
+
+    @api.get("/{path:path}", include_in_schema=False, response_model=None)
+    def ui(path: str) -> FileResponse | HTMLResponse:
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        index = dist / "index.html"
+        if not index.is_file():
+            return HTMLResponse(_NO_UI)
+        candidate = (dist / path).resolve()
+        if path and candidate.is_file() and dist.resolve() in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(index)

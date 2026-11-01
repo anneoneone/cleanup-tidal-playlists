@@ -167,7 +167,7 @@ class Planner:
 
         members = {p.id: self._members(rows.get(p.id, [])) for p in playlists}
         genres = self._track_genres(playlists, members)
-        active = [p for p in playlists if not _vanished(p, rows.get(p.id, []))]
+        active = [p for p in playlists if not is_vanished(p, rows.get(p.id, []))]
         matches = self._match_all(active, lib)
         claimed: set[str] = set(matches.values())
         genre_done: set[str] = set()
@@ -555,7 +555,7 @@ def _add_changes(
     return changes
 
 
-def _vanished(playlist: Playlist, rows: list[PlaylistTrack]) -> bool:
+def is_vanished(playlist: Playlist, rows: list[PlaylistTrack]) -> bool:
     """Return whether no Source has the playlist any more."""
     if playlist.in_tidal:
         return False

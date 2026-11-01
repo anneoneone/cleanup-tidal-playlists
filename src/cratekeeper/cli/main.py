@@ -125,6 +125,61 @@ def sync_command(
         raise click.ClickException(f"{result.result.failed} groups failed")
 
 
+@cli.command("ui")
+@click.option("--port", type=int, help="Port (default: setting 'port', 8765).")
+@click.option("--no-browser", is_flag=True, help="Do not open the browser.")
+@click.option(
+    "--dev",
+    is_flag=True,
+    help="Allow the Vite dev server (http://localhost:5173) to call the API.",
+)
+@click.pass_obj
+def ui_command(
+    obj: dict[str, Any], port: Optional[int], no_browser: bool, dev: bool
+) -> None:
+    """Start the web UI on this computer and open it in the browser."""
+    import socket
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from ..api.app import create_app, web_dist
+
+    app = _open_app(obj["log_level"], console_logs=True)
+    port = port or app.settings.port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        if probe.connect_ex(("127.0.0.1", port)) == 0:
+            raise click.ClickException(
+                f"Port {port} is already in use. Is Cratekeeper already running? "
+                "Use --port to pick another one."
+            )
+    origins = ("http://localhost:5173", "http://127.0.0.1:5173") if dev else ()
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_app(app, port, extra_origins=origins),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+        )
+    )
+    url = f"http://127.0.0.1:{port}"
+    if not (web_dist() / "index.html").is_file():
+        console.print("[yellow]The web UI is not built: run 'make ui'.[/yellow]")
+    console.print(
+        f"Cratekeeper is running at [link={url}]{url}[/link] (Ctrl+C stops it)"
+    )
+    if not no_browser:
+        threading.Timer(1.0, webbrowser.open, args=(url,)).start()
+    try:
+        server.run()
+    finally:
+        if not app.runner.shutdown(timeout=0):
+            console.print("Waiting for the running job to finish…")
+            app.runner.shutdown()
+        app.close()
+
+
 @cli.command("status")
 @click.pass_obj
 def status_command(obj: dict[str, Any]) -> None:

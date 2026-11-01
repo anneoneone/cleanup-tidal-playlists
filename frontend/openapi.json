@@ -1,0 +1,1964 @@
+{
+  "components": {
+    "schemas": {
+      "ApplyIn": {
+        "description": "Which Plan groups to apply.",
+        "properties": {
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Groups",
+            "type": "array"
+          }
+        },
+        "title": "ApplyIn",
+        "type": "object"
+      },
+      "BackupOut": {
+        "description": "A Backup.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "full",
+              "db"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "rekordbox_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rekordbox Dir"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "created_at",
+          "files",
+          "size_bytes"
+        ],
+        "title": "BackupOut",
+        "type": "object"
+      },
+      "CancelOut": {
+        "description": "Result of a cancel request.",
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cancelled"
+        ],
+        "title": "CancelOut",
+        "type": "object"
+      },
+      "Change": {
+        "description": "One change.\n\nFields that do not apply to the kind stay empty.",
+        "properties": {
+          "content_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Id"
+          },
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Path"
+          },
+          "folder": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder"
+          },
+          "genre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Genre"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChangeKind"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "old_folder": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Folder"
+          },
+          "old_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Name"
+          },
+          "playlist_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Playlist Id"
+          },
+          "rekordbox_playlist_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rekordbox Playlist Id"
+          },
+          "song_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Song Id"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "track_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Track Id"
+          }
+        },
+        "required": [
+          "kind",
+          "summary"
+        ],
+        "title": "Change",
+        "type": "object"
+      },
+      "ChangeKind": {
+        "description": "What one change does.",
+        "enum": [
+          "create_playlist",
+          "rename_playlist",
+          "move_playlist",
+          "import_track",
+          "add_track",
+          "remove_track",
+          "set_genre",
+          "delete_playlist"
+        ],
+        "title": "ChangeKind",
+        "type": "string"
+      },
+      "Check": {
+        "description": "One health check on the dashboard.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ok"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "detail"
+        ],
+        "title": "Check",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JobOut": {
+        "description": "A running or recent background job.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_seq": {
+            "title": "Last Seq",
+            "type": "integer"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "status",
+          "started_at",
+          "last_seq"
+        ],
+        "title": "JobOut",
+        "type": "object"
+      },
+      "Plan": {
+        "description": "A complete Plan.\n\nApplying it is only allowed while the fingerprint matches.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/PlanGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/PlaylistLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "new_folders": {
+            "items": {
+              "type": "string"
+            },
+            "title": "New Folders",
+            "type": "array"
+          },
+          "rekordbox_db": {
+            "title": "Rekordbox Db",
+            "type": "string"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "unchanged_playlists": {
+            "default": 0,
+            "title": "Unchanged Playlists",
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "created_at",
+          "fingerprint",
+          "rekordbox_db"
+        ],
+        "title": "Plan",
+        "type": "object"
+      },
+      "PlanGroup": {
+        "description": "Changes for one Playlist (or the playlist deletions).\n\nApplied as one unit.",
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "folder": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Folder",
+            "type": "array"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "member_track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Member Track Ids",
+            "type": "array"
+          },
+          "playlist_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Playlist Id"
+          },
+          "rekordbox_playlist_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rekordbox Playlist Id"
+          },
+          "selected_by_default": {
+            "default": true,
+            "title": "Selected By Default",
+            "type": "boolean"
+          },
+          "target_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Name"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title"
+        ],
+        "title": "PlanGroup",
+        "type": "object"
+      },
+      "PlanOut": {
+        "description": "A stored Plan and whether it was applied already.",
+        "properties": {
+          "applied_by_run": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied By Run"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "plan"
+        ],
+        "title": "PlanOut",
+        "type": "object"
+      },
+      "PlaylistDetailOut": {
+        "description": "A Playlist with its Tracks.",
+        "properties": {
+          "folder": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Folder",
+            "type": "array"
+          },
+          "gone": {
+            "title": "Gone",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "in_rekordbox": {
+            "title": "In Rekordbox",
+            "type": "boolean"
+          },
+          "last_synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Synced At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rekordbox_name": {
+            "title": "Rekordbox Name",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "enum": [
+                "tidal",
+                "bandcamp",
+                "local"
+              ],
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "tracks": {
+            "items": {
+              "$ref": "#/components/schemas/TrackOut"
+            },
+            "title": "Tracks",
+            "type": "array"
+          },
+          "tracks_bandcamp": {
+            "title": "Tracks Bandcamp",
+            "type": "integer"
+          },
+          "tracks_in_rekordbox": {
+            "title": "Tracks In Rekordbox",
+            "type": "integer"
+          },
+          "tracks_local": {
+            "title": "Tracks Local",
+            "type": "integer"
+          },
+          "tracks_tidal": {
+            "title": "Tracks Tidal",
+            "type": "integer"
+          },
+          "tracks_with_file": {
+            "title": "Tracks With File",
+            "type": "integer"
+          },
+          "tracks_without_file": {
+            "title": "Tracks Without File",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sources",
+          "gone",
+          "folder",
+          "rekordbox_name",
+          "in_rekordbox",
+          "tracks_tidal",
+          "tracks_bandcamp",
+          "tracks_local",
+          "tracks_with_file",
+          "tracks_without_file",
+          "tracks_in_rekordbox",
+          "tracks"
+        ],
+        "title": "PlaylistDetailOut",
+        "type": "object"
+      },
+      "PlaylistLink": {
+        "description": "A Playlist that already matches its Rekordbox playlist (bookkeeping only).",
+        "properties": {
+          "content_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Content Ids",
+            "type": "object"
+          },
+          "member_track_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Member Track Ids",
+            "type": "array"
+          },
+          "playlist_id": {
+            "title": "Playlist Id",
+            "type": "integer"
+          },
+          "rekordbox_playlist_id": {
+            "title": "Rekordbox Playlist Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "playlist_id",
+          "rekordbox_playlist_id"
+        ],
+        "title": "PlaylistLink",
+        "type": "object"
+      },
+      "PlaylistOut": {
+        "description": "A Playlist row in the Playlists table.",
+        "properties": {
+          "folder": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Folder",
+            "type": "array"
+          },
+          "gone": {
+            "title": "Gone",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "in_rekordbox": {
+            "title": "In Rekordbox",
+            "type": "boolean"
+          },
+          "last_synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Synced At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rekordbox_name": {
+            "title": "Rekordbox Name",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "enum": [
+                "tidal",
+                "bandcamp",
+                "local"
+              ],
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "tracks_bandcamp": {
+            "title": "Tracks Bandcamp",
+            "type": "integer"
+          },
+          "tracks_in_rekordbox": {
+            "title": "Tracks In Rekordbox",
+            "type": "integer"
+          },
+          "tracks_local": {
+            "title": "Tracks Local",
+            "type": "integer"
+          },
+          "tracks_tidal": {
+            "title": "Tracks Tidal",
+            "type": "integer"
+          },
+          "tracks_with_file": {
+            "title": "Tracks With File",
+            "type": "integer"
+          },
+          "tracks_without_file": {
+            "title": "Tracks Without File",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sources",
+          "gone",
+          "folder",
+          "rekordbox_name",
+          "in_rekordbox",
+          "tracks_tidal",
+          "tracks_bandcamp",
+          "tracks_local",
+          "tracks_with_file",
+          "tracks_without_file",
+          "tracks_in_rekordbox"
+        ],
+        "title": "PlaylistOut",
+        "type": "object"
+      },
+      "RunOut": {
+        "description": "One sync, apply or restore.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "has_plan": {
+            "default": false,
+            "title": "Has Plan",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "plan_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Run Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "totals": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totals"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "started_at"
+        ],
+        "title": "RunOut",
+        "type": "object"
+      },
+      "SettingsOut": {
+        "description": "Current settings plus derived information.",
+        "properties": {
+          "config_file": {
+            "title": "Config File",
+            "type": "string"
+          },
+          "tag_mapping_in_use": {
+            "title": "Tag Mapping In Use",
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": true,
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "required": [
+          "values",
+          "tag_mapping_in_use",
+          "config_file"
+        ],
+        "title": "SettingsOut",
+        "type": "object"
+      },
+      "StatusOut": {
+        "description": "Everything the dashboard shows.",
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "current_job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "home": {
+            "title": "Home",
+            "type": "string"
+          },
+          "last_apply": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_sync": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "v1_import_available": {
+            "default": false,
+            "title": "V1 Import Available",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "home",
+          "checks",
+          "counts"
+        ],
+        "title": "StatusOut",
+        "type": "object"
+      },
+      "SyncIn": {
+        "description": "Start a sync.",
+        "properties": {
+          "allow_shrink": {
+            "default": false,
+            "title": "Allow Shrink",
+            "type": "boolean"
+          },
+          "download": {
+            "default": true,
+            "title": "Download",
+            "type": "boolean"
+          },
+          "full": {
+            "default": false,
+            "title": "Full",
+            "type": "boolean"
+          },
+          "offline": {
+            "default": false,
+            "title": "Offline",
+            "type": "boolean"
+          },
+          "playlist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Playlist"
+          }
+        },
+        "title": "SyncIn",
+        "type": "object"
+      },
+      "TidalLoginOut": {
+        "description": "State of the Tidal login.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "logged_in": {
+            "title": "Logged In",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "idle",
+              "pending",
+              "done",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "user_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Code"
+          }
+        },
+        "required": [
+          "logged_in",
+          "state"
+        ],
+        "title": "TidalLoginOut",
+        "type": "object"
+      },
+      "TrackOut": {
+        "description": "A Track inside a Playlist, with its presence per Source and Rekordbox.",
+        "properties": {
+          "added_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added At"
+          },
+          "album": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Album"
+          },
+          "artist": {
+            "title": "Artist",
+            "type": "string"
+          },
+          "download_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Error"
+          },
+          "download_status": {
+            "title": "Download Status",
+            "type": "string"
+          },
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Path"
+          },
+          "has_file": {
+            "title": "Has File",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "in_bandcamp": {
+            "title": "In Bandcamp",
+            "type": "boolean"
+          },
+          "in_local": {
+            "title": "In Local",
+            "type": "boolean"
+          },
+          "in_rekordbox": {
+            "title": "In Rekordbox",
+            "type": "boolean"
+          },
+          "in_tidal": {
+            "title": "In Tidal",
+            "type": "boolean"
+          },
+          "isrc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isrc"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "removed_from_tidal": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Removed From Tidal"
+          },
+          "tidal_unavailable": {
+            "title": "Tidal Unavailable",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "artist",
+          "in_tidal",
+          "in_bandcamp",
+          "in_local",
+          "in_rekordbox",
+          "has_file",
+          "download_status",
+          "tidal_unavailable"
+        ],
+        "title": "TrackOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Cratekeeper",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/auth/tidal": {
+      "get": {
+        "operationId": "get_tidal_login_api_auth_tidal_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TidalLoginOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Tidal Login"
+      },
+      "post": {
+        "operationId": "start_tidal_login_api_auth_tidal_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TidalLoginOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Start Tidal Login"
+      }
+    },
+    "/api/backups": {
+      "get": {
+        "operationId": "get_backups_api_backups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackupOut"
+                  },
+                  "title": "Response Get Backups Api Backups Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Backups"
+      }
+    },
+    "/api/backups/{backup_id}/restore": {
+      "post": {
+        "operationId": "post_restore_api_backups__backup_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backup_id",
+            "required": true,
+            "schema": {
+              "title": "Backup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Restore"
+      }
+    },
+    "/api/jobs/current": {
+      "get": {
+        "operationId": "get_current_job_api_jobs_current_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/JobOut"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Get Current Job Api Jobs Current Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Current Job"
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_job_api_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job"
+      }
+    },
+    "/api/jobs/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancel_job_api_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job"
+      }
+    },
+    "/api/jobs/{job_id}/events": {
+      "get": {
+        "operationId": "job_events_api_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Job Events"
+      }
+    },
+    "/api/plans/{run_id}": {
+      "get": {
+        "operationId": "get_plan_api_plans__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Plan"
+      }
+    },
+    "/api/plans/{run_id}/apply": {
+      "post": {
+        "operationId": "post_apply_api_plans__run_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Apply"
+      }
+    },
+    "/api/playlists": {
+      "get": {
+        "operationId": "get_playlists_api_playlists_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PlaylistOut"
+                  },
+                  "title": "Response Get Playlists Api Playlists Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Playlists"
+      }
+    },
+    "/api/playlists/{playlist_id}": {
+      "get": {
+        "operationId": "get_playlist_api_playlists__playlist_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "title": "Playlist Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Playlist"
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "operationId": "get_runs_api_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RunOut"
+                  },
+                  "title": "Response Get Runs Api Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Runs"
+      }
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "operationId": "get_run_api_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Run"
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "operationId": "get_settings_api_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings"
+      },
+      "put": {
+        "operationId": "put_settings_api_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Values",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Settings"
+      }
+    },
+    "/api/settings/tag-mapping": {
+      "get": {
+        "operationId": "get_tag_mapping_api_settings_tag_mapping_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Tag Mapping Api Settings Tag Mapping Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Tag Mapping"
+      },
+      "put": {
+        "operationId": "put_tag_mapping_api_settings_tag_mapping_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Mapping",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Tag Mapping Api Settings Tag Mapping Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Tag Mapping"
+      }
+    },
+    "/api/status": {
+      "get": {
+        "operationId": "get_status_api_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status"
+      }
+    },
+    "/api/sync": {
+      "post": {
+        "operationId": "post_sync_api_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Sync"
+      }
+    }
+  }
+}
