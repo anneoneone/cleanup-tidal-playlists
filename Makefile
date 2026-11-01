@@ -1,6 +1,6 @@
 # Makefile for Cratekeeper development
 
-.PHONY: help install install-dev format lint typecheck test check clean
+.PHONY: help install install-dev format lint typecheck test check clean ui ui-dev ui-check openapi
 
 help:
 	@echo "Targets:"
@@ -11,6 +11,10 @@ help:
 	@echo "  typecheck    Run mypy"
 	@echo "  test         Run pytest with coverage"
 	@echo "  check        format check + lint + typecheck + test (same as CI)"
+	@echo "  ui           Build the web UI into src/cratekeeper/web/dist"
+	@echo "  ui-dev       Run the Vite dev server (start cratekeeper ui --dev next to it)"
+	@echo "  ui-check     eslint, tsc, vitest and build for the web UI"
+	@echo "  openapi      Export the API contract and regenerate UI types"
 	@echo "  clean        Remove build and cache files"
 
 install:
@@ -39,6 +43,23 @@ check:
 	flake8 src/ tests/
 	mypy --package cratekeeper --config-file=pyproject.toml
 	pytest
+
+ui:
+	npm --prefix frontend ci
+	npm --prefix frontend run build
+
+ui-dev:
+	npm --prefix frontend run dev
+
+ui-check:
+	npm --prefix frontend run lint
+	npm --prefix frontend run typecheck
+	npm --prefix frontend run test
+	npm --prefix frontend run build
+
+openapi:
+	python scripts/export_openapi.py
+	npm --prefix frontend run gen:api
 
 clean:
 	rm -rf build/ dist/ *.egg-info src/*.egg-info .pytest_cache .mypy_cache .coverage htmlcov coverage.xml
