@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sqlite3
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -25,6 +27,11 @@ from pyrekordbox.utils import get_rekordbox_pid
 from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
+
+# pyrekordbox writes date values through sqlite3's default adapters, which are
+# deprecated since Python 3.12 and warn on every use. These do the same thing.
+sqlite3.register_adapter(date, lambda value: value.isoformat())
+sqlite3.register_adapter(datetime, lambda value: value.isoformat(" "))
 
 XML_NAME = "masterPlaylists6.xml"
 SQLITE_HEADER = b"SQLite format 3\x00"
