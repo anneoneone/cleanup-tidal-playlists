@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - Cratekeeper
+
+`tidal-cleanup` is now **Cratekeeper**. The command is `cratekeeper`; data moves to
+`~/.cratekeeper/` with `cratekeeper migrate`.
+
+### Added
+
+- Local web UI (`cratekeeper ui`): Dashboard, Sync with live progress, Plan review
+  per playlist, Playlists, Settings (incl. Playlist tag mapping and Tidal login),
+  History and Backups
+- Plan → Apply: the Plan writes nothing and lists every change; Apply runs the
+  chosen playlist groups, each committed or rolled back on its own. A Plan can be
+  applied once, and only while it is the newest one
+- Backups before every Apply (database + Rekordbox files) and every Refresh
+  (database), with restore
+- `config.toml` settings, `migrate`, `status`, `login`, `backups` commands
+- Local playlists: Music folder sub-folders without a Tidal playlist
+
+### Changed
+
+- One CLI command `sync` replaces `sync`, `db sync`, `sync-rekordbox`, `download`,
+  `diff`, `init` and the legacy commands
+- One Tidal refresh (with pagination) replaces the two v1 versions; one Tidal login
+  serves refresh and downloads
+- A track removed from a Tidal playlist now leaves the Rekordbox playlist (its file
+  stays on disk)
+- A playlist keeps its Music folder sub-folder when renamed
+- Each track gets one genre across all its playlists
+
+### Fixed
+
+- Dry runs wrote to the database and never listed track removals
+- Stored Rekordbox IDs were never used (pyrekordbox 0.4 lookup bug), so status
+  emoji changes created duplicate playlists
+- A failed playlist leaked half-done changes into the next commit
+- Cratekeeper's database was updated before Rekordbox committed
+- An unplugged drive looked like deleted files
+- Tests wrote to the real database
+
+### Removed
+
+- MyTag writing (`rekordbox <playlist>`), Rekordbox XML export, `legacy_*`
+  commands and the v1 debug scripts
+
+## tidal-cleanup changes after 2.0.0 (never released)
+
 ### Fixed
 
 - **Critical**: Fixed bug where playlists were deleted and recreated on every sync instead of being updated in-place
