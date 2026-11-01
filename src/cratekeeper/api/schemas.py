@@ -78,6 +78,7 @@ class StatusOut(BaseModel):
     last_sync: Optional[RunOut] = None
     last_apply: Optional[RunOut] = None
     current_job: Optional[JobOut] = None
+    rekordbox_running: bool = False
     v1_import_available: bool = False
 
 
@@ -150,7 +151,8 @@ class PlanOut(BaseModel):
 
     run_id: int
     plan: Plan
-    applied_by_run: Optional[int] = None
+    applied_by_run: Optional[int] = None  # changed Rekordbox with this Plan
+    superseded_by: Optional[int] = None  # a newer sync run
 
 
 class SettingsOut(BaseModel):

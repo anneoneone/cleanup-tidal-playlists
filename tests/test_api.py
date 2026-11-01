@@ -66,6 +66,7 @@ def test_status_lists_checks_and_counts(client: TestClient) -> None:
     body = client.get("/api/status").json()
     keys = {c["key"] for c in body["checks"]}
     assert {"music_folder", "rekordbox_library", "tidal_login", "ffmpeg"} <= keys
+    assert client.get("/api/status").json()["rekordbox_running"] is False
     assert body["counts"]["playlists"] == 0
     assert body["current_job"] is None
 
@@ -110,11 +111,32 @@ def test_sync_plan_apply_flow(client: TestClient, core: App) -> None:
     assert (
         client.get(f"/api/plans/{run_id}").json()["applied_by_run"] == result["run_id"]
     )
+    again = client.post(
+        f"/api/plans/{run_id}/apply", json={"groups": keys}, headers=HEADERS
+    )
+    assert again.status_code == 409 and "applied in run" in again.json()["detail"]
 
     runs = client.get("/api/runs").json()
     assert [r["kind"] for r in runs] == ["apply", "sync"]
     assert runs[1]["totals"]["create_playlist"] == 2
     assert client.get("/api/plans/12345").status_code == 404
+
+
+def test_older_plan_is_superseded_by_a_newer_sync(
+    client: TestClient, core: App
+) -> None:
+    first = offline_sync(client, core)
+    second = offline_sync(client, core)
+
+    old = client.get(f"/api/plans/{first}").json()
+    assert old["superseded_by"] == second
+    assert client.get(f"/api/plans/{second}").json()["superseded_by"] is None
+    keys = [g["key"] for g in old["plan"]["groups"]]
+    response = client.post(
+        f"/api/plans/{first}/apply", json={"groups": keys}, headers=HEADERS
+    )
+    assert response.status_code == 409
+    assert f"Run {second} made a newer Plan" in response.json()["detail"]
 
 
 def test_event_stream_replays_events_until_the_end(

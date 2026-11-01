@@ -89,6 +89,31 @@ def latest_run(session: Session, kind: Optional[RunKind] = None) -> Optional[Run
     return session.scalars(stmt).first()
 
 
+def plan_apply_run(session: Session, plan_run_id: int) -> Optional[int]:
+    """Return the newest apply run that changed Rekordbox with this Plan."""
+    runs = session.scalars(
+        select(Run)
+        .where(Run.kind == RunKind.APPLY.value, Run.plan_run_id == plan_run_id)
+        .order_by(Run.id.desc())
+    ).all()
+    for run in runs:
+        if run.status == RunStatus.SUCCEEDED.value or (run.summary or {}).get(
+            "applied", 0
+        ):
+            return run.id
+    return None
+
+
+def newer_sync_run(session: Session, run_id: int) -> Optional[int]:
+    """Return the newest sync run started after ``run_id``."""
+    stmt = (
+        select(Run.id)
+        .where(Run.kind == RunKind.SYNC.value, Run.id > run_id)
+        .order_by(Run.id.desc())
+    )
+    return session.scalars(stmt).first()
+
+
 def mark_interrupted_runs(
     session: Session,
     reason: str = "Interrupted: the process stopped during the run",

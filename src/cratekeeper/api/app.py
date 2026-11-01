@@ -17,9 +17,16 @@ from pydantic import ValidationError
 from ..app import App
 from ..backups import BackupError, get_backup, list_backups
 from ..db import repository as repo
-from ..db.models import RunKind, RunStatus
 from ..jobs import TERMINAL_EVENTS, JobBusyError, JobEvent
-from ..pipeline import SyncOptions, apply, load_plan, restore, sync
+from ..pipeline import (
+    PlanClosedError,
+    SyncOptions,
+    apply,
+    check_plan_open,
+    load_plan,
+    restore,
+    sync,
+)
 from ..settings import Settings
 from .schemas import (
     ApplyIn,
@@ -170,17 +177,12 @@ def _router() -> APIRouter:  # noqa: C901 - one place lists every route
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         with core.db.session() as session:
-            applied_by = next(
-                (
-                    r.id
-                    for r in repo.list_runs(session, limit=200)
-                    if r.kind == RunKind.APPLY.value
-                    and r.plan_run_id == run_id
-                    and r.status == RunStatus.SUCCEEDED.value
-                ),
-                None,
+            return PlanOut(
+                run_id=run_id,
+                plan=plan,
+                applied_by_run=repo.plan_apply_run(session, run_id),
+                superseded_by=repo.newer_sync_run(session, run_id),
             )
-        return PlanOut(run_id=run_id, plan=plan, applied_by_run=applied_by)
 
     @router.post("/plans/{run_id}/apply", response_model=JobOut, status_code=202)
     def post_apply(core: Core, run_id: int, body: ApplyIn) -> JobOut:
@@ -195,6 +197,10 @@ def _router() -> APIRouter:  # noqa: C901 - one place lists every route
             )
         if not body.groups:
             raise HTTPException(status_code=422, detail="No groups selected")
+        try:
+            check_plan_open(core, run_id)
+        except PlanClosedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         groups = set(body.groups)
         return _start(
             core, "apply", "Apply", lambda ctx: apply(core, ctx, run_id, groups)

@@ -11,8 +11,17 @@ from cratekeeper.db import Playlist, Run
 from cratekeeper.db import repository as repo
 from cratekeeper.db.models import RunKind
 from cratekeeper.jobs import JobContext, JobRunner, JobStatus, held_lock
-from cratekeeper.pipeline import SyncOptions, apply, default_groups, restore, sync
+from cratekeeper.pipeline import (
+    PlanClosedError,
+    SyncOptions,
+    apply,
+    check_plan_open,
+    default_groups,
+    restore,
+    sync,
+)
 from cratekeeper.rekordbox.connection import open_library
+from cratekeeper.rekordbox.plan import DELETE_GROUP, Change, ChangeKind, Plan, PlanGroup
 from cratekeeper.tidal.client import TidalPlaylist, TidalTrack, TrackListing
 
 
@@ -151,3 +160,34 @@ def test_open_keeps_runs_of_a_job_in_another_process(app: App) -> None:
     with app.db.session() as s:
         run = repo.get_run(s, run_id)
         assert run is not None and run.status == "failed"
+
+
+def test_default_groups_never_include_deletions() -> None:
+    change = Change(kind=ChangeKind.DELETE_PLAYLIST, summary="Delete Old")
+    plan = Plan(
+        created_at=datetime(2026, 1, 1),
+        fingerprint="x",
+        rekordbox_db="master.db",
+        groups=[
+            PlanGroup(key="playlist:1", title="A", changes=[change]),
+            # A stored Plan without the flag loads it as True.
+            PlanGroup(key=DELETE_GROUP, title="Delete", changes=[change]),
+        ],
+    )
+    assert default_groups(plan) == {"playlist:1"}
+
+
+def test_partly_applied_plan_is_closed(app: App) -> None:
+    with app.db.session() as s:
+        sync_id = repo.start_run(s, RunKind.SYNC).id
+        failed = repo.start_run(s, RunKind.APPLY, plan_run_id=sync_id).id
+        repo.finish_run(s, failed, pipeline.RunStatus.FAILED, error="no change")
+    check_plan_open(app, sync_id)  # an Apply that changed nothing keeps it open
+
+    with app.db.session() as s:
+        partly = repo.start_run(s, RunKind.APPLY, plan_run_id=sync_id).id
+        repo.finish_run(
+            s, partly, pipeline.RunStatus.FAILED, summary={"applied": 1, "failed": 1}
+        )
+    with pytest.raises(PlanClosedError, match=f"applied in run {partly}"):
+        check_plan_open(app, sync_id)

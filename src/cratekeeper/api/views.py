@@ -167,6 +167,7 @@ def status_out(app: App) -> StatusOut:
             counts=counts,
             last_sync=run_out(last_sync) if last_sync else None,
             last_apply=run_out(last_apply) if last_apply else None,
+            rekordbox_running=running,
             v1_import_available=counts["playlists"] == 0 and v1_db_path().is_file(),
         )
     job = app.runner.current()

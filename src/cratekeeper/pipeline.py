@@ -21,7 +21,7 @@ from .jobs import JobCancelled, JobContext
 from .music.refresh import refresh_music_folder
 from .rekordbox.applier import ApplyResult, apply_plan
 from .rekordbox.connection import RekordboxLocation, planning_copy, require_closed
-from .rekordbox.plan import Plan
+from .rekordbox.plan import DELETE_GROUP, Plan
 from .rekordbox.planner import Planner
 from .tidal.client import TidalClient
 from .tidal.refresh import refresh_tidal
@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 class PlanNotFoundError(LookupError):
     """Raised when a run has no Plan to apply."""
+
+
+class PlanClosedError(RuntimeError):
+    """Raised when a Plan was applied already or a newer sync replaced it."""
 
 
 @dataclass(frozen=True)
@@ -140,8 +144,32 @@ def load_plan(app: App, run_id: int) -> Plan:
 
 
 def default_groups(plan: Plan) -> set[str]:
-    """Return the groups that are selected unless the user changes it."""
-    return {g.key for g in plan.groups if g.selected_by_default and g.changes}
+    """Return the groups that are selected unless the user changes it.
+
+    Playlist deletions are never selected by default.
+    """
+    return {
+        g.key
+        for g in plan.groups
+        if g.selected_by_default and g.changes and g.key != DELETE_GROUP
+    }
+
+
+def check_plan_open(app: App, plan_run_id: int) -> None:
+    """Raise :class:`PlanClosedError` if the Plan must not be applied any more.
+
+    After an Apply, Rekordbox has changed. After a newer sync, the database has newer
+    Source data. Both need a new Plan.
+    """
+    with app.db.session() as session:
+        applied = repo.plan_apply_run(session, plan_run_id)
+        newer = repo.newer_sync_run(session, plan_run_id)
+    if applied is not None:
+        raise PlanClosedError(
+            f"This Plan was applied in run {applied}. Run a new sync first."
+        )
+    if newer is not None:
+        raise PlanClosedError(f"Run {newer} made a newer Plan. Apply that one.")
 
 
 def apply(
@@ -149,6 +177,7 @@ def apply(
 ) -> ApplyOutcome:
     """Back up, then apply the chosen groups of a stored Plan."""
     plan = load_plan(app, plan_run_id)
+    check_plan_open(app, plan_run_id)
     selected = default_groups(plan) if groups is None else groups
     with app.db.session() as session:
         run_id = repo.start_run(

@@ -575,6 +575,17 @@
           "run_id": {
             "title": "Run Id",
             "type": "integer"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
           }
         },
         "required": [
@@ -1002,6 +1013,11 @@
                 "type": "null"
               }
             ]
+          },
+          "rekordbox_running": {
+            "default": false,
+            "title": "Rekordbox Running",
+            "type": "boolean"
           },
           "v1_import_available": {
             "default": false,
