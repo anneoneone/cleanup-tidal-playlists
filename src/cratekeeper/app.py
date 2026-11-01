@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Optional
 
 from .db import repository as repo
 from .db.engine import Database
 from .home import Home
-from .jobs import JobRunner
+from .jobs import JobBusyError, JobRunner, held_lock
 from .rekordbox.connection import RekordboxLocation, locate
 from .rekordbox.naming import NameRules
 from .settings import Settings
@@ -32,8 +33,9 @@ class App:
         settings = Settings.load(home)
         db = Database(home.db_file)
         db.prepare()
-        with db.session() as session:
-            repo.mark_interrupted_runs(session)
+        # While another process runs a job, its "running" run is not stale.
+        with suppress(JobBusyError), held_lock(home.lock_file), db.session() as s:
+            repo.mark_interrupted_runs(s)
         return cls(
             home=home,
             settings=settings,

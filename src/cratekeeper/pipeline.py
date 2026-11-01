@@ -199,6 +199,10 @@ def restore(app: App, ctx: JobContext, backup_id: str) -> BackupInfo:
         keep_db=app.settings.backups_keep_db,
     )
     with app.db.session() as session:
+        # A Backup taken during a sync holds that sync as "running".
+        repo.mark_interrupted_runs(
+            session, "Not finished when the restored Backup was taken"
+        )
         run = repo.start_run(session, RunKind.RESTORE, scope=backup_id)
         repo.finish_run(
             session, run.id, RunStatus.SUCCEEDED, summary={"backup": backup_id}

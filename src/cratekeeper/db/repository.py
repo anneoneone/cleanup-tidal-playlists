@@ -89,15 +89,21 @@ def latest_run(session: Session, kind: Optional[RunKind] = None) -> Optional[Run
     return session.scalars(stmt).first()
 
 
-def mark_interrupted_runs(session: Session) -> int:
-    """Mark runs left "running" by a crashed process as failed."""
+def mark_interrupted_runs(
+    session: Session,
+    reason: str = "Interrupted: the process stopped during the run",
+) -> int:
+    """Mark runs left "running" as failed.
+
+    Only call this while holding the job lock, so no live run is hit.
+    """
     runs = session.scalars(
         select(Run).where(Run.status == RunStatus.RUNNING.value)
     ).all()
     for run in runs:
         run.status = RunStatus.FAILED.value
         run.finished_at = utc_now()
-        run.error = run.error or "Interrupted: the process stopped during the run"
+        run.error = run.error or reason
     return len(runs)
 
 

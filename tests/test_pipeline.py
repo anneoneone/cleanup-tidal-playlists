@@ -9,7 +9,8 @@ from cratekeeper.app import App
 from cratekeeper.backups import list_backups
 from cratekeeper.db import Playlist, Run
 from cratekeeper.db import repository as repo
-from cratekeeper.jobs import JobContext, JobRunner, JobStatus
+from cratekeeper.db.models import RunKind
+from cratekeeper.jobs import JobContext, JobRunner, JobStatus, held_lock
 from cratekeeper.pipeline import SyncOptions, apply, default_groups, restore, sync
 from cratekeeper.rekordbox.connection import open_library
 from cratekeeper.tidal.client import TidalPlaylist, TidalTrack, TrackListing
@@ -87,6 +88,10 @@ def test_full_sync_then_apply_then_restore(
     run_job(app, lambda ctx: restore(app, ctx, first_refresh.id))
     with app.db.session() as s:
         assert repo.library_counts(s)["playlists"] == 0
+        # The Backup was taken while the first sync was running.
+        first = repo.get_run(s, outcome.run_id)
+        assert first is not None and first.status == "failed"
+        assert first.error == "Not finished when the restored Backup was taken"
 
 
 def test_failed_sync_is_recorded(app: App, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,3 +135,19 @@ def test_offline_sync_skips_tidal_and_downloads(
     with app.db.session() as s:
         assert s.query(Playlist).one().tidal_id is None
         assert s.query(Run).count() == 1
+
+
+def test_open_keeps_runs_of_a_job_in_another_process(app: App) -> None:
+    with app.db.session() as s:
+        run_id = repo.start_run(s, RunKind.SYNC).id
+
+    with held_lock(app.home.lock_file):  # the UI server runs a sync
+        App.open().close()
+        with app.db.session() as s:
+            run = repo.get_run(s, run_id)
+            assert run is not None and run.status == "running"
+
+    App.open().close()  # no job holds the lock: the run is stale
+    with app.db.session() as s:
+        run = repo.get_run(s, run_id)
+        assert run is not None and run.status == "failed"
