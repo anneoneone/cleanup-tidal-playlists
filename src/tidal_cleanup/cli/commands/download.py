@@ -20,7 +20,6 @@ from ...core.sync import (
 from ...core.tidal import TidalApiService, TidalDownloadService, TidalStateFetcher
 from ...database import DatabaseService
 from ..display import display_download_results, filter_decisions_by_playlist
-from .legacy import TidalCleanupApp
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -109,9 +108,7 @@ def fetch_tidal_playlists(
     is_flag=True,
     help="Force fetch all tracks, ignoring last update timestamps",
 )
-@click.pass_obj
 def download(
-    app: TidalCleanupApp,
     playlist: Optional[str],
     dry_run: bool,
     skip_fetch: bool,
@@ -151,8 +148,8 @@ def download(
     # Ensure database schema is initialized
     db_service.init_db()
 
-    download_service = app.download_service
-    tidal_service = app.tidal_service
+    download_service = TidalDownloadService(config)
+    tidal_service = TidalApiService(config.tidal_token_file)
 
     console.print("\n[bold cyan]📥 Database-driven download[/bold cyan]")
     if dry_run:

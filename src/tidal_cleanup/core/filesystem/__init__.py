@@ -1,13 +1,8 @@
 """Filesystem module.
 
-Handles scanning and managing local audio files.
+Reads tags from local audio files.
 """
 
 from .file_scanner import FileScannerService
-from .scanner import FilesystemScanner, ScanStatistics
 
-__all__ = [
-    "FilesystemScanner",
-    "ScanStatistics",
-    "FileScannerService",
-]
+__all__ = ["FileScannerService"]
