@@ -1,27 +1,22 @@
-# Makefile for Tidal Cleanup development
+# Makefile for Cratekeeper development
 
-.PHONY: help install install-dev clean lint format test test-cov test-all security docs build release pre-commit pipeline-check
+.PHONY: help install install-dev format lint typecheck test check clean ui ui-dev ui-check openapi
 
-# Default target
 help:
-	@echo "Available targets:"
-	@echo "  help           Show this help message"
-	@echo "  install        Install package in development mode"
-	@echo "  install-dev    Install with development dependencies"
-	@echo "  clean          Clean build artifacts and cache"
-	@echo "  lint           Run all linting tools"
-	@echo "  pipeline-check Run exact same checks as CI/CD pipeline"
-	@echo "  format         Run code formatters"
-	@echo "  test           Run tests"
-	@echo "  test-cov       Run tests with coverage"
-	@echo "  test-all       Run tests across all environments"
-	@echo "  security       Run security checks"
-	@echo "  docs           Build documentation"
-	@echo "  build          Build package"
-	@echo "  release        Create release"
-	@echo "  pre-commit     Install and run pre-commit hooks"
+	@echo "Targets:"
+	@echo "  install      Install Cratekeeper (editable)"
+	@echo "  install-dev  Install with development tools and pre-commit hooks"
+	@echo "  format       Run black and isort"
+	@echo "  lint         Run flake8"
+	@echo "  typecheck    Run mypy"
+	@echo "  test         Run pytest with coverage"
+	@echo "  check        format check + lint + typecheck + test (same as CI)"
+	@echo "  ui           Build the web UI into src/cratekeeper/web/dist"
+	@echo "  ui-dev       Run the Vite dev server (start cratekeeper ui --dev next to it)"
+	@echo "  ui-check     eslint, tsc, vitest and build for the web UI"
+	@echo "  openapi      Export the API contract and regenerate UI types"
+	@echo "  clean        Remove build and cache files"
 
-# Installation targets
 install:
 	pip install -e .
 
@@ -29,82 +24,43 @@ install-dev:
 	pip install -e ".[dev]"
 	pre-commit install
 
-# Cleaning
-clean:
-	rm -rf build/
-	rm -rf dist/
-	rm -rf *.egg-info/
-	rm -rf .pytest_cache/
-	rm -rf .mypy_cache/
-	rm -rf .coverage
-	rm -rf htmlcov/
-	rm -rf .tox/
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-
-# Code quality
-lint:
-	flake8 src/ tests/
-	mypy --package tidal_cleanup --config-file=pyproject.toml
-	bandit -r src/
-
-# Run the exact same checks as the CI/CD pipeline
-pipeline-check:
-	@echo "Running pipeline quality checks..."
-	black --check --diff src/ tests/
-	isort --check-only --diff src/ tests/
-	flake8 src/ tests/
-	mypy --package tidal_cleanup --config-file=pyproject.toml
-	@echo "✅ All pipeline checks passed!"
-
 format:
 	black src/ tests/
 	isort src/ tests/
 
-# Testing
+lint:
+	flake8 src/ tests/
+
+typecheck:
+	mypy --package cratekeeper --config-file=pyproject.toml
+
 test:
 	pytest
 
-test-cov:
-	pytest --cov=src/tidal_cleanup --cov-report=html --cov-report=term-missing
+check:
+	black --check src/ tests/
+	isort --check-only src/ tests/
+	flake8 src/ tests/
+	mypy --package cratekeeper --config-file=pyproject.toml
+	pytest
 
-test-all:
-	tox
+ui:
+	npm --prefix frontend ci
+	npm --prefix frontend run build
 
-# Security
-security:
-	bandit -r src/ -f json -o bandit-report.json
-	safety check --json --output safety-report.json
+ui-dev:
+	npm --prefix frontend run dev
 
-# Documentation
-docs:
-	@echo "Documentation build would go here"
+ui-check:
+	npm --prefix frontend run lint
+	npm --prefix frontend run typecheck
+	npm --prefix frontend run test
+	npm --prefix frontend run build
 
-# Building and releasing
-build:
-	python -m build
+openapi:
+	python scripts/export_openapi.py
+	npm --prefix frontend run gen:api
 
-release: clean build
-	python -m twine check dist/*
-	@echo "Ready for release. Run 'python -m twine upload dist/*' to publish"
-
-# Pre-commit
-pre-commit:
-	pre-commit install
-	pre-commit run --all-files
-
-# Development workflow
-dev-setup: install-dev pre-commit
-	@echo "Development environment setup complete!"
-
-# Run CLI in development mode
-run-cli:
-	python -m tidal_cleanup.cli.main
-
-# Quick quality check
-quick-check: format lint test
-	@echo "Quick quality check complete!"
-
-# Full check before PR
-pr-check: clean format lint test-cov security
-	@echo "PR check complete!"
+clean:
+	rm -rf build/ dist/ *.egg-info src/*.egg-info .pytest_cache .mypy_cache .coverage htmlcov coverage.xml
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +

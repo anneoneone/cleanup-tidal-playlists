@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+/* The theme follows the system unless the user picks one; see lib/theme.ts. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --surface-2: #f0f0ed;
+  --line: #e2e2dd;
+  --fg: #1d1d1b;
+  --muted: #66665f;
+  --accent: #0f766e;
+  --accent-hover: #115e59;
+  --accent-fg: #ffffff;
+  --accent-soft: #e3f2ef;
+  --ring: #0d9488;
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #111312;
+  --surface: #191b1a;
+  --surface-2: #212423;
+  --line: #2d3130;
+  --fg: #e7e8e6;
+  --muted: #9b9f9c;
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-fg: #042f2e;
+  --accent-soft: #10302c;
+  --ring: #2dd4bf;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-focus: var(--ring);
+}
+
+@layer base {
+  html {
+    background-color: var(--bg);
+  }
+
+  body {
+    @apply bg-bg text-fg antialiased;
+    font-feature-settings: "tnum" 0;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply text-fg;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@utility animate-indeterminate {
+  animation: indeterminate 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-indeterminate,
+  .animate-spin {
+    animation-duration: 3s;
+  }
+}

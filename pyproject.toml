@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tidal-cleanup"
+name = "cratekeeper"
 version = "2.0.0"
-description = "A modern tool for synchronizing Tidal playlists with local audio files."
+description = "Keep a Rekordbox library in line with Tidal and Bandcamp playlists."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Anton Kress", email = "anton.kress@posteo.de" }]
@@ -14,238 +14,133 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Sound/Audio",
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
-keywords = ["tidal", "music", "playlist", "audio", "rekordbox", "dj"]
+keywords = ["tidal", "bandcamp", "music", "playlist", "rekordbox", "dj"]
 requires-python = ">=3.12"
+# tidal-dl-ng (downloads) is optional and no longer on PyPI: install it yourself.
 dependencies = [
-    "tidalapi>=0.7.0",
+    "tidalapi>=0.8.8,<0.9",
+    "pyrekordbox>=0.4.4,<0.5",
     "pydantic>=2.0.0",
     "click>=8.0.0",
     "rich>=12.0.0",
-    "thefuzz>=0.19.0",
     "mutagen>=1.45.0",
-    "ffmpeg-python>=0.2.0",
-    "python-dotenv>=1.0.0",
-    "pyrekordbox>=0.1.0",
-    "tidal-dl-ng>=0.31.4",
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
+    "tomli-w>=1.2.0",
+    "fastapi>=0.143.3",
+    "starlette>=1.8.0",
+    "uvicorn>=0.54.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "pytest-mock>=3.10.0",
-    "black>=23.0.0",
+    "httpx>=0.28.1",
+    "black==25.9.0",
     "isort>=5.12.0",
-    "flake8>=6.0.0",
+    "flake8>=7.0.0",
     "flake8-docstrings>=1.7.0",
     "flake8-bugbear>=23.0.0",
     "flake8-comprehensions>=3.10.0",
     "flake8-simplify>=0.19.0",
-    "mypy>=1.0.0",
-    "types-requests>=2.31.0",
-    "bandit>=1.7.0",
-    "safety>=2.3.0",
+    "flake8-bandit>=4.1.0",
+    "mypy>=1.16.0",
     "pre-commit>=3.0.0",
-    "tox>=4.0.0",
 ]
-test = ["pytest>=7.0.0", "pytest-cov>=4.0.0", "pytest-mock>=3.10.0"]
-docs = ["sphinx>=5.0.0", "sphinx-rtd-theme>=1.2.0", "myst-parser>=0.18.0"]
 
 [project.urls]
 Homepage = "https://github.com/anneoneone/cleanup-tidal-playlists"
 Repository = "https://github.com/anneoneone/cleanup-tidal-playlists"
-Documentation = "https://github.com/anneoneone/cleanup-tidal-playlists#readme"
 Issues = "https://github.com/anneoneone/cleanup-tidal-playlists/issues"
 
 [project.scripts]
-tidal-cleanup = "tidal_cleanup.cli.main:cli"
+cratekeeper = "cratekeeper.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-tidal_cleanup = ["py.typed"]
+cratekeeper = [
+    "py.typed",
+    "defaults/*.json",
+    "db/migrations/script.py.mako",
+    "db/migrations/*.py",
+    "db/migrations/versions/*.py",
+    # Built web UI (`make ui`); not in git
+    "web/dist/*",
+    "web/dist/assets/*",
+]
 
-# Black configuration
 [tool.black]
 line-length = 88
-target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-  | alembic
-)/
-'''
+target-version = ["py312"]
 
-# isort configuration
 [tool.isort]
 profile = "black"
-multi_line_output = 3
 line_length = 88
-known_first_party = ["tidal_cleanup"]
-known_third_party = [
-    "tidalapi",
-    "pydantic",
-    "click",
-    "rich",
-    "thefuzz",
-    "mutagen",
-]
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+known_first_party = ["cratekeeper"]
+known_third_party = ["alembic", "click", "mutagen", "pydantic", "pyrekordbox", "rich", "tidalapi"]
 
-# MyPy configuration
 [tool.mypy]
 python_version = "3.12"
 strict = true
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
 warn_unreachable = true
-strict_equality = true
 show_error_codes = true
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = [
     "tidalapi.*",
-    "tidalapi",
     "mutagen.*",
-    "mutagen",
-    "ffmpeg.*",
-    "thefuzz.*",
-    "dotenv.*",
-    "pydantic.*",
-    "click.*",
-    "rich.*",
     "pyrekordbox.*",
     "tidal_dl_ng.*",
-    "tidal_dl_ng",
 ]
 ignore_missing_imports = true
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["src.tidal_cleanup.cli.*", "tidal_cleanup.cli.*"]
+module = ["cratekeeper.db.migrations.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["cratekeeper.cli.*"]
 disallow_untyped_decorators = false
-
-[[tool.mypy.overrides]]
-module = ["src.tidal_cleanup.models.*", "tidal_cleanup.models.*"]
-disallow_untyped_decorators = false
-disallow_any_generics = false
-disallow_subclassing_any = false
-
-[[tool.mypy.overrides]]
-module = [
-    "tidal_cleanup.core.tidal.*",
-    "tidal_cleanup.core.rekordbox.playlist_sync",
-    "tidal_cleanup.core.rekordbox.service",
-    "tidal_cleanup.core.filesystem.file_scanner",
-    "tidal_cleanup.legacy.file_service",
-]
-# Allow untyped calls to third-party libraries without type stubs
-warn_return_any = false
-disallow_untyped_calls = false
-# Suppress attr-defined and call-arg errors for third-party library imports
-disable_error_code = "attr-defined,call-arg"
-
-[[tool.mypy.overrides]]
-module = ["src.tidal_cleanup.services.*", "tidal_cleanup.services.*"]
-disallow_untyped_calls = false
-# Suppress attr-defined errors for third-party library imports
-disable_error_code = "attr-defined"
-
-[[tool.mypy.overrides]]
-module = ["src.tidal_cleanup.database.*", "tidal_cleanup.database.*"]
-disallow_subclassing_any = false
-disable_error_code = ["no-any-return", "misc"]
 
 [[tool.mypy.overrides]]
 module = ["tests.*"]
 ignore_errors = true
-disallow_untyped_calls = false
-disallow_untyped_defs = false
 
-[[tool.mypy.overrides]]
-module = ["scripts.*"]
-ignore_errors = true
-disallow_untyped_calls = false
-disallow_untyped_defs = false
-
-[[tool.mypy.overrides]]
-module = ["alembic.*"]
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = [
-    "src.tidal_cleanup.database.file_scanner_service",
-    "tidal_cleanup.database.file_scanner_service",
-]
-warn_unused_ignores = false
-
-# Pytest configuration
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
     "--strict-markers",
     "--strict-config",
-    "--cov=src/tidal_cleanup",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml",
-    "--cov-fail-under=25",
+    "--cov=src/cratekeeper",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-fail-under=85",
 ]
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
 
-# Coverage configuration
 [tool.coverage.run]
-source = ["src/tidal_cleanup"]
-omit = ["*/tests/*", "*/test_*", "setup.py"]
+source = ["src/cratekeeper"]
+omit = ["*/db/migrations/*", "*/__main__.py"]
 
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
-    "raise AssertionError",
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
-    "@abstractmethod",
+    "\\.\\.\\.$",
 ]
 
-# Bandit security linting
 [tool.bandit]
-exclude_dirs = ["tests", "test_*"]
-skips = [
-    "B101",
-    "B404",
-    "B603",
-] # Skip assert_used, subprocess import, subprocess call
-
-# Flake8 configuration (in setup.cfg since flake8 doesn't support pyproject.toml yet)
+exclude_dirs = ["tests"]
+skips = ["B101", "B404", "B603"]

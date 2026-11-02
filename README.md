@@ -1,306 +1,157 @@
-# Tidal Playlist Cleanup Tool
+# Cratekeeper
 
-A modern, professional tool for synchronizing Tidal playlists with local audio files, featuring audio conversion, Rekordbox XML generation, and enterprise-grade development practices.
+Cratekeeper keeps your Rekordbox library in line with the playlists you curate on
+Tidal and in Bandcamp folders. It reads your playlists, downloads missing Tidal
+tracks, and shows you a **Plan** of every change it would make to Rekordbox. You
+review the Plan per playlist and **Apply** what you want. A **Backup** is taken
+before every Apply.
 
-## Features
+Cratekeeper is v2 of `tidal-cleanup`. The words used here are defined in
+[CONTEXT.md](CONTEXT.md).
 
-- **Tidal Integration**: Secure OAuth authentication with session persistence
-- **Smart Track Matching**: Fuzzy matching algorithms to handle track name variations
-- **Audio Conversion**: Batch conversion from M4A/MP4 to MP3 using FFmpeg
-- **Rekordbox Support**: Generate XML files for Rekordbox DJ software
-- **Rekordbox Playlist Sync**: Direct synchronization with Rekordbox database using MyTags
-- **Directory Diff Optimization**: Intelligent file comparison for fast, incremental updates
-- **Modern CLI**: Rich terminal interface with progress bars and colored output
-- **Configurable**: Environment-based configuration with sensible defaults
-- **Logging**: Comprehensive logging with file rotation and colored console output
-- **Error Handling**: Robust error handling with detailed error messages
-- **Quality Assurance**: Comprehensive testing, linting, and security scanning
-- **Modern Development**: Professional development workflow with automated quality gates
+## What it does
 
-## Development Standards
+1. **Refresh** – reads your Tidal playlists, your Bandcamp folder and your Music
+   folder into its own database. Rekordbox is not touched.
+2. **Download** – fetches Tidal tracks that have no file yet (needs `tidal-dl-ng`
+   and `ffmpeg`).
+3. **Plan** – compares what each playlist should look like in Rekordbox with what
+   is there: create, rename or move playlists, import, add or remove tracks, set
+   the genre. Nothing is written.
+4. **Apply** – writes the chosen groups of the Plan to Rekordbox, one playlist at a
+   time. A failed playlist is rolled back and the others still apply.
 
-This project follows modern Python development best practices:
+Playlist names carry emojis that decide the Rekordbox folder and the genre, e.g.
+`Peak Time 🏢⬆️` becomes `Peak Time High` in `Genre/Techno/Archived`. See
+[docs/naming.md](docs/naming.md).
 
-- **📦 Modern Packaging**: pyproject.toml with PEP 517/518 build system
-- **🔍 Code Quality**: Black, isort, flake8, mypy with strict configuration
-- **🛡️ Security**: Bandit, Safety, and automated vulnerability scanning
-- **🧪 Testing**: pytest with 80%+ coverage requirement
-- **🔄 CI/CD**: GitHub Actions with matrix testing across Python 3.9-3.12
-- **📝 Documentation**: Comprehensive guides and API documentation
-- **🪝 Pre-commit**: 15+ automated quality checks before every commit
+## Install
 
-## Architecture
-
-The application follows modern Python best practices:
-
-```
-src/tidal_cleanup/
-├── __init__.py          # Package initialization
-├── config.py            # Configuration management
-├── models/              # Data models (Pydantic)
-│   ├── __init__.py
-│   └── models.py
-├── services/            # Business logic services
-│   ├── __init__.py
-│   ├── tidal_service.py      # Tidal API integration
-│   ├── file_service.py       # File operations
-│   ├── track_comparison_service.py  # Track matching
-│   └── rekordbox_service.py  # XML generation
-├── utils/               # Utilities
-│   ├── __init__.py
-│   └── logging_config.py
-└── cli/                 # Command-line interface
-    ├── __init__.py
-    └── main.py
-```
-
-## Installation
-
-### Prerequisites
-
-- Python 3.9 or higher
-- FFmpeg (for audio conversion)
-- Git (for development)
-
-### Quick Install
+Needs macOS, Python 3.12+ and Rekordbox 6 or 7.
 
 ```bash
-# Install from source
 pip install -e .
-
-# Or install with development dependencies
-pip install -e ".[dev]"
 ```
 
-### Development Setup
+Optional, for downloads: `ffmpeg` (`brew install ffmpeg`) and `tidal-dl-ng` 0.31.
+`tidal-dl-ng` is no longer on PyPI; install it into the same environment from a
+wheel or source you trust. Without it, Cratekeeper still syncs everything else and
+tells you how many tracks need a download.
 
-For contributors and developers:
+Build the web UI once (needs Node.js 22+):
 
 ```bash
-# Clone and setup development environment
-git clone https://github.com/anneoneone/cleanup-tidal-playlists.git
-cd cleanup-tidal-playlists
-make dev-setup
+make ui
 ```
 
-This installs all dependencies, sets up pre-commit hooks, and prepares the development environment.
+## First start
 
-## Environment Configuration
-
-The application uses environment variables for configuration. Copy the example configuration:
+Coming from `tidal-cleanup`? Import your data and settings once. Your v1 files stay
+untouched.
 
 ```bash
-cp config/.env.example .env
+cratekeeper migrate --env-file config/.env-Tidal
 ```
 
-Edit `.env` to customize paths and settings:
+New install? Log in to Tidal and set your folders on the Settings page (or in
+`~/.cratekeeper/config.toml`):
 
 ```bash
-# Tidal API settings
-TIDAL_CLEANUP_TIDAL_TOKEN_FILE=~/Documents/tidal_session.json
-
-# Audio directories
-TIDAL_CLEANUP_M4A_DIRECTORY=~/Music/Tidal/m4a
-TIDAL_CLEANUP_MP3_DIRECTORY=~/Music/Tidal/mp3
-
-# Rekordbox settings
-TIDAL_CLEANUP_REKORDBOX_INPUT_FOLDER=~/Music/Tidal/mp3/Playlists
-TIDAL_CLEANUP_REKORDBOX_OUTPUT_FILE=~/Documents/rekordbox/antons_music.xml
-
-# Other settings
-TIDAL_CLEANUP_FUZZY_MATCH_THRESHOLD=80
-TIDAL_CLEANUP_LOG_LEVEL=INFO
+cratekeeper login
 ```
 
-## Usage
-
-### Command Line Interface
-
-The CLI provides several commands for different workflows:
+Then check that everything is found:
 
 ```bash
-# Show help and available commands
-tidal-cleanup --help
-
-# Show current configuration and status
-tidal-cleanup status
-
-# Synchronize playlists only
-tidal-cleanup sync
-
-# Convert audio files only
-tidal-cleanup convert
-
-# Generate Rekordbox XML only
-tidal-cleanup rekordbox
-
-# Run full workflow (sync + convert + rekordbox)
-tidal-cleanup full
-
-# Run with debug logging
-tidal-cleanup --log-level DEBUG full
-
-# Run non-interactively (no prompts)
-tidal-cleanup --no-interactive sync
-
-# Log to file
-tidal-cleanup --log-file app.log full
+cratekeeper status
 ```
 
-## Performance Optimization
+## Daily use
 
-The application uses an intelligent **directory diff mechanism** for optimal performance:
-
-### Convert Command
-
-- **First run**: Converts all M4A files to MP3
-- **Subsequent runs**: Only converts new/missing files, skips existing MP3s
-- **Auto-cleanup**: Removes orphaned MP3 files that no longer have M4A sources
-
-### Sync Command
-
-- **Diff-based**: Only processes tracks that differ between MP3 folder and Rekordbox
-- **Incremental updates**: Skips tracks already in sync
-- **Smart MyTag management**: Updates tags only for changed tracks
-
-### Example Performance Gains
-
-- **1000 tracks already converted**: ~10 seconds instead of 30 minutes
-- **10 new tracks + 5 removed**: ~2 minutes instead of full reconversion
-- **Playlist sync with no changes**: ~5 seconds instead of full rescan
-
-See [DIRECTORY_DIFF_OPTIMIZATION.md](docs/DIRECTORY_DIFF_OPTIMIZATION.md) for technical details.
-
-### Development Commands
-
-For developers working on the project:
+Open the web UI:
 
 ```bash
-# Development setup
-make dev-setup  # Complete development environment setup
-make help  # Show all available commands
-
-# Code quality
-make format  # Format code with Black and isort
-make lint  # Run all linting (flake8, mypy, bandit)
-make security  # Run security checks
-make pr-check  # Full validation before creating PR
-
-# Testing
-make test  # Run tests
-make test-cov  # Run tests with coverage report
-make test-all  # Run tests across all Python versions
-
-# Building and releasing
-make build  # Build package
-make clean  # Clean build artifacts
+cratekeeper ui
 ```
 
-### Python API
+- **Dashboard** – health checks, counts, last sync, "Sync now".
+- **Sync** – live progress of Refresh, Download and Plan; then review the Plan per
+  playlist and Apply.
+- **Playlists** – every playlist with its Sources, Folder placement and track
+  counts; drill down to see each track in Tidal, Bandcamp, on disk and in Rekordbox.
+- **Settings** – folders and options, the Playlist tag mapping, Tidal login.
+- **History** and **Backups** – past runs with their Plans, and one-click restore.
 
-### Programmatic Usage
-
-You can also use the services directly in Python:
-
-```python
-from tidal_cleanup.config import get_config
-from tidal_cleanup.services import TidalApiService, FileService
-
-# Initialize services
-config = get_config()
-tidal_service = TidalApiService(config.tidal_token_file)
-file_service = FileService()
-
-# Connect to Tidal
-tidal_service.connect()
-
-# Get playlists
-playlists = tidal_service.get_playlists()
-print(f"Found {len(playlists)} playlists")
-
-# Process specific playlist
-for playlist in playlists:
-    if playlist.name == "My Favorites":
-        tracks = tidal_service.get_tracks(playlist.id)
-        print(f"Playlist has {len(tracks)} tracks")
-
-        # Convert tracks
-        for track in tracks:
-            file_path = file_service.convert_track(track)
-            print(f"Converted: {file_path}")
-```
-
-## Architecture & Migration
-
-The modern version maintains compatibility with your existing workflow while providing significant improvements:
-
-### Key Improvements
-
-1. **Modular Architecture**: Code is organized into logical modules
-2. **Configuration Management**: Hard-coded paths replaced with configurable settings
-3. **Error Handling**: Comprehensive error handling throughout
-4. **Logging**: Structured logging with different levels
-5. **CLI Interface**: Rich terminal interface with progress indicators
-6. **Type Safety**: Pydantic models for data validation
-7. **Testing**: Comprehensive test coverage with pytest
-8. **Quality Assurance**: Pre-commit hooks and CI/CD pipeline
-9. **Security**: Automated vulnerability scanning
-10. **Documentation**: Complete API documentation and examples
-
-### Backward Compatibility
-
-1. **Core Functionality**: All original features are maintained
-2. **File Formats**: Same audio format support
-3. **Tidal Integration**: Compatible with existing Tidal sessions
-4. **Rekordbox Output**: Same XML format for Rekordbox
-
-## Advanced Configuration
-
-The application uses a configuration file that can be customized:
-
-```python
-# Default configuration (can be overridden)
-{
-    "tidal_token_file": "tidal_session.json",
-    "output_directory": "./output",
-    "rekordbox_xml_path": "./rekordbox.xml",
-    "log_level": "INFO",
-    "max_workers": 4
-}
-```
-
-You can customize settings by creating a `config.yaml` file or using environment variables.
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Tidal Authentication**: If authentication fails, delete the token file and re-authenticate
-2. **FFmpeg Not Found**: Ensure FFmpeg is installed and in your PATH
-3. **Permission Errors**: Check file permissions for input/output directories
-4. **Import Errors**: Make sure you've installed all dependencies
-
-### Logging
-
-Enable debug logging for detailed troubleshooting:
+Or from the terminal:
 
 ```bash
-tidal-cleanup --log-level DEBUG --log-file debug.log full
+cratekeeper sync                 # refresh, download, plan, ask, apply
+cratekeeper sync --plan-only     # stop after the plan
+cratekeeper sync --offline       # no Tidal refresh, no downloads (re-plan)
+cratekeeper sync -p "Peak Time 🏢⬆️"
+cratekeeper backups              # list; `backups restore <ID>` restores
 ```
 
-## Contributing
+`sync` flags: `--yes` (no prompt), `--no-download`, `--delete-playlists` (also apply
+the deletion group), `--full` (fetch every Tidal playlist again), `--allow-shrink`
+(accept that Tidal lists far fewer playlists than before).
 
-We welcome contributions! Please read `CONTRIBUTING.md` for guidelines on:
+## Safety
 
-- Setting up the development environment
-- Running tests and quality checks
-- Submitting pull requests
-- Code style and standards
+- The Plan is built on a copy of the Rekordbox library and writes nothing.
+- Apply refuses while Rekordbox is running, and when the library changed after the
+  Plan was made. A Plan can only be applied once, and only while it is the newest
+  one.
+- A full Backup (Cratekeeper's database plus Rekordbox's `master.db`, `local.db`
+  and `masterPlaylists6.xml`) is taken before every Apply; a database Backup before
+  every Refresh.
+- If the Music folder or the Bandcamp folder is missing (drive unplugged),
+  Cratekeeper stops instead of treating the files as deleted.
+- Deleting Rekordbox playlists is its own group in the Plan and is off by default.
+- Cratekeeper never deletes or renames your audio files.
 
-### Security
+## Settings
 
-For security concerns, please see `SECURITY.md` for reporting guidelines.
+`~/.cratekeeper/config.toml` (or the Settings page). Every key can be overridden
+with an environment variable `CRATEKEEPER_<KEY>`; `CRATEKEEPER_HOME` moves the whole
+folder.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `music_folder` | `~/Music/Tidal/mp3` | Folder with one sub-folder per playlist under `Playlists/` |
+| `bandcamp_folder` | – | Folder with one sub-folder per Bandcamp playlist |
+| `rekordbox_db` | auto | Rekordbox `master.db` |
+| `tag_mapping` | built-in | Playlist tag mapping file (emoji → tag, folders) |
+| `target_format` | `mp3` | Format downloads are converted to |
+| `ffmpeg_quality` | `2` | ffmpeg `-q:a` for MP3 (0 = best) |
+| `download_quality` | `LOSSLESS` | Tidal quality for downloads |
+| `prune_tracks` | `true` | Remove tracks from Rekordbox playlists that are not in the playlist any more |
+| `backups_keep_full` | `20` | Full Backups to keep |
+| `backups_keep_db` | `10` | Database Backups to keep |
+| `port` | `8765` | Port of `cratekeeper ui` |
+
+Files in `~/.cratekeeper/`: `config.toml`, `cratekeeper.db`, `tidal_session.json`,
+`tag_mapping.json` (if edited), `backups/`, `logs/`, `tidal-dl-ng/`.
+
+## Development
+
+```bash
+make install-dev   # editable install with tools and pre-commit hooks
+make check         # black, isort, flake8, mypy, pytest (same as CI)
+make ui            # build the web UI
+make ui-dev        # Vite dev server; run `cratekeeper ui --dev` next to it
+```
+
+Try the UI on demo data without touching real files:
+
+```bash
+python scripts/make_demo_home.py /tmp/ck-demo
+CRATEKEEPER_HOME=/tmp/ck-demo/home cratekeeper ui
+```
+
+How it fits together: [docs/architecture.md](docs/architecture.md). Contribution
+rules: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT License — see LICENSE file for details.
+MIT

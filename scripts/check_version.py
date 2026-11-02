@@ -20,7 +20,7 @@ def get_version_from_pyproject() -> Optional[str]:
 
 def get_version_from_init() -> Optional[str]:
     """Get version from __init__.py."""
-    init_path = Path("src/tidal_cleanup/__init__.py")
+    init_path = Path("src/cratekeeper/__init__.py")
     if not init_path.exists():
         return None
 
