@@ -178,7 +178,7 @@ def test_one_dialog_at_a_time(client: TestClient, fake: FakeOsascript) -> None:
 def test_not_macos_returns_503(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(picker.sys, "platform", "linux")
+    monkeypatch.setattr(picker.platform, "system", lambda: "Linux")
     response = client.post(URL, json={"field": "music_folder"}, headers=HEADERS)
     assert response.status_code == 503
     assert "only works on macOS" in response.json()["detail"]

@@ -7,9 +7,9 @@ path. Nothing is read or written: only the path goes back to the page.
 
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess  # noqa: S404 - runs osascript with a fixed argument list
-import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -108,7 +108,7 @@ def check_pick(field: PickField, raw: str) -> Path:
 
 
 def _osascript() -> Optional[str]:
-    if sys.platform != "darwin":
+    if platform.system() != "Darwin":
         return None
     return shutil.which("osascript")
 
