@@ -1,6 +1,6 @@
 import { Link, useParams, useSearchParams } from "react-router";
 import { isApiError } from "../api/client";
-import { usePlaylist } from "../api/queries";
+import { useImportFiles, usePlaylist } from "../api/queries";
 import type { TrackOut } from "../api/types";
 import { Badge, SourceBadges } from "../components/Badge";
 import { cx } from "../components/cx";
@@ -16,6 +16,7 @@ import {
   formatRelative,
   parseUtc,
 } from "../lib/format";
+import { ImportButton, ImportResults } from "../playlists/ImportTracks";
 import {
   filterAndSortTracks,
   firstSortDir,
@@ -65,6 +66,7 @@ export default function PlaylistDetail() {
 
 function PlaylistDetailView({ id }: { id: number }) {
   const query = usePlaylist(id);
+  const importer = useImportFiles(id);
   const [params, setParams] = useSearchParams();
 
   if (query.isPending) return <Loading />;
@@ -132,7 +134,9 @@ function PlaylistDetailView({ id }: { id: number }) {
             {!playlist.in_rekordbox && <Badge>not in Rekordbox</Badge>}
           </span>
         }
+        actions={<ImportButton importer={importer} />}
       />
+      <ImportResults importer={importer} />
       <section
         className="mb-6 rounded-lg border border-line bg-surface p-4"
         aria-label="Playlist details"

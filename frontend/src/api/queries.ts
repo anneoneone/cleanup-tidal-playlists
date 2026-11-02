@@ -4,6 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { importFiles } from "../playlists/importFiles";
 import { api } from "./client";
 import type {
   BackupOut,
@@ -214,6 +215,19 @@ export function useSaveTagMapping() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.settings });
       void queryClient.invalidateQueries({ queryKey: queryKeys.playlists });
     },
+  });
+}
+
+export function useImportFiles(playlistId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (files: readonly File[]) => importFiles(playlistId, files),
+    onSettled: () =>
+      Promise.all([
+        // Also matches queryKeys.playlist(playlistId).
+        queryClient.invalidateQueries({ queryKey: queryKeys.playlists }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.status }),
+      ]),
   });
 }
 
