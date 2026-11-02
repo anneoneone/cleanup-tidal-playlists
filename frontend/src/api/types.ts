@@ -21,6 +21,9 @@ export type BackupOut = Schemas["BackupOut"];
 export type CancelOut = Schemas["CancelOut"];
 export type SyncIn = Schemas["SyncIn"];
 export type ApplyIn = Schemas["ApplyIn"];
+export type PickPathIn = Schemas["PickPathIn"];
+export type PickPathOut = Schemas["PickPathOut"];
+export type PickField = PickPathIn["field"];
 export type Source = PlaylistOut["sources"][number];
 
 /** Kinds of job events sent over SSE. Not part of openapi.json (see schemas.py). */

@@ -9,6 +9,8 @@ import type {
   BackupOut,
   CancelOut,
   JobOut,
+  PickPathIn,
+  PickPathOut,
   PlanOut,
   PlaylistDetailOut,
   PlaylistOut,
@@ -191,6 +193,14 @@ export function useSaveSettings() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.tagMapping });
       void queryClient.invalidateQueries({ queryKey: queryKeys.playlists });
     },
+  });
+}
+
+/** Open the Finder dialog on the server's Mac; resolves to null when cancelled. */
+export function usePickPath() {
+  return useMutation({
+    mutationFn: async (body: PickPathIn) =>
+      (await api.post<PickPathOut>("/api/settings/pick-path", body)).path ?? null,
   });
 }
 

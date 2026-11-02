@@ -89,6 +89,11 @@ the Host header must match, and changing requests need the `X-Cratekeeper: 1`
 header and a matching Origin. The contract is exported to `frontend/openapi.json`
 (`scripts/export_openapi.py`) and the UI generates its types from it.
 
+A browser cannot give a page an absolute path. So for the path settings,
+`POST /api/settings/pick-path` (`api/picker.py`) opens the macOS Finder dialog with
+`osascript` and returns only the chosen path. Request values go to the script as
+arguments, never into its text. One dialog at a time; it closes after 10 minutes.
+
 ## Tests
 
 `pytest` runs with `HOME` and `CRATEKEEPER_HOME` pointing at temp folders and with
