@@ -15,7 +15,8 @@ Source = Literal["tidal", "bandcamp", "library"]
 # present = there and wanted, absent = not there, unsynced = there but removed
 # from every Source, missing = wanted and was there, but is gone now.
 TargetState = Literal["present", "absent", "unsynced", "missing"]
-# A track on a USB stick: present = wanted, unsynced = removed from every Source
+# A track in a USB stick's copy of a Playlist: present = wanted, unsynced = removed
+# from every Source of the Playlist
 StickState = Literal["present", "unsynced"]
 
 
@@ -111,7 +112,7 @@ class PlaylistOut(BaseModel):
 
 
 class TrackStickOut(BaseModel):
-    """A USB stick that holds a Track (as of the stick's last scan)."""
+    """A USB stick whose copy of the Playlist holds a Track (as of its last scan)."""
 
     id: int
     name: str
@@ -239,6 +240,8 @@ class StickOut(BaseModel):
     scanned_at: datetime
     tracks_total: int  # tracks in the export
     tracks_matched: int  # of these, the ones that match a Cratekeeper Track
+    playlists_total: int  # playlists in the export (folders not counted)
+    playlists_matched: int  # of these, the ones that match a Playlist
 
 
 class StickScanOut(BaseModel):

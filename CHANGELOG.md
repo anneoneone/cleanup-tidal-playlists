@@ -31,8 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Playlist's Music folder sub-folder as Library tracks (never overwrites a file)
 - USB sticks: "Scan sticks" on the Dashboard reads the Rekordbox export
   (`export.pdb`) of each plugged-in stick, read-only. The playlist view shows per
-  track on which sticks it is (or "unsynced" there: in no Source of any playlist),
-  with a stick filter
+  track on which sticks the playlist holds it (or "unsynced" there: removed from
+  the playlist's Sources), with a stick filter
 
 ### Changed
 

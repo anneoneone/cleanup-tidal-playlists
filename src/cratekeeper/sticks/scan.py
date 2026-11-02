@@ -1,4 +1,4 @@
-"""Scan mounted USB sticks and record which Tracks each one holds.
+"""Scan mounted USB sticks and record which Tracks and playlists each one holds.
 
 Sticks are only read, never written. A stick that is not mounted keeps its last scan.
 """
@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 import plistlib
 import subprocess  # noqa: S404 - runs diskutil with a fixed argument list
-from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections import Counter, defaultdict
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -17,10 +17,19 @@ from typing import Optional
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from ..db import Database, Stick, StickTrack, Track
+from ..db import (
+    Database,
+    Playlist,
+    Stick,
+    StickPlaylist,
+    StickPlaylistTrack,
+    StickTrack,
+    Track,
+)
 from ..db.repository import utc_now
 from ..music.paths import resolve_stored_path, simplify
-from .export_pdb import ExportError, ExportTrack, read_export
+from ..rekordbox.naming import NameRules
+from .export_pdb import ExportError, ExportPlaylist, ExportTrack, read_export
 
 logger = logging.getLogger(__name__)
 
@@ -148,13 +157,65 @@ class TrackIndex:
         return found
 
 
+@dataclass(frozen=True)
+class PlaylistTarget:
+    """Where a Playlist lands in Rekordbox, and so on a stick."""
+
+    playlist_id: int
+    name: str  # the Rekordbox name
+    folder: tuple[str, ...]
+
+
+def playlist_targets(session: Session, rules: NameRules) -> list[PlaylistTarget]:
+    """Return the Rekordbox name and folder of every Playlist."""
+    targets = []
+    for playlist in session.scalars(select(Playlist).order_by(Playlist.id)):
+        tags = rules.parse(playlist.name)
+        targets.append(
+            PlaylistTarget(
+                playlist.id, rules.rekordbox_name(tags), tuple(rules.folder_path(tags))
+            )
+        )
+    return targets
+
+
+def match_playlists(
+    items: Sequence[ExportPlaylist], targets: Sequence[PlaylistTarget]
+) -> dict[int, int]:
+    """Return the Playlist ID of each stick playlist that has one, by position.
+
+    A Playlist takes the stick playlist with its Rekordbox name in its folder. When
+    there is none, it takes the one with its name in another folder, but only if the
+    name is unique among the stick playlists and Playlists left. Each stick playlist
+    goes to one Playlist at most.
+    """
+    free: dict[str, list[int]] = defaultdict(list)
+    for position, item in enumerate(items):
+        free[item.name].append(position)
+    found: dict[int, int] = {}
+    left = []
+    for target in targets:
+        hits = [p for p in free[target.name] if items[p].folder == target.folder]
+        if hits:
+            found[hits[0]] = target.playlist_id
+            free[target.name].remove(hits[0])
+        else:
+            left.append(target)
+    wanted = Counter(target.name for target in left)
+    for target in left:
+        if wanted[target.name] == 1 and len(free[target.name]) == 1:
+            found[free[target.name].pop()] = target.playlist_id
+    return found
+
+
 def scan_sticks(
     db: Database,
     music_folder: Path,
+    rules: NameRules,
     volumes: Optional[Path] = None,
     read_volume_id: Optional[Callable[[Path], str]] = None,
 ) -> ScanResult:
-    """Read every mounted stick and replace its stored Tracks."""
+    """Read every mounted stick and replace its stored Tracks and playlists."""
     read_volume_id = read_volume_id or volume_id
     result = ScanResult()
     mounted = find_sticks(volumes)
@@ -164,30 +225,42 @@ def scan_sticks(
         index = TrackIndex(music_folder)
         for track in session.scalars(select(Track)):
             index.add(track)
+        targets = playlist_targets(session, rules)
         for stick in mounted:
             if stick.export is None:
                 result.problems.append(_no_export(stick))
                 continue
             try:
                 stick_id = read_volume_id(stick.mount)
-                items = read_export(stick.export)
+                export = read_export(stick.export)
             except (VolumeIdError, ExportError) as exc:
                 result.problems.append(f"{stick.name}: {exc}")
                 continue
-            matches = [index.match(item) for item in items]
+            matches = {item: index.match(item) for item in export.tracks}
+            links = match_playlists(export.playlists, targets)
             row = _save(
                 session,
                 volume_id=stick_id,
                 name=stick.name,
-                total=len(items),
-                matched=sum(1 for m in matches if m),
-                track_ids=set().union(*matches),
+                total=len(export.tracks),
+                matched=sum(1 for item in export.tracks if matches[item]),
+                track_ids=set().union(*matches.values()),
+                playlists=[
+                    (
+                        item,
+                        links.get(position),
+                        set().union(*(matches[track] for track in item.tracks)),
+                    )
+                    for position, item in enumerate(export.playlists)
+                ],
             )
             logger.info(
-                "Stick %s: %d tracks, %d matched",
+                "Stick %s: %d tracks, %d matched; %d playlists, %d matched",
                 row.name,
                 row.tracks_total,
                 row.tracks_matched,
+                len(export.playlists),
+                len(links),
             )
             result.scanned.append(row.id)
     return result
@@ -210,6 +283,7 @@ def _save(
     total: int,
     matched: int,
     track_ids: Iterable[int],
+    playlists: Sequence[tuple[ExportPlaylist, Optional[int], set[int]]],
 ) -> Stick:
     stick = session.scalars(
         select(Stick).where(Stick.volume_id == volume_id)
@@ -226,4 +300,22 @@ def _save(
     rows = [{"stick_id": stick.id, "track_id": t} for t in sorted(track_ids)]
     if rows:
         session.execute(insert(StickTrack), rows)
+    session.execute(delete(StickPlaylist).where(StickPlaylist.stick_id == stick.id))
+    for item, playlist_id, playlist_tracks in playlists:
+        saved = StickPlaylist(
+            stick_id=stick.id,
+            name=item.name,
+            folder=list(item.folder),
+            playlist_id=playlist_id,
+        )
+        session.add(saved)
+        session.flush()
+        if playlist_tracks:
+            session.execute(
+                insert(StickPlaylistTrack),
+                [
+                    {"stick_playlist_id": saved.id, "track_id": t}
+                    for t in sorted(playlist_tracks)
+                ],
+            )
     return stick

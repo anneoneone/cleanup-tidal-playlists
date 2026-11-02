@@ -411,7 +411,7 @@ def _import_file(
 def _scan_sticks(core: App) -> scan.ScanResult:
     # The job lock keeps syncs (here or in the CLI) out while stick data changes.
     with held_lock(core.home.lock_file):
-        return scan.scan_sticks(core.db, core.settings.music_folder)
+        return scan.scan_sticks(core.db, core.settings.music_folder, core.rules())
 
 
 def _settings_out(core: App) -> SettingsOut:

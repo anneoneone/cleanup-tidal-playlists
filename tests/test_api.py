@@ -6,14 +6,14 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 import cratekeeper.api.app as api_module
 from cratekeeper.api.app import create_app
 from cratekeeper.app import App
 from cratekeeper.db import PlaylistTrack
 from cratekeeper.jobs import held_lock
-from cratekeeper.sticks.export_pdb import ExportTrack
+from cratekeeper.sticks.export_pdb import ExportPlaylist, ExportTrack
 from cratekeeper.tidal.auth import LoginStart
 
 HEADERS = {"X-Cratekeeper": "1"}
@@ -385,16 +385,24 @@ def test_scan_sticks_and_show_them_per_track(
 
     offline_sync(client, core)
     one = core.settings.music_folder / "Playlists" / "Peak 🏢" / "A - One.mp3"
+    on_stick = ExportTrack(
+        title="One",
+        artist="A",
+        isrc="",
+        file_name=one.name,
+        file_path=f"/Contents/A/{one.name}",
+        file_size=one.stat().st_size,
+    )
+    rules = core.rules()
+    tags = rules.parse("Peak 🏢")
     write_export(
         no_mounted_sticks / "S1" / "PIONEER" / "rekordbox" / "export.pdb",
-        [
-            ExportTrack(
-                title="One",
-                artist="A",
-                isrc="",
-                file_name=one.name,
-                file_path=f"/Contents/A/{one.name}",
-                file_size=one.stat().st_size,
+        [on_stick],
+        playlists=[
+            ExportPlaylist(
+                name=rules.rekordbox_name(tags),
+                folder=tuple(rules.folder_path(tags)),
+                tracks=(on_stick,),
             )
         ],
     )
@@ -411,6 +419,7 @@ def test_scan_sticks_and_show_them_per_track(
         1,
         1,
     )
+    assert (s1["playlists_total"], s1["playlists_matched"]) == (1, 1)
 
     playlists = client.get("/api/playlists").json()
     peak = next(p for p in playlists if p["name"] == "Peak 🏢")
@@ -420,7 +429,8 @@ def test_scan_sticks_and_show_them_per_track(
     (other,) = client.get(f"/api/playlists/{party['id']}").json()["tracks"]
     assert other["sticks"] == []
 
-    # Gone from Peak's Sources: still wanted while Party has it, unsynced after
+    # Gone from Peak's Sources: unsynced in S1's Peak, even while Party has it.
+    # S1 has no Party playlist, so the track is not on S1 for Party.
     with core.db.session() as session:
         row = session.scalars(
             select(PlaylistTrack).where(PlaylistTrack.track_id == track["id"])
@@ -429,17 +439,10 @@ def test_scan_sticks_and_show_them_per_track(
         session.add(
             PlaylistTrack(playlist_id=party["id"], track_id=track["id"], in_local=True)
         )
-
-    def peak_sticks() -> Any:
-        (row,) = client.get(f"/api/playlists/{peak['id']}").json()["tracks"]
-        return [s["state"] for s in row["sticks"]]
-
-    assert peak_sticks() == ["present"]
-    with core.db.session() as session:
-        session.execute(
-            delete(PlaylistTrack).where(PlaylistTrack.playlist_id == party["id"])
-        )
-    assert peak_sticks() == ["unsynced"]
+    (row,) = client.get(f"/api/playlists/{peak['id']}").json()["tracks"]
+    assert [s["state"] for s in row["sticks"]] == ["unsynced"]
+    party_tracks = client.get(f"/api/playlists/{party['id']}").json()["tracks"]
+    assert [t["sticks"] for t in party_tracks if t["id"] == track["id"]] == [[]]
 
     # Unplugged: the last scan stays
     shutil.rmtree(no_mounted_sticks / "S1")

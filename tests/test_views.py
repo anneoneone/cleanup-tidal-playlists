@@ -88,19 +88,7 @@ def test_track_state_on_sticks() -> None:
         ("S2", "present"),
     ]
 
-    row, track = make(downloaded=True)  # removed from every Source
+    row, track = make(downloaded=True)  # removed from the Playlist's Sources
     state = track_state(row, track, True, sticks[:1])
     assert [(s.id, s.state) for s in state.sticks] == [(1, "unsynced")]
     assert track_state(row, track, True).sticks == []
-
-
-def test_track_state_on_sticks_counts_every_playlist() -> None:
-    # Removed from this Playlist's Sources, but another Playlist still wants it
-    row, track = make(downloaded=True)
-    state = track_state(row, track, True, [(1, "S1")], wanted_anywhere=True)
-    assert (state.download, [s.state for s in state.sticks]) == (
-        "unsynced",
-        ["present"],
-    )
-    state = track_state(row, track, True, [(1, "S1")], wanted_anywhere=False)
-    assert [s.state for s in state.sticks] == ["unsynced"]

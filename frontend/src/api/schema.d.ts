@@ -803,6 +803,10 @@ export interface components {
       mounted: boolean;
       /** Name */
       name: string;
+      /** Playlists Matched */
+      playlists_matched: number;
+      /** Playlists Total */
+      playlists_total: number;
       /**
        * Scanned At
        * Format: date-time
@@ -924,7 +928,7 @@ export interface components {
     };
     /**
      * TrackStickOut
-     * @description A USB stick that holds a Track (as of the stick's last scan).
+     * @description A USB stick whose copy of the Playlist holds a Track (as of its last scan).
      */
     TrackStickOut: {
       /** Id */

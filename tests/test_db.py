@@ -11,6 +11,8 @@ from cratekeeper.db import (
     RunKind,
     RunStatus,
     Stick,
+    StickPlaylist,
+    StickPlaylistTrack,
     StickTrack,
     head_revision,
 )
@@ -68,7 +70,12 @@ def test_v1_database_is_upgraded_and_keeps_rows(tmp_path: Path) -> None:
     db.prepare()
 
     assert db.schema_revision() == head_revision()
-    assert {"sticks", "stick_tracks"} <= set(table_names(db.engine))
+    assert {
+        "sticks",
+        "stick_tracks",
+        "stick_playlists",
+        "stick_playlist_tracks",
+    } <= set(table_names(db.engine))
     with db.session() as session:
         row = session.scalars(select(PlaylistTrack)).one()
         assert row.in_local is True
@@ -148,7 +155,7 @@ def test_library_counts_on_empty_db(tmp_path: Path) -> None:
         }
 
 
-def test_upgraded_stick_tracks_go_with_their_track(tmp_path: Path) -> None:
+def test_upgraded_stick_rows_go_with_their_track_and_playlist(tmp_path: Path) -> None:
     path = tmp_path / "v1.db"
     make_v1_database(path)
     db = Database(path)
@@ -157,7 +164,16 @@ def test_upgraded_stick_tracks_go_with_their_track(tmp_path: Path) -> None:
         session.add(Stick(id=1, volume_id="u1", name="S1", scanned_at=repo.utc_now()))
         session.flush()
         session.add(StickTrack(stick_id=1, track_id=1))
+        session.add(
+            StickPlaylist(id=1, stick_id=1, name="House", folder=["G"], playlist_id=1)
+        )
+        session.flush()
+        session.add(StickPlaylistTrack(stick_playlist_id=1, track_id=1))
     with db.session() as session:
         session.execute(text("DELETE FROM tracks WHERE id = 1"))
+        session.execute(text("DELETE FROM playlist_tracks"))
+        session.execute(text("DELETE FROM playlists WHERE id = 1"))
     with db.session() as session:
         assert session.scalars(select(StickTrack)).all() == []
+        assert session.scalars(select(StickPlaylistTrack)).all() == []
+        assert session.scalars(select(StickPlaylist.playlist_id)).all() == [None]

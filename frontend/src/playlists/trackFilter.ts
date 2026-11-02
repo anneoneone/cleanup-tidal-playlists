@@ -8,8 +8,9 @@ export type TrackSourceFilter = "all" | Source | "none";
 export type TrackStateFilter =
   "all" | "to_download" | "missing" | "unsynced" | "not_in_rekordbox" | "in_rekordbox";
 /**
- * USB sticks. "none" and "off:<id>" only count tracks that are still in a Source:
- * the ones that should go on the stick.
+ * USB sticks: a track is on a stick when the stick's copy of this playlist holds it.
+ * "none" and "off:<id>" only count tracks that are still in a Source: the ones that
+ * should go on the stick.
  */
 export type TrackStickFilter =
   "all" | "any" | "none" | "unsynced" | `on:${number}` | `off:${number}`;

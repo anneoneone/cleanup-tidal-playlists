@@ -1146,6 +1146,14 @@
             "title": "Name",
             "type": "string"
           },
+          "playlists_matched": {
+            "title": "Playlists Matched",
+            "type": "integer"
+          },
+          "playlists_total": {
+            "title": "Playlists Total",
+            "type": "integer"
+          },
           "scanned_at": {
             "format": "date-time",
             "title": "Scanned At",
@@ -1166,7 +1174,9 @@
           "mounted",
           "scanned_at",
           "tracks_total",
-          "tracks_matched"
+          "tracks_matched",
+          "playlists_total",
+          "playlists_matched"
         ],
         "title": "StickOut",
         "type": "object"
@@ -1484,7 +1494,7 @@
         "type": "object"
       },
       "TrackStickOut": {
-        "description": "A USB stick that holds a Track (as of the stick's last scan).",
+        "description": "A USB stick whose copy of the Playlist holds a Track (as of its last scan).",
         "properties": {
           "id": {
             "title": "Id",

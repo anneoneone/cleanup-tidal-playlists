@@ -70,14 +70,18 @@ export function SticksCard({ jobRunning }: { jobRunning: boolean }) {
 function StickRow({ stick }: { stick: StickOut }) {
   const scanned = parseUtc(stick.scanned_at);
   const unknown = stick.tracks_total - stick.tracks_matched;
+  const unknownPlaylists = stick.playlists_total - stick.playlists_matched;
   return (
     <li className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2.5 first:pt-0 last:pb-0">
       <span className="w-24 shrink-0 text-sm font-medium break-words">{stick.name}</span>
       {stick.mounted && <Badge tone="green">plugged in</Badge>}
       <span className="min-w-0 flex-1 basis-48 text-sm text-muted">
         {formatCount(stick.tracks_total)} tracks
-        {unknown > 0 && `, ${formatCount(unknown)} not in Cratekeeper`} · scanned{" "}
-        <span title={formatDateTime(scanned)}>{formatRelative(scanned)}</span>
+        {unknown > 0 && `, ${formatCount(unknown)} not in Cratekeeper`} ·{" "}
+        {formatCount(stick.playlists_total)} playlists
+        {unknownPlaylists > 0 &&
+          `, ${formatCount(unknownPlaylists)} not in Cratekeeper`}{" "}
+        · scanned <span title={formatDateTime(scanned)}>{formatRelative(scanned)}</span>
       </span>
     </li>
   );

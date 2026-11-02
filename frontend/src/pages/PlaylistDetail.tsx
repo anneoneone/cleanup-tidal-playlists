@@ -425,12 +425,13 @@ function TargetCell({
   }
 }
 
+/** The sticks whose copy of this playlist (same Rekordbox name) holds the track. */
 function StickCell({ sticks }: { sticks: TrackOut["sticks"] }) {
   if (sticks.length === 0) {
     return (
-      <span title="On no USB stick" className="text-muted">
+      <span title="Not in this playlist on any USB stick" className="text-muted">
         <span aria-hidden="true">–</span>
-        <span className="sr-only">On no USB stick</span>
+        <span className="sr-only">Not in this playlist on any USB stick</span>
       </span>
     );
   }
@@ -438,14 +439,14 @@ function StickCell({ sticks }: { sticks: TrackOut["sticks"] }) {
     <span className="flex flex-wrap gap-1">
       {sticks.map((stick) =>
         stick.state === "present" ? (
-          <Badge key={stick.id} tone="green" title={`On ${stick.name}`}>
+          <Badge key={stick.id} tone="green" title={`In this playlist on ${stick.name}`}>
             {stick.name}
           </Badge>
         ) : (
           <Badge
             key={stick.id}
             tone="amber"
-            title={`Still on ${stick.name}, but no Playlist has it in a Source`}
+            title={`Still in this playlist on ${stick.name}, but removed from its Sources`}
           >
             ⚠ {stick.name} unsynced
           </Badge>

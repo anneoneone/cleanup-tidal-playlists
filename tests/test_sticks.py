@@ -8,15 +8,35 @@ from typing import Any, Optional
 import pytest
 from sqlalchemy import select
 
-from cratekeeper.db import Database, Stick, StickTrack, Track
+from cratekeeper.db import (
+    Database,
+    Playlist,
+    Stick,
+    StickPlaylist,
+    StickPlaylistTrack,
+    StickTrack,
+    Track,
+)
+from cratekeeper.rekordbox.naming import NameRules
+from cratekeeper.settings import default_tag_mapping_path
 from cratekeeper.sticks import scan
-from cratekeeper.sticks.export_pdb import ExportError, ExportTrack, read_export
+from cratekeeper.sticks.export_pdb import (
+    Export,
+    ExportError,
+    ExportPlaylist,
+    ExportTrack,
+    read_export,
+)
 from cratekeeper.sticks.scan import (
+    PlaylistTarget,
     VolumeIdError,
     find_sticks,
+    match_playlists,
     scan_sticks,
     volume_id,
 )
+
+RULES = NameRules.from_file(default_tag_mapping_path())
 
 
 def item(
@@ -38,8 +58,24 @@ def item(
     )
 
 
-def stick(volumes: Path, name: str, write_export: Any, *items: ExportTrack) -> Path:
-    return write_export(volumes / name / "PIONEER" / "rekordbox" / "export.pdb", items)
+def stick(
+    volumes: Path,
+    name: str,
+    write_export: Any,
+    *items: ExportTrack,
+    playlists: tuple[ExportPlaylist, ...] = (),
+) -> Path:
+    return write_export(
+        volumes / name / "PIONEER" / "rekordbox" / "export.pdb",
+        items,
+        playlists=playlists,
+    )
+
+
+def playlist(name: str, *tracks: ExportTrack, folder: str = "") -> ExportPlaylist:
+    return ExportPlaylist(
+        name=name, folder=tuple(folder.split("/")) if folder else (), tracks=tracks
+    )
 
 
 # --------------------------------------------------------------------- reader
@@ -51,7 +87,30 @@ def test_read_export_returns_present_tracks(tmp_path: Path, write_export: Any) -
     tracks.append(item("Pátio – Ñ", "Beltrán", isrc="DEK602512307", size=7))
     path = write_export(tmp_path / "export.pdb", tracks, [item("Deleted")])
 
-    assert read_export(path) == tracks
+    assert read_export(path) == Export(tracks=tracks, playlists=[])
+
+
+def test_read_export_returns_playlists_in_their_folders(
+    tmp_path: Path, write_export: Any
+) -> None:
+    one, two, gone = item("One"), item("Two"), item("Gone")
+    playlists = [
+        playlist("Peak", two, one, two, folder="Genre/House/Archived"),
+        playlist("Warmup", one, folder="Genre/House/Archived"),
+        playlist("Root", gone, one),  # Gone was deleted from the export
+        playlist("Empty", folder="Events/Partys/2025"),
+    ]
+    path = write_export(tmp_path / "export.pdb", [one, two], [gone], playlists)
+
+    export = read_export(path)
+
+    assert export.tracks == [one, two]
+    assert [(p.folder, p.name, p.tracks) for p in export.playlists] == [
+        (("Genre", "House", "Archived"), "Peak", (two, one, two)),
+        (("Genre", "House", "Archived"), "Warmup", (one,)),
+        ((), "Root", (one,)),
+        (("Events", "Partys", "2025"), "Empty", ()),
+    ]
 
 
 def test_read_export_rejects_other_files(tmp_path: Path, write_export: Any) -> None:
@@ -79,6 +138,60 @@ def test_read_export_rejects_strings_outside_the_file(
 
     with pytest.raises(ExportError, match="damaged"):
         read_export(path)
+
+
+@pytest.mark.parametrize("parent", [1, 99], ids=["loop", "missing"])
+def test_read_export_rejects_a_damaged_playlist_tree(
+    tmp_path: Path, write_export: Any, parent: int
+) -> None:
+    one = item("One")
+    path = write_export(
+        tmp_path / "export.pdb", [one], playlists=[playlist("P", one, folder="F")]
+    )
+    data = bytearray(path.read_bytes())
+    # Pages: header, tracks (2), artists (2), tree (2). The first tree row is F.
+    struct.pack_into("<I", data, 6 * 512 + 0x28, parent)
+    path.write_bytes(bytes(data))
+
+    with pytest.raises(ExportError, match="playlist tree is damaged"):
+        read_export(path)
+
+
+# ------------------------------------------------------------------ matching
+
+
+def target(playlist_id: int, name: str, folder: str = "Genre/House") -> PlaylistTarget:
+    return PlaylistTarget(playlist_id, name, tuple(folder.split("/")))
+
+
+def test_match_playlists_by_name_in_the_folder_first() -> None:
+    items = [
+        playlist("Peak", folder="Old"),
+        playlist("Peak", folder="Genre/House"),
+        playlist("Peak", folder="Genre/House"),  # a second copy stays unmatched
+        playlist("Warmup"),  # at the top: only the name matches
+        playlist("Dub", folder="A"),
+        playlist("Dub", folder="B"),
+        playlist("Twice"),
+        playlist("Other"),
+    ]
+    targets = [
+        target(1, "Peak"),
+        target(2, "Warmup"),
+        target(3, "Dub"),  # two stick playlists named Dub, none in its folder
+        target(4, "Twice", "X"),  # two Playlists named Twice, none in their folder
+        target(5, "Twice", "Y"),
+        target(6, "Missing"),
+    ]
+
+    assert match_playlists(items, targets) == {1: 1, 3: 2}
+
+
+def test_match_playlists_gives_each_stick_playlist_once() -> None:
+    items = [playlist("Peak", folder="Genre/House")]
+    targets = [target(1, "Peak"), target(2, "Peak")]
+
+    assert match_playlists(items, targets) == {0: 1}
 
 
 # ----------------------------------------------------------------------- scan
@@ -156,7 +269,7 @@ def test_scan_matches_by_file_or_isrc_then_by_name(
         item("Not in Cratekeeper", file_name="other.mp3", size=999),
     )
 
-    result = scan_sticks(db, music)
+    result = scan_sticks(db, music, RULES)
 
     assert result.problems == []
     on_stick = stick_tracks(db)["S1"]
@@ -179,19 +292,94 @@ def test_rescan_replaces_tracks_and_keeps_unmounted_sticks(
     two = add_track(db, title="Two")
     stick(no_mounted_sticks, "S1", write_export, item("One"))
     stick(no_mounted_sticks, "S2", write_export, item("One"), item("Two"))
-    scan_sticks(db, tmp_path)
+    scan_sticks(db, tmp_path, RULES)
 
     # S2 is unplugged, S1 now holds Two only
     stick(no_mounted_sticks, "S1", write_export, item("Two"))
     shutil.rmtree(no_mounted_sticks / "S2")
-    result = scan_sticks(db, tmp_path)
+    result = scan_sticks(db, tmp_path, RULES)
 
     assert len(result.scanned) == 1
     assert stick_tracks(db) == {"S1": {two}, "S2": {one, two}}
 
 
+def stick_playlists(db: Database) -> list[tuple[str, str, Optional[int], set[int]]]:
+    """Return (stick, folder/name, Playlist ID, Track IDs) per stick playlist."""
+    with db.session() as session:
+        found = []
+        rows = session.execute(
+            select(Stick.name, StickPlaylist)
+            .join(StickPlaylist, StickPlaylist.stick_id == Stick.id)
+            .order_by(StickPlaylist.id)
+        )
+        for stick_name, row in rows:
+            tracks = session.scalars(
+                select(StickPlaylistTrack.track_id).where(
+                    StickPlaylistTrack.stick_playlist_id == row.id
+                )
+            )
+            path = "/".join([*row.folder, row.name])
+            found.append((stick_name, path, row.playlist_id, set(tracks)))
+        return found
+
+
+def add_playlist(db: Database, name: str) -> int:
+    with db.session() as session:
+        row = Playlist(name=name)
+        session.add(row)
+        session.flush()
+        return row.id
+
+
+def test_scan_records_stick_playlists_and_their_playlist(
+    tmp_path: Path, db: Database, no_mounted_sticks: Path, write_export: Any
+) -> None:
+    one = add_track(db, title="One")
+    two = add_track(db, title="Two")
+    three = add_track(db, title="Three")
+    # No tags: Rekordbox name "Warmup" in Genre/Uncategorized/Archived
+    warmup = add_playlist(db, "Warmup")
+    closing = add_playlist(db, "Closing")
+    a, b, c = item("One"), item("Two"), item("Three")
+    stick(
+        no_mounted_sticks,
+        "S1",
+        write_export,
+        a,
+        b,
+        c,
+        item("Unknown"),
+        playlists=(
+            playlist("Warmup", a, b, a, folder="Genre/Uncategorized/Archived"),
+            playlist("Closing", c),  # at the top of the stick
+            playlist("Not in Cratekeeper", c, item("Unknown")),
+        ),
+    )
+
+    scan_sticks(db, tmp_path, RULES)
+
+    expected = [
+        ("S1", "Genre/Uncategorized/Archived/Warmup", warmup, {one, two}),
+        ("S1", "Closing", closing, {three}),
+        ("S1", "Not in Cratekeeper", None, {three}),
+    ]
+    assert stick_playlists(db) == expected
+
+    # A rescan replaces them; a deleted Playlist or Track leaves the stick playlist
+    scan_sticks(db, tmp_path, RULES)
+    assert stick_playlists(db) == expected
+    with db.session() as session:
+        session.delete(session.get(Playlist, closing))
+        session.delete(session.get(Track, two))
+    assert [(p, pid, ids) for _, p, pid, ids in stick_playlists(db)] == [
+        ("Genre/Uncategorized/Archived/Warmup", warmup, {one}),
+        ("Closing", None, {three}),
+        ("Not in Cratekeeper", None, {three}),
+    ]
+
+
 def test_scan_without_sticks_changes_nothing(tmp_path: Path, db: Database) -> None:
-    result = scan_sticks(db, tmp_path)
+    result = scan_sticks(db, tmp_path, RULES)
 
     assert (result.scanned, result.problems) == ([], [])
     assert stick_tracks(db) == {}
@@ -208,7 +396,7 @@ def test_scan_reports_unreadable_sticks(
     (broken / "export.pdb").write_bytes(b"\0" * 100)
     (no_mounted_sticks / "EMPTY" / "PIONEER" / "rekordbox").mkdir(parents=True)
 
-    result = scan_sticks(db, tmp_path)
+    result = scan_sticks(db, tmp_path, RULES)
 
     assert result.scanned == []
     assert len(result.problems) == 3
@@ -222,7 +410,7 @@ def test_stick_tracks_go_with_their_track(
 ) -> None:
     track_id = add_track(db, title="One")
     stick(no_mounted_sticks, "S1", write_export, item("One"))
-    scan_sticks(db, tmp_path)
+    scan_sticks(db, tmp_path, RULES)
 
     with db.session() as session:
         session.delete(session.get(Track, track_id))
@@ -280,7 +468,7 @@ def test_scan_skips_sticks_without_a_volume_id(
         raise VolumeIdError("cannot read the volume ID (timeout)")
 
     monkeypatch.setattr(scan, "volume_id", fail)
-    result = scan_sticks(db, tmp_path)
+    result = scan_sticks(db, tmp_path, RULES)
 
     assert result.problems == ["S1: cannot read the volume ID (timeout)"]
     assert stick_tracks(db) == {}

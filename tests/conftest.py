@@ -16,7 +16,7 @@ from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TALB, TIT2, TPE1, TSRC, TXXX
 
 from cratekeeper.sticks import scan
-from cratekeeper.sticks.export_pdb import ExportTrack
+from cratekeeper.sticks.export_pdb import ExportPlaylist, ExportTrack
 
 AudioMaker = Callable[..., Path]
 ExportMaker = Callable[..., Path]
@@ -198,11 +198,11 @@ def _pdb_isrc(code: str) -> bytes:
     return bytes([0x90]) + struct.pack("<H", len(raw) + 4) + b"\0" + raw
 
 
-def _track_row(track: ExportTrack, artist_id: int) -> bytes:
+def _track_row(track: ExportTrack, artist_id: int, track_id: int) -> bytes:
     row = bytearray(0x5E + 2 * 21)
     struct.pack_into("<H", row, 0, 0x24)
     struct.pack_into("<I", row, 0x10, track.file_size)
-    struct.pack_into("<I", row, 0x44, artist_id)
+    struct.pack_into("<2I", row, 0x44, artist_id, track_id)
     strings = [b"\x03"] * 21  # empty strings
     strings[0] = _pdb_isrc(track.isrc) if track.isrc else b"\x03"
     strings[17] = _pdb_string(track.title)
@@ -218,6 +218,37 @@ def _artist_row(artist_id: int, name: str) -> bytes:
     if artist_id % 2:  # name offset in one byte
         return struct.pack("<HHIBB", 0x60, 0, artist_id, 3, 10) + _pdb_string(name)
     return struct.pack("<HHIBBH", 0x64, 0, artist_id, 3, 0, 12) + _pdb_string(name)
+
+
+def _tree_row(parent: int, node_id: int, folder: bool, name: str) -> bytes:
+    return struct.pack("<5I", parent, 0, 0, node_id, int(folder)) + _pdb_string(name)
+
+
+def _playlist_tables(
+    playlists: Sequence[ExportPlaylist], track_ids: dict[ExportTrack, int]
+) -> tuple[list[tuple[bytes, bool]], list[tuple[bytes, bool]]]:
+    """Return the playlist tree rows (folders made as needed) and the entry rows."""
+    tree: list[tuple[bytes, bool]] = []
+    entries: list[tuple[bytes, bool]] = []
+    folders: dict[tuple[str, ...], int] = {(): 0}
+
+    def folder_id(path: tuple[str, ...]) -> int:
+        if path not in folders:
+            parent = folder_id(path[:-1])
+            folders[path] = len(tree) + 1
+            tree.append((_tree_row(parent, folders[path], True, path[-1]), True))
+        return folders[path]
+
+    for playlist in playlists:
+        parent = folder_id(playlist.folder)
+        node_id = len(tree) + 1
+        tree.append((_tree_row(parent, node_id, False, playlist.name), True))
+        rows = [
+            struct.pack("<3I", position, track_ids[track], node_id)
+            for position, track in enumerate(playlist.tracks, start=1)
+        ]
+        entries += [(row, True) for row in reversed(rows)]  # the reader sorts them
+    return tree, entries
 
 
 def _data_pages(rows: list[tuple[bytes, bool]]) -> list[list[tuple[bytes, bool]]]:
@@ -258,20 +289,35 @@ def _page(
 
 
 def _write_export(
-    path: Path, tracks: Sequence[ExportTrack], deleted: Sequence[ExportTrack] = ()
+    path: Path,
+    tracks: Sequence[ExportTrack],
+    deleted: Sequence[ExportTrack] = (),
+    playlists: Sequence[ExportPlaylist] = (),
 ) -> Path:
-    """Write an export.pdb with a tracks and an artists table.
+    """Write an export.pdb with tracks, artists and playlist tables.
 
-    ``deleted`` tracks are in the file, but marked as removed.
+    ``deleted`` tracks are in the file, but marked as removed. Playlists may list
+    them. The folders of the playlists are made as needed.
     """
     names = sorted({t.artist for t in [*tracks, *deleted]})
     ids = {name: index + 1 for index, name in enumerate(names)}
-    track_rows = [(_track_row(t, ids[t.artist]), True) for t in tracks]
-    track_rows += [(_track_row(t, ids[t.artist]), False) for t in deleted]
+    track_ids: dict[ExportTrack, int] = {}
+    track_rows = []
+    for index, (track, keep) in enumerate(
+        [*((t, True) for t in tracks), *((t, False) for t in deleted)], start=1
+    ):
+        track_ids.setdefault(track, index)
+        track_rows.append((_track_row(track, ids[track.artist], index), keep))
     artist_rows = [(_artist_row(ids[n], n), True) for n in names]
+    tree_rows, entry_rows = _playlist_tables(playlists, track_ids)
     pages: list[bytes] = [b""]  # page 0: the file header
     tables = []
-    for kind, rows in ((0, track_rows), (2, artist_rows)):
+    for kind, rows in (
+        (0, track_rows),
+        (2, artist_rows),
+        (7, tree_rows),
+        (8, entry_rows),
+    ):
         chain = [[], *_data_pages(rows)]
         first = len(pages)
         for offset, page_rows in enumerate(chain):
