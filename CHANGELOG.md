@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Playlist view: Source, Download and Rekordbox state per track (unsynced, file
   missing), with sorting and filters
 - Settings: a "Choose…" button next to each path opens the macOS Finder dialog
+- Playlist view: "Import tracks" copies audio files from this Mac into the
+  Playlist's Music folder sub-folder as Library tracks (never overwrites a file)
 
 ### Changed
 

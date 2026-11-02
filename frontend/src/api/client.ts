@@ -101,7 +101,11 @@ export async function request<T>(
     headers["X-Cratekeeper"] = "1";
   }
   const init: RequestInit = { method, headers, signal };
-  if (body !== undefined) {
+  if (body instanceof Blob) {
+    // A file goes as it is (the server reads the raw body).
+    headers["Content-Type"] = "application/octet-stream";
+    init.body = body;
+  } else if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(body);
   }

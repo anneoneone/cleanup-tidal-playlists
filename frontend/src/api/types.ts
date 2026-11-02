@@ -10,6 +10,7 @@ export type JobStatus = JobOut["status"];
 export type PlaylistOut = Schemas["PlaylistOut"];
 export type PlaylistDetailOut = Schemas["PlaylistDetailOut"];
 export type TrackOut = Schemas["TrackOut"];
+export type ImportedTrackOut = Schemas["ImportedTrackOut"];
 export type PlanOut = Schemas["PlanOut"];
 export type Plan = Schemas["Plan"];
 export type PlanGroup = Schemas["PlanGroup"];

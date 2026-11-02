@@ -192,6 +192,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/playlists/{playlist_id}/files": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Post Playlist File
+     * @description Copy the audio file in the body into the Playlist's Music folder sub-folder.
+     *
+     *     ``name`` is the file name. The file becomes a Library track (or the file of
+     *     one of the Playlist's Tidal tracks, if it matches one).
+     */
+    post: operations["post_playlist_file_api_playlists__playlist_id__files_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/runs": {
     parameters: {
       query?: never;
@@ -421,6 +444,18 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
+    };
+    /**
+     * ImportedTrackOut
+     * @description An audio file added to a Playlist's Music folder sub-folder.
+     */
+    ImportedTrackOut: {
+      /** File Path */
+      file_path: string;
+      /** Library Track */
+      library_track: boolean;
+      /** Track Id */
+      track_id: number;
     };
     /**
      * JobOut
@@ -1150,6 +1185,43 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PlaylistDetailOut"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  post_playlist_file_api_playlists__playlist_id__files_post: {
+    parameters: {
+      query: {
+        name: string;
+      };
+      header?: never;
+      path: {
+        playlist_id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/octet-stream": string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImportedTrackOut"];
         };
       };
       /** @description Validation Error */

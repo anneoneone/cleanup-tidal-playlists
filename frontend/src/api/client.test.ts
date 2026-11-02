@@ -41,6 +41,15 @@ describe("api client", () => {
     expect(init?.body).toBe('{"offline":true}');
   });
 
+  it("sends a file as the raw body", async () => {
+    const fetchMock = mockFetch(201, { track_id: 1 });
+    const file = new File(["data"], "x.mp3");
+    await api.post("/api/playlists/1/files?name=x.mp3", file);
+    expect(headersOf(fetchMock)["X-Cratekeeper"]).toBe("1");
+    expect(headersOf(fetchMock)["Content-Type"]).toBe("application/octet-stream");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(file);
+  });
+
   it("sends the header even without a body", async () => {
     const fetchMock = mockFetch(200, { cancelled: true });
     await api.post("/api/jobs/x/cancel");
