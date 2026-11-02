@@ -328,8 +328,10 @@ def migrate_command(
         f"{report.tracks} tracks into {report.database}"
     )
     console.print(
-        f"Removed {report.orphan_tracks_removed} local tracks in no "
-        f"playlist; fixed {report.shared_paths_fixed} shared file paths."
+        f"Removed {report.orphan_tracks_removed} Library tracks in no "
+        f"playlist; fixed {report.shared_paths_fixed} shared file paths; "
+        f"{report.library_flags_cleared} Tidal tracks are no longer marked as "
+        "Library tracks."
     )
     for key, value in report.settings.items():
         console.print(f"  {key} = {value}")

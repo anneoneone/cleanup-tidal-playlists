@@ -2,7 +2,7 @@
 
 v1 files are only read, never changed. Steps:
 1. copy ``~/.tidal-cleanup/sync.db`` with SQLite's backup API and upgrade it
-2. clean up v1 data: local tracks in no playlist, file paths shared by several
+2. clean up v1 data: Library tracks in no playlist, file paths shared by several
    tracks, and Tidal timestamps (so the first Tidal refresh is a full one)
 3. write ``config.toml`` from the v1 settings (env file and environment)
 4. copy the Tidal login and the Playlist tag mapping
@@ -62,6 +62,7 @@ class MigrateReport:
     tracks: int = 0
     orphan_tracks_removed: int = 0
     shared_paths_fixed: int = 0
+    library_flags_cleared: int = 0
     settings: dict[str, Any] = field(default_factory=dict)
     copied: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -98,8 +99,9 @@ def migrate(
     db = Database(home.db_file)
     db.prepare()
     with db.session() as session:
-        report.orphan_tracks_removed = _remove_orphan_local_tracks(session)
+        report.orphan_tracks_removed = _remove_orphan_library_tracks(session)
         report.shared_paths_fixed = _fix_shared_paths(session)
+        report.library_flags_cleared = _clear_library_flag_on_tidal_tracks(session)
         session.execute(update(Playlist).values(last_updated_tidal=None))
         report.playlists = int(session.scalar(select(func.count(Playlist.id))) or 0)
         report.tracks = int(session.scalar(select(func.count(Track.id))) or 0)
@@ -143,11 +145,24 @@ def _has_playlists(path: Path) -> bool:
     return bool(row and row[0])
 
 
-def _remove_orphan_local_tracks(session: Session) -> int:
+def _remove_orphan_library_tracks(session: Session) -> int:
     """Delete tracks without Tidal ID that are in no playlist (v1 created many)."""
     in_playlist = select(PlaylistTrack.track_id).distinct()
     result = session.execute(
         delete(Track).where(Track.tidal_id.is_(None), Track.id.not_in(in_playlist))
+    )
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+def _clear_library_flag_on_tidal_tracks(session: Session) -> int:
+    """Unset v1's ``in_local`` on Tidal tracks (v1 used it for "has a file")."""
+    tidal_tracks = select(Track.id).where(Track.tidal_id.is_not(None))
+    result = session.execute(
+        update(PlaylistTrack)
+        .where(
+            PlaylistTrack.in_local.is_(True), PlaylistTrack.track_id.in_(tidal_tracks)
+        )
+        .values(in_local=False)
     )
     return int(getattr(result, "rowcount", 0) or 0)
 

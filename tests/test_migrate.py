@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cratekeeper.db import Database, Playlist, Track, head_revision
+from cratekeeper.db import Database, Playlist, PlaylistTrack, Track, head_revision
 from cratekeeper.home import Home
 from cratekeeper.migrate import MigrateError, migrate
 from cratekeeper.settings import Settings
@@ -77,12 +77,15 @@ def test_migrate_imports_cleans_and_writes_settings(
     assert v1.read_bytes() == before  # v1 untouched
     assert (report.playlists, report.orphan_tracks_removed) == (1, 1)
     assert report.shared_paths_fixed == 1
+    assert report.library_flags_cleared == 1  # v1 flagged the Tidal track
     db = Database(home.db_file)
     assert db.schema_revision() == head_revision()
     with db.session() as s:
         assert sorted(t.id for t in s.query(Track)) == [1, 2, 4]
         assert s.get(Track, 1).file_paths == ["Playlists/House/a.mp3"]
         assert s.get(Track, 2).file_paths == []
+        assert s.get(PlaylistTrack, 1).in_local is False  # Tidal track
+        assert s.get(PlaylistTrack, 2).in_local is True  # Library track
         playlist = s.get(Playlist, 1)
         assert playlist.last_updated_tidal is None and playlist.in_tidal is True
     settings = Settings.load(home)
