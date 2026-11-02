@@ -561,3 +561,78 @@ class Run(Base):
     def __repr__(self) -> str:
         """String representation of Run."""
         return f"<Run(id={self.id}, kind='{self.kind}', status='{self.status}')>"
+
+
+class Stick(Base):
+    """A USB stick with a Rekordbox export, as of its last scan."""
+
+    __tablename__ = "sticks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Volume UUID, or "name:<volume name>" when the system has none
+    volume_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    scanned_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    tracks_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tracks_matched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    def __repr__(self) -> str:
+        """String representation of Stick."""
+        return f"<Stick(id={self.id}, name='{self.name}')>"
+
+
+class StickTrack(Base):
+    """A Track found on a USB stick in its last scan."""
+
+    __tablename__ = "stick_tracks"
+
+    stick_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sticks.id", ondelete="CASCADE"), primary_key=True
+    )
+    track_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    __table_args__ = (Index("idx_stick_track", "track_id"),)
+
+
+class StickPlaylist(Base):
+    """A playlist on a USB stick, as of the stick's last scan."""
+
+    __tablename__ = "stick_playlists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stick_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sticks.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Folder names from the top, e.g. ["Genre", "House", "Archived"]
+    folder: Mapped[List[str]] = mapped_column(JSON, nullable=False)
+    # The Playlist with this Rekordbox name and folder, found in the scan
+    playlist_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("playlists.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        Index("idx_stick_playlist_stick", "stick_id"),
+        Index("idx_stick_playlist_playlist", "playlist_id"),
+    )
+
+    def __repr__(self) -> str:
+        """String representation of StickPlaylist."""
+        return f"<StickPlaylist(id={self.id}, name='{self.name}')>"
+
+
+class StickPlaylistTrack(Base):
+    """A Track in a playlist on a USB stick."""
+
+    __tablename__ = "stick_playlist_tracks"
+
+    stick_playlist_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("stick_playlists.id", ondelete="CASCADE"), primary_key=True
+    )
+    track_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    __table_args__ = (Index("idx_stick_playlist_track", "track_id"),)

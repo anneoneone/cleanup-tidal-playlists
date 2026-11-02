@@ -22,6 +22,7 @@ function track(id: number, fields: Partial<TrackOut>): TrackOut {
     removed_from_tidal: null,
     download: "present",
     rekordbox: "present",
+    sticks: [],
     file_path: null,
     download_status: "downloaded",
     download_error: null,
@@ -47,6 +48,7 @@ const removed = track(4, {
   download: "unsynced",
   rekordbox: "unsynced",
   added_at: "2024-01-01T10:00:00",
+  sticks: [{ id: 2, name: "S2", state: "unsynced" }],
 });
 const library = track(5, {
   artist: "Ämbient",
@@ -54,6 +56,10 @@ const library = track(5, {
   tidal_track: false,
   rekordbox: "absent",
   file_path: "/music/Playlists/X/Ambient - Dub.mp3",
+  sticks: [
+    { id: 1, name: "S1", state: "present" },
+    { id: 2, name: "S2", state: "present" },
+  ],
 });
 const all = [synced, missing, todo, removed, library];
 
@@ -76,6 +82,15 @@ describe("matchesTrack", () => {
     expect(only({ state: "unsynced" })).toEqual([4]);
     expect(only({ state: "not_in_rekordbox" })).toEqual([3, 5]);
     expect(only({ state: "in_rekordbox" })).toEqual([1, 2, 4]);
+  });
+
+  it("filters by USB stick; 'not on' only counts tracks still in a Source", () => {
+    expect(only({ stick: "any" })).toEqual([4, 5]);
+    expect(only({ stick: "none" })).toEqual([1, 2, 3]);
+    expect(only({ stick: "unsynced" })).toEqual([4]);
+    expect(only({ stick: "on:1" })).toEqual([5]);
+    expect(only({ stick: "on:2" })).toEqual([4, 5]);
+    expect(only({ stick: "off:1" })).toEqual([1, 2, 3]);
   });
 
   it("searches artist, title and file name, ignoring accents and case", () => {

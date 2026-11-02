@@ -56,7 +56,17 @@ The Rekordbox folder a **Playlist** lands in, derived from its **Playlist tags**
 The **Tracks** a **Playlist** should have in Rekordbox: those currently in the Tidal playlist that have a file, plus its **Bandcamp** files, plus its **Library tracks**. A Track removed from Tidal leaves the Rekordbox playlist; its file stays on disk.
 
 **Unsynced**:
-A **Track** that was removed from every **Source** of a **Playlist** but is still on disk or still in the Rekordbox playlist.
+A **Track** that was removed from every **Source** of a **Playlist** but is still on disk, still in the Rekordbox playlist, or still in the Playlist's **Stick playlist**.
+
+**USB stick**:
+A USB stick or SD card with a Rekordbox export (`PIONEER/rekordbox/export.pdb`) for DJ players. Known by its volume ID, shown by its volume name (S1, S2, …). A track in the export matches a **Track** when it has the same file (name and size) or the same ISRC, else the same artist and title.
+_Avoid_: device, drive, export (alone)
+
+**Stick playlist**:
+A playlist in the export of a **USB stick**. It belongs to the **Playlist** with the same Rekordbox name and **Folder placement**. If the stick has it in another folder, the name is enough when only one stick playlist and one Playlist left have that name. For a Playlist, a **Track** is on a stick only when its Stick playlist holds it.
+
+**Stick scan**:
+Reading the export of every plugged-in **USB stick** into Cratekeeper's database. Never writes to a stick. A stick that is not plugged in keeps its last scan.
 
 **File missing**:
 A **Track** that should have a file and had one, but the file is gone (e.g. deleted by hand).

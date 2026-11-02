@@ -319,6 +319,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/sticks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Sticks */
+    get: operations["get_sticks_api_sticks_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/sticks/scan": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Post Stick Scan */
+    post: operations["post_stick_scan_api_sticks_scan_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/sync": {
     parameters: {
       query?: never;
@@ -759,6 +793,43 @@ export interface components {
       version: string;
     };
     /**
+     * StickOut
+     * @description A USB stick with a Rekordbox export, as of its last scan.
+     */
+    StickOut: {
+      /** Id */
+      id: number;
+      /** Mounted */
+      mounted: boolean;
+      /** Name */
+      name: string;
+      /** Playlists Matched */
+      playlists_matched: number;
+      /** Playlists Total */
+      playlists_total: number;
+      /**
+       * Scanned At
+       * Format: date-time
+       */
+      scanned_at: string;
+      /** Tracks Matched */
+      tracks_matched: number;
+      /** Tracks Total */
+      tracks_total: number;
+    };
+    /**
+     * StickScanOut
+     * @description Result of a stick scan.
+     */
+    StickScanOut: {
+      /** Problems */
+      problems: string[];
+      /** Scanned */
+      scanned: number[];
+      /** Sticks */
+      sticks: components["schemas"]["StickOut"][];
+    };
+    /**
      * SyncIn
      * @description Start a sync.
      */
@@ -809,7 +880,7 @@ export interface components {
     };
     /**
      * TrackOut
-     * @description A Track inside a Playlist, with its presence per Source and Rekordbox.
+     * @description A Track inside a Playlist, with its presence per Source and target.
      */
     TrackOut: {
       /** Added At */
@@ -844,6 +915,8 @@ export interface components {
       removed_from_tidal?: string | null;
       /** Sources */
       sources: ("tidal" | "bandcamp" | "library")[];
+      /** Sticks */
+      sticks: components["schemas"]["TrackStickOut"][];
       /** Tidal Track */
       tidal_track: boolean;
       /** Tidal Unavailable */
@@ -852,6 +925,21 @@ export interface components {
       title: string;
       /** Version */
       version?: string | null;
+    };
+    /**
+     * TrackStickOut
+     * @description A USB stick whose copy of the Playlist holds a Track (as of its last scan).
+     */
+    TrackStickOut: {
+      /** Id */
+      id: number;
+      /** Name */
+      name: string;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: "present" | "unsynced";
     };
     /** ValidationError */
     ValidationError: {
@@ -1461,6 +1549,46 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["StatusOut"];
+        };
+      };
+    };
+  };
+  get_sticks_api_sticks_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StickOut"][];
+        };
+      };
+    };
+  };
+  post_stick_scan_api_sticks_scan_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StickScanOut"];
         };
       };
     };

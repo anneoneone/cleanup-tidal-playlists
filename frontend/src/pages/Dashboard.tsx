@@ -17,6 +17,7 @@ import {
   labelize,
   parseUtc,
 } from "../lib/format";
+import { SticksCard } from "../sticks/SticksCard";
 
 const COUNT_LABELS: Record<string, string> = {
   playlists: "Playlists",
@@ -143,6 +144,8 @@ export default function Dashboard() {
               <LastRunCard title="Last sync" run={status.data.last_sync ?? null} />
               <LastRunCard title="Last apply" run={status.data.last_apply ?? null} />
             </div>
+
+            <SticksCard jobRunning={jobRunning} />
 
             <Card title="Health">
               <ul className="divide-y divide-line">

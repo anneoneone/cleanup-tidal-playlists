@@ -15,6 +15,9 @@ Source = Literal["tidal", "bandcamp", "library"]
 # present = there and wanted, absent = not there, unsynced = there but removed
 # from every Source, missing = wanted and was there, but is gone now.
 TargetState = Literal["present", "absent", "unsynced", "missing"]
+# A track in a USB stick's copy of a Playlist: present = wanted, unsynced = removed
+# from every Source of the Playlist
+StickState = Literal["present", "unsynced"]
 
 
 class Check(BaseModel):
@@ -108,8 +111,16 @@ class PlaylistOut(BaseModel):
     last_synced_at: Optional[datetime] = None
 
 
+class TrackStickOut(BaseModel):
+    """A USB stick whose copy of the Playlist holds a Track (as of its last scan)."""
+
+    id: int
+    name: str
+    state: StickState
+
+
 class TrackOut(BaseModel):
-    """A Track inside a Playlist, with its presence per Source and Rekordbox."""
+    """A Track inside a Playlist, with its presence per Source and target."""
 
     id: int
     title: str
@@ -124,6 +135,7 @@ class TrackOut(BaseModel):
     removed_from_tidal: Optional[datetime] = None
     download: TargetState
     rekordbox: TargetState
+    sticks: list[TrackStickOut]
     file_path: Optional[str] = None
     download_status: str
     download_error: Optional[str] = None
@@ -217,3 +229,24 @@ class PickPathOut(BaseModel):
     """The chosen path, or null when the dialog was cancelled."""
 
     path: Optional[str] = None
+
+
+class StickOut(BaseModel):
+    """A USB stick with a Rekordbox export, as of its last scan."""
+
+    id: int
+    name: str
+    mounted: bool
+    scanned_at: datetime
+    tracks_total: int  # tracks in the export
+    tracks_matched: int  # of these, the ones that match a Cratekeeper Track
+    playlists_total: int  # playlists in the export (folders not counted)
+    playlists_matched: int  # of these, the ones that match a Playlist
+
+
+class StickScanOut(BaseModel):
+    """Result of a stick scan."""
+
+    scanned: list[int]  # IDs of the sticks read in this scan
+    problems: list[str]  # mounted sticks that could not be read
+    sticks: list[StickOut]  # every known stick

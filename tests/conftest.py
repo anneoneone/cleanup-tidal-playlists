@@ -1,12 +1,13 @@
 """Test isolation: no test may touch real user data or the network.
 
-Also builds small real audio files, so tag code runs against mutagen itself.
+Also builds small real audio files, so tag code runs against mutagen itself, and
+small Rekordbox USB exports (``export.pdb``).
 """
 
 import os
 import socket
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Optional
 
@@ -14,7 +15,11 @@ import pytest
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TALB, TIT2, TPE1, TSRC, TXXX
 
+from cratekeeper.sticks import scan
+from cratekeeper.sticks.export_pdb import ExportPlaylist, ExportTrack
+
 AudioMaker = Callable[..., Path]
+ExportMaker = Callable[..., Path]
 
 # One silent MPEG-1 Layer III frame (128 kbit/s, 44.1 kHz, 417 bytes).
 _MP3_FRAME = b"\xff\xfb\x90\x00" + b"\x00" * 413
@@ -173,3 +178,173 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     original_connect = socket.socket.connect
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+
+
+# ------------------------------------------------------- Rekordbox USB exports
+
+_PAGE = 512
+
+
+def _pdb_string(text: str) -> bytes:
+    """Encode a DeviceSQL string: short ASCII, or long UTF-16."""
+    if text.isascii() and len(text) < 126:
+        return bytes([(len(text) + 1) << 1 | 1]) + text.encode("ascii")
+    raw = text.encode("utf-16-le")
+    return bytes([0x90]) + struct.pack("<H", len(raw) + 4) + b"\0" + raw
+
+
+def _pdb_isrc(code: str) -> bytes:
+    raw = b"\x03" + code.encode("ascii") + b"\0"
+    return bytes([0x90]) + struct.pack("<H", len(raw) + 4) + b"\0" + raw
+
+
+def _track_row(track: ExportTrack, artist_id: int, track_id: int) -> bytes:
+    row = bytearray(0x5E + 2 * 21)
+    struct.pack_into("<H", row, 0, 0x24)
+    struct.pack_into("<I", row, 0x10, track.file_size)
+    struct.pack_into("<2I", row, 0x44, artist_id, track_id)
+    strings = [b"\x03"] * 21  # empty strings
+    strings[0] = _pdb_isrc(track.isrc) if track.isrc else b"\x03"
+    strings[17] = _pdb_string(track.title)
+    strings[19] = _pdb_string(track.file_name)
+    strings[20] = _pdb_string(track.file_path)
+    for index, value in enumerate(strings):
+        struct.pack_into("<H", row, 0x5E + 2 * index, len(row))
+        row += value
+    return bytes(row)
+
+
+def _artist_row(artist_id: int, name: str) -> bytes:
+    if artist_id % 2:  # name offset in one byte
+        return struct.pack("<HHIBB", 0x60, 0, artist_id, 3, 10) + _pdb_string(name)
+    return struct.pack("<HHIBBH", 0x64, 0, artist_id, 3, 0, 12) + _pdb_string(name)
+
+
+def _tree_row(parent: int, node_id: int, folder: bool, name: str) -> bytes:
+    return struct.pack("<5I", parent, 0, 0, node_id, int(folder)) + _pdb_string(name)
+
+
+def _playlist_tables(
+    playlists: Sequence[ExportPlaylist], track_ids: dict[ExportTrack, int]
+) -> tuple[list[tuple[bytes, bool]], list[tuple[bytes, bool]]]:
+    """Return the playlist tree rows (folders made as needed) and the entry rows."""
+    tree: list[tuple[bytes, bool]] = []
+    entries: list[tuple[bytes, bool]] = []
+    folders: dict[tuple[str, ...], int] = {(): 0}
+
+    def folder_id(path: tuple[str, ...]) -> int:
+        if path not in folders:
+            parent = folder_id(path[:-1])
+            folders[path] = len(tree) + 1
+            tree.append((_tree_row(parent, folders[path], True, path[-1]), True))
+        return folders[path]
+
+    for playlist in playlists:
+        parent = folder_id(playlist.folder)
+        node_id = len(tree) + 1
+        tree.append((_tree_row(parent, node_id, False, playlist.name), True))
+        rows = [
+            struct.pack("<3I", position, track_ids[track], node_id)
+            for position, track in enumerate(playlist.tracks, start=1)
+        ]
+        entries += [(row, True) for row in reversed(rows)]  # the reader sorts them
+    return tree, entries
+
+
+def _data_pages(rows: list[tuple[bytes, bool]]) -> list[list[tuple[bytes, bool]]]:
+    """Split (row, present) pairs into pages that fit."""
+    pages: list[list[tuple[bytes, bool]]] = [[]]
+    used = 0
+    for row in rows:
+        groups = len(pages[-1]) // 16 + 1
+        if pages[-1] and 0x28 + used + len(row[0]) + groups * 0x24 > _PAGE:
+            pages.append([])
+            used = 0
+        pages[-1].append(row)
+        used += len(row[0])
+    return pages
+
+
+def _page(
+    index: int, kind: int, next_page: int, rows: list[tuple[bytes, bool]]
+) -> bytes:
+    page = bytearray(_PAGE)
+    struct.pack_into("<3I", page, 4, index, kind, next_page)
+    if not rows:  # an index page, like the first page of every real table
+        page[0x1B] = 0x64
+        return bytes(page)
+    present = sum(1 for _, keep in rows if keep)
+    page[0x18:0x1B] = (len(rows) | present << 13).to_bytes(3, "little")
+    page[0x1B] = 0x34
+    heap = 0
+    for slot, (row, keep) in enumerate(rows):
+        page[0x28 + heap : 0x28 + heap + len(row)] = row
+        base = _PAGE - (slot // 16) * 0x24
+        struct.pack_into("<H", page, base - 6 - 2 * (slot % 16), heap)
+        if keep:
+            (flags,) = struct.unpack_from("<H", page, base - 4)
+            struct.pack_into("<H", page, base - 4, flags | 1 << slot % 16)
+        heap += len(row)
+    return bytes(page)
+
+
+def _write_export(
+    path: Path,
+    tracks: Sequence[ExportTrack],
+    deleted: Sequence[ExportTrack] = (),
+    playlists: Sequence[ExportPlaylist] = (),
+) -> Path:
+    """Write an export.pdb with tracks, artists and playlist tables.
+
+    ``deleted`` tracks are in the file, but marked as removed. Playlists may list
+    them. The folders of the playlists are made as needed.
+    """
+    names = sorted({t.artist for t in [*tracks, *deleted]})
+    ids = {name: index + 1 for index, name in enumerate(names)}
+    track_ids: dict[ExportTrack, int] = {}
+    track_rows = []
+    for index, (track, keep) in enumerate(
+        [*((t, True) for t in tracks), *((t, False) for t in deleted)], start=1
+    ):
+        track_ids.setdefault(track, index)
+        track_rows.append((_track_row(track, ids[track.artist], index), keep))
+    artist_rows = [(_artist_row(ids[n], n), True) for n in names]
+    tree_rows, entry_rows = _playlist_tables(playlists, track_ids)
+    pages: list[bytes] = [b""]  # page 0: the file header
+    tables = []
+    for kind, rows in (
+        (0, track_rows),
+        (2, artist_rows),
+        (7, tree_rows),
+        (8, entry_rows),
+    ):
+        chain = [[], *_data_pages(rows)]
+        first = len(pages)
+        for offset, page_rows in enumerate(chain):
+            index = first + offset
+            pages.append(_page(index, kind, index + 1, page_rows))
+        tables.append((kind, first, first + len(chain) - 1))
+    header = bytearray(_PAGE)
+    struct.pack_into("<7I", header, 0, 0, _PAGE, len(tables), len(pages), 5, 1, 0)
+    for index, (kind, first, last) in enumerate(tables):
+        struct.pack_into("<4I", header, 0x1C + 16 * index, kind, last + 1, first, last)
+    pages[0] = bytes(header)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"".join(pages))
+    return path
+
+
+@pytest.fixture
+def write_export() -> ExportMaker:
+    """Return a function that writes a small Rekordbox ``export.pdb``."""
+    return _write_export
+
+
+@pytest.fixture(autouse=True)
+def no_mounted_sticks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Look for USB sticks in an empty temporary folder, never in /Volumes."""
+    volumes = tmp_path / "volumes"
+    volumes.mkdir()
+    monkeypatch.setattr(scan, "VOLUMES", volumes)
+    monkeypatch.setattr(scan, "volume_id", lambda mount: f"uuid-{mount.name}")
+    return volumes

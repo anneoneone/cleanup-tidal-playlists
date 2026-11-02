@@ -11,6 +11,10 @@ from .models import (
     Run,
     RunKind,
     RunStatus,
+    Stick,
+    StickPlaylist,
+    StickPlaylistTrack,
+    StickTrack,
     Track,
 )
 
@@ -26,6 +30,10 @@ __all__ = [
     "Run",
     "RunKind",
     "RunStatus",
+    "Stick",
+    "StickPlaylist",
+    "StickPlaylistTrack",
+    "StickTrack",
     "Track",
     "head_revision",
 ]

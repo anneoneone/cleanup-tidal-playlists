@@ -11,6 +11,7 @@ export type PlaylistOut = Schemas["PlaylistOut"];
 export type PlaylistDetailOut = Schemas["PlaylistDetailOut"];
 export type TrackOut = Schemas["TrackOut"];
 export type ImportedTrackOut = Schemas["ImportedTrackOut"];
+export type TrackStickOut = Schemas["TrackStickOut"];
 export type PlanOut = Schemas["PlanOut"];
 export type Plan = Schemas["Plan"];
 export type PlanGroup = Schemas["PlanGroup"];
@@ -25,6 +26,8 @@ export type ApplyIn = Schemas["ApplyIn"];
 export type PickPathIn = Schemas["PickPathIn"];
 export type PickPathOut = Schemas["PickPathOut"];
 export type PickField = PickPathIn["field"];
+export type StickOut = Schemas["StickOut"];
+export type StickScanOut = Schemas["StickScanOut"];
 export type Source = PlaylistOut["sources"][number];
 
 /** Kinds of job events sent over SSE. Not part of openapi.json (see schemas.py). */

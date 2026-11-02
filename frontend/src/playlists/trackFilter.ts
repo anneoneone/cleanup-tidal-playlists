@@ -7,17 +7,26 @@ export type TargetState = TrackOut["download"];
 export type TrackSourceFilter = "all" | Source | "none";
 export type TrackStateFilter =
   "all" | "to_download" | "missing" | "unsynced" | "not_in_rekordbox" | "in_rekordbox";
+/**
+ * USB sticks: a track is on a stick when the stick's copy of this playlist holds it.
+ * "none" and "off:<id>" only count tracks that are still in a Source: the ones that
+ * should go on the stick.
+ */
+export type TrackStickFilter =
+  "all" | "any" | "none" | "unsynced" | `on:${number}` | `off:${number}`;
 
 export interface TrackFilter {
   query: string;
   source: TrackSourceFilter;
   state: TrackStateFilter;
+  stick: TrackStickFilter;
 }
 
 export const DEFAULT_TRACK_FILTER: TrackFilter = {
   query: "",
   source: "all",
   state: "all",
+  stick: "all",
 };
 
 export const TRACK_SORT_KEYS = ["track", "added", "download", "rekordbox"] as const;
@@ -49,6 +58,23 @@ function matchesState(track: TrackOut, state: TrackStateFilter): boolean {
   }
 }
 
+function matchesStick(track: TrackOut, stick: TrackStickFilter): boolean {
+  const wanted = track.sources.length > 0;
+  switch (stick) {
+    case "all":
+      return true;
+    case "any":
+      return track.sticks.length > 0;
+    case "none":
+      return wanted && track.sticks.length === 0;
+    case "unsynced":
+      return track.sticks.some((s) => s.state === "unsynced");
+  }
+  const [kind, id] = stick.split(":");
+  const on = track.sticks.some((s) => s.id === Number(id));
+  return kind === "on" ? on : wanted && !on;
+}
+
 export function matchesTrack(track: TrackOut, filter: TrackFilter): boolean {
   if (filter.source === "none" && track.sources.length > 0) return false;
   if (
@@ -59,6 +85,7 @@ export function matchesTrack(track: TrackOut, filter: TrackFilter): boolean {
     return false;
   }
   if (!matchesState(track, filter.state)) return false;
+  if (!matchesStick(track, filter.stick)) return false;
   const query = normalize(filter.query.trim());
   if (!query) return true;
   const haystack = normalize(

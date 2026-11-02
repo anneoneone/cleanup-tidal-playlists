@@ -77,3 +77,18 @@ def test_track_state(
     row, track = make(**kwargs)
     state = track_state(row, track, has_file)
     assert (state.sources, state.download, state.rekordbox) == expected
+
+
+def test_track_state_on_sticks() -> None:
+    sticks = [(1, "S1"), (2, "S2")]
+    row, track = make(in_tidal=True, downloaded=True)
+    state = track_state(row, track, True, sticks)
+    assert [(s.name, s.state) for s in state.sticks] == [
+        ("S1", "present"),
+        ("S2", "present"),
+    ]
+
+    row, track = make(downloaded=True)  # removed from the Playlist's Sources
+    state = track_state(row, track, True, sticks[:1])
+    assert [(s.id, s.state) for s in state.sticks] == [(1, "unsynced")]
+    assert track_state(row, track, True).sticks == []
