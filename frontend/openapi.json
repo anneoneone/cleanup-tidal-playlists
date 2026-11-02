@@ -395,6 +395,55 @@
         "title": "JobOut",
         "type": "object"
       },
+      "PickPathIn": {
+        "description": "Open the Finder dialog for one Settings path.",
+        "properties": {
+          "field": {
+            "enum": [
+              "music_folder",
+              "bandcamp_folder",
+              "rekordbox_db",
+              "tag_mapping"
+            ],
+            "title": "Field",
+            "type": "string"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "title": "PickPathIn",
+        "type": "object"
+      },
+      "PickPathOut": {
+        "description": "The chosen path, or null when the dialog was cancelled.",
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          }
+        },
+        "title": "PickPathOut",
+        "type": "object"
+      },
       "Plan": {
         "description": "A complete Plan.\n\nApplying it is only allowed while the fingerprint matches.",
         "properties": {
@@ -1919,6 +1968,44 @@
           }
         },
         "summary": "Put Settings"
+      }
+    },
+    "/api/settings/pick-path": {
+      "post": {
+        "operationId": "post_pick_path_api_settings_pick_path_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickPathIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickPathOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Pick Path"
       }
     },
     "/api/settings/tag-mapping": {

@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 from ..rekordbox.plan import Plan
+from .picker import PickField
 
 Source = Literal["tidal", "bandcamp", "library"]
 # Where a track stands for one target (its file, Rekordbox):
@@ -195,3 +196,16 @@ class CancelOut(BaseModel):
     """Result of a cancel request."""
 
     cancelled: bool
+
+
+class PickPathIn(BaseModel):
+    """Open the Finder dialog for one Settings path."""
+
+    field: PickField
+    start: Optional[str] = None  # current value; the dialog opens next to it
+
+
+class PickPathOut(BaseModel):
+    """The chosen path, or null when the dialog was cancelled."""
+
+    path: Optional[str] = None

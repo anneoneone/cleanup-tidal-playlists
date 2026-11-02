@@ -28,11 +28,14 @@ from ..pipeline import (
     sync,
 )
 from ..settings import Settings
+from .picker import InvalidPickError, PickerBusyError, PickerError, pick_path
 from .schemas import (
     ApplyIn,
     BackupOut,
     CancelOut,
     JobOut,
+    PickPathIn,
+    PickPathOut,
     PlanOut,
     PlaylistDetailOut,
     PlaylistOut,
@@ -221,6 +224,24 @@ def _router() -> APIRouter:  # noqa: C901 - one place lists every route
         settings.save(core.home)
         core.reload_settings()
         return _settings_out(core)
+
+    @router.post("/settings/pick-path", response_model=PickPathOut)
+    def post_pick_path(body: PickPathIn) -> PickPathOut:
+        try:
+            path = pick_path(body.field, body.start)
+        except PickerBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except PickerError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except InvalidPickError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if path is None:
+            return PickPathOut(path=None)
+        try:
+            Settings.model_validate({body.field: str(path)})
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors()) from exc
+        return PickPathOut(path=str(path))
 
     @router.get("/settings/tag-mapping")
     def get_tag_mapping(core: Core) -> dict[str, Any]:
