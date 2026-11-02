@@ -136,6 +136,14 @@ class PlaylistDetailOut(PlaylistOut):
     tracks: list[TrackOut]
 
 
+class ImportedTrackOut(BaseModel):
+    """An audio file added to a Playlist's Music folder sub-folder."""
+
+    track_id: int
+    file_path: str
+    library_track: bool  # False: the file matched one of the Playlist's Tidal tracks
+
+
 class SyncIn(BaseModel):
     """Start a sync."""
 

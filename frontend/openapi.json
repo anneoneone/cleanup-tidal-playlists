@@ -305,6 +305,30 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ImportedTrackOut": {
+        "description": "An audio file added to a Playlist's Music folder sub-folder.",
+        "properties": {
+          "file_path": {
+            "title": "File Path",
+            "type": "string"
+          },
+          "library_track": {
+            "title": "Library Track",
+            "type": "boolean"
+          },
+          "track_id": {
+            "title": "Track Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "track_id",
+          "file_path",
+          "library_track"
+        ],
+        "title": "ImportedTrackOut",
+        "type": "object"
+      },
       "JobOut": {
         "description": "A running or recent background job.",
         "properties": {
@@ -1819,6 +1843,66 @@
           }
         },
         "summary": "Get Playlist"
+      }
+    },
+    "/api/playlists/{playlist_id}/files": {
+      "post": {
+        "description": "Copy the audio file in the body into the Playlist's Music folder sub-folder.\n\n``name`` is the file name. The file becomes a Library track (or the file of\none of the Playlist's Tidal tracks, if it matches one).",
+        "operationId": "post_playlist_file_api_playlists__playlist_id__files_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "playlist_id",
+            "required": true,
+            "schema": {
+              "title": "Playlist Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportedTrackOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Playlist File"
       }
     },
     "/api/runs": {

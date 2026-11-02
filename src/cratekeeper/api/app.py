@@ -5,19 +5,30 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Iterable
+import tempfile
+from collections.abc import AsyncIterator, Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import asdict
 from importlib import resources
 from pathlib import Path
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, BinaryIO, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import ValidationError
 
 from ..app import App
 from ..backups import BackupError, get_backup, list_backups
 from ..db import repository as repo
-from ..jobs import TERMINAL_EVENTS, JobBusyError, JobEvent
+from ..jobs import TERMINAL_EVENTS, JobBusyError, JobEvent, held_lock
+from ..music.library_import import (
+    FileNameError,
+    ImportedTrack,
+    import_library_track,
+    import_target,
+)
+from ..music.paths import FolderMissingError
 from ..pipeline import (
     PlanClosedError,
     SyncOptions,
@@ -33,6 +44,7 @@ from .schemas import (
     ApplyIn,
     BackupOut,
     CancelOut,
+    ImportedTrackOut,
     JobOut,
     PickPathIn,
     PickPathOut,
@@ -123,6 +135,40 @@ def _router() -> APIRouter:  # noqa: C901 - one place lists every route
         if detail is None:
             raise HTTPException(status_code=404, detail="Playlist not found")
         return detail
+
+    @router.post(
+        "/playlists/{playlist_id}/files",
+        response_model=ImportedTrackOut,
+        status_code=201,
+        openapi_extra=_FILE_BODY,
+    )
+    async def post_playlist_file(
+        core: Core, playlist_id: int, name: str, request: Request
+    ) -> ImportedTrackOut:
+        """Copy the audio file in the body into the Playlist's Music folder sub-folder.
+
+        ``name`` is the file name. The file becomes a Library track (or the file of
+        one of the Playlist's Tidal tracks, if it matches one).
+        """
+        music_folder = core.settings.music_folder
+        with _import_errors():  # fail before the upload if we can
+            await run_in_threadpool(
+                import_target, core.db, music_folder, playlist_id, name
+            )
+            _check_no_job(core)
+        with tempfile.TemporaryFile() as upload:
+            size = 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                await run_in_threadpool(upload.write, chunk)
+            if size == 0:
+                raise HTTPException(status_code=422, detail="The file is empty")
+            upload.seek(0)
+            with _import_errors():
+                imported = await run_in_threadpool(
+                    _import_file, core, playlist_id, name, upload
+                )
+        return ImportedTrackOut(**asdict(imported))
 
     @router.post("/sync", response_model=JobOut, status_code=202)
     def post_sync(core: Core, body: SyncIn) -> JobOut:
@@ -301,6 +347,47 @@ def _router() -> APIRouter:  # noqa: C901 - one place lists every route
         )
 
     return router
+
+
+_FILE_BODY: dict[str, Any] = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/octet-stream": {
+                "schema": {"type": "string", "format": "binary"}
+            }
+        },
+    }
+}
+
+
+@contextmanager
+def _import_errors() -> Iterator[None]:
+    """Turn errors of a file import into HTTP errors."""
+    try:
+        yield
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNameError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (FileExistsError, FolderMissingError, JobBusyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _check_no_job(core: App) -> None:
+    job = core.runner.current()
+    if job is not None and not job.done:
+        raise JobBusyError(f"A job is already running: {job.label or job.kind}")
+
+
+def _import_file(
+    core: App, playlist_id: int, name: str, data: BinaryIO
+) -> ImportedTrack:
+    # The job lock keeps syncs (here or in the CLI) out while the folder changes.
+    with held_lock(core.home.lock_file):
+        return import_library_track(
+            core.db, core.settings.music_folder, playlist_id, name, data
+        )
 
 
 def _settings_out(core: App) -> SettingsOut:

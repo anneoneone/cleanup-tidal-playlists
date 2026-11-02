@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 import cratekeeper.api.app as api_module
 from cratekeeper.api.app import create_app
 from cratekeeper.app import App
+from cratekeeper.jobs import held_lock
 from cratekeeper.tidal.auth import LoginStart
 
 HEADERS = {"X-Cratekeeper": "1"}
@@ -184,6 +185,93 @@ def test_busy_runner_returns_409(client: TestClient, core: App) -> None:
     assert client.post("/api/jobs/missing/cancel", headers=HEADERS).json() == {
         "cancelled": False
     }
+
+
+def test_import_file_adds_a_library_track(
+    client: TestClient, core: App, tmp_path: Path, make_mp3: Any
+) -> None:
+    offline_sync(client, core)
+    peak = next(
+        p for p in client.get("/api/playlists").json() if p["name"] == "Peak 🏢"
+    )
+    data = make_mp3(
+        tmp_path / "upload" / "x.mp3", title="Three", artist="C"
+    ).read_bytes()
+    url = f"/api/playlists/{peak['id']}/files"
+
+    response = client.post(
+        url, params={"name": "C - Three.mp3"}, content=data, headers=HEADERS
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert (body["file_path"], body["library_track"]) == (
+        "Playlists/Peak 🏢/C - Three.mp3",
+        True,
+    )
+    music = core.settings.music_folder
+    assert (music / body["file_path"]).read_bytes() == data
+    detail = client.get(f"/api/playlists/{peak['id']}").json()
+    new = next(t for t in detail["tracks"] if t["id"] == body["track_id"])
+    assert (new["title"], new["sources"], new["rekordbox"]) == (
+        "Three",
+        ["library"],
+        "absent",
+    )
+    run_id = offline_sync(client, core)  # the next Plan adds it to Rekordbox
+    changes = [
+        c
+        for g in client.get(f"/api/plans/{run_id}").json()["plan"]["groups"]
+        for c in g["changes"]
+    ]
+    assert any("Three" in json.dumps(c) for c in changes)
+
+    again = client.post(
+        url, params={"name": "C - Three.mp3"}, content=b"x", headers=HEADERS
+    )
+    assert (
+        again.status_code == 409 and "already in the folder" in again.json()["detail"]
+    )
+    assert (music / body["file_path"]).read_bytes() == data
+
+
+def test_import_file_errors(client: TestClient, core: App) -> None:
+    offline_sync(client, core)
+    pid = client.get("/api/playlists").json()[0]["id"]
+    url = f"/api/playlists/{pid}/files"
+
+    def post(name: str, content: bytes = b"data", **kwargs: Any) -> Any:
+        return client.post(
+            url, params={"name": name}, content=content, headers=HEADERS, **kwargs
+        )
+
+    assert post("notes.txt").status_code == 422
+    assert post("../x.mp3").status_code == 422
+    assert post("x.mp3", b"").json()["detail"] == "The file is empty"
+    assert (
+        client.post(
+            "/api/playlists/999/files",
+            params={"name": "x.mp3"},
+            content=b"data",
+            headers=HEADERS,
+        ).status_code
+        == 404
+    )
+    assert client.post(url, params={"name": "x.mp3"}, content=b"d").status_code == 403
+
+    release = threading.Event()
+    job = core.runner.start("test", lambda ctx: release.wait(10), label="Busy")
+    try:
+        busy = post("x.mp3")
+        assert busy.status_code == 409 and "Busy" in busy.json()["detail"]
+    finally:
+        release.set()
+        job.wait(10)
+    with held_lock(core.home.lock_file):  # a job in another process (the CLI)
+        cli_busy = post("x.mp3")
+    assert cli_busy.status_code == 409 and "job is running" in cli_busy.json()["detail"]
+    assert list(core.settings.music_folder.rglob("x.mp3")) == []
+    assert list(core.settings.music_folder.rglob(".*.part")) == []
 
 
 def test_settings_round_trip_and_validation(client: TestClient, core: App) -> None:
