@@ -42,8 +42,8 @@ Per `playlist_tracks` row:
 
 - `in_tidal` – the track is in the Tidal playlist now
 - `in_bandcamp` – the file is in the playlist's Bandcamp folder now
-- `in_local` – a Local track: a file in the playlist's Music folder sub-folder that
-  matches no Tidal track
+- `in_local` – a Library track: a file in the playlist's Music folder sub-folder
+  that matches no Tidal track (never set on a Tidal track)
 - `in_rekordbox` – in the Rekordbox playlist after the last Apply
 
 Rekordbox membership = rows with (`in_tidal` and a file) or `in_bandcamp` or

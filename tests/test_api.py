@@ -81,13 +81,19 @@ def test_sync_plan_apply_flow(client: TestClient, core: App) -> None:
     playlists = client.get("/api/playlists").json()
     assert {p["name"] for p in playlists} == {"Peak 🏢", "Party 2024 🎉"}
     peak = next(p for p in playlists if p["name"] == "Peak 🏢")
-    assert peak["sources"] == ["local"] and peak["folder"] == [
+    assert peak["sources"] == ["library"] and peak["folder"] == [
         "Genre",
         "Techno",
         "Archived",
     ]
     detail = client.get(f"/api/playlists/{peak['id']}").json()
-    assert detail["tracks"][0]["has_file"] is True
+    track = detail["tracks"][0]
+    assert (track["sources"], track["download"], track["rekordbox"]) == (
+        ["library"],
+        "present",
+        "absent",
+    )
+    assert (detail["tracks_library"], detail["tracks_unsynced"]) == (1, 0)
     assert client.get("/api/playlists/999").status_code == 404
 
     bad = client.post(

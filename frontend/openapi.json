@@ -642,7 +642,7 @@
               "enum": [
                 "tidal",
                 "bandcamp",
-                "local"
+                "library"
               ],
               "type": "string"
             },
@@ -664,12 +664,20 @@
             "title": "Tracks In Rekordbox",
             "type": "integer"
           },
-          "tracks_local": {
-            "title": "Tracks Local",
+          "tracks_library": {
+            "title": "Tracks Library",
+            "type": "integer"
+          },
+          "tracks_missing": {
+            "title": "Tracks Missing",
             "type": "integer"
           },
           "tracks_tidal": {
             "title": "Tracks Tidal",
+            "type": "integer"
+          },
+          "tracks_unsynced": {
+            "title": "Tracks Unsynced",
             "type": "integer"
           },
           "tracks_with_file": {
@@ -691,10 +699,12 @@
           "in_rekordbox",
           "tracks_tidal",
           "tracks_bandcamp",
-          "tracks_local",
+          "tracks_library",
           "tracks_with_file",
           "tracks_without_file",
+          "tracks_missing",
           "tracks_in_rekordbox",
+          "tracks_unsynced",
           "tracks"
         ],
         "title": "PlaylistDetailOut",
@@ -782,7 +792,7 @@
               "enum": [
                 "tidal",
                 "bandcamp",
-                "local"
+                "library"
               ],
               "type": "string"
             },
@@ -797,12 +807,20 @@
             "title": "Tracks In Rekordbox",
             "type": "integer"
           },
-          "tracks_local": {
-            "title": "Tracks Local",
+          "tracks_library": {
+            "title": "Tracks Library",
+            "type": "integer"
+          },
+          "tracks_missing": {
+            "title": "Tracks Missing",
             "type": "integer"
           },
           "tracks_tidal": {
             "title": "Tracks Tidal",
+            "type": "integer"
+          },
+          "tracks_unsynced": {
+            "title": "Tracks Unsynced",
             "type": "integer"
           },
           "tracks_with_file": {
@@ -824,10 +842,12 @@
           "in_rekordbox",
           "tracks_tidal",
           "tracks_bandcamp",
-          "tracks_local",
+          "tracks_library",
           "tracks_with_file",
           "tracks_without_file",
-          "tracks_in_rekordbox"
+          "tracks_missing",
+          "tracks_in_rekordbox",
+          "tracks_unsynced"
         ],
         "title": "PlaylistOut",
         "type": "object"
@@ -1175,6 +1195,16 @@
             "title": "Artist",
             "type": "string"
           },
+          "download": {
+            "enum": [
+              "present",
+              "absent",
+              "unsynced",
+              "missing"
+            ],
+            "title": "Download",
+            "type": "string"
+          },
           "download_error": {
             "anyOf": [
               {
@@ -1201,29 +1231,9 @@
             ],
             "title": "File Path"
           },
-          "has_file": {
-            "title": "Has File",
-            "type": "boolean"
-          },
           "id": {
             "title": "Id",
             "type": "integer"
-          },
-          "in_bandcamp": {
-            "title": "In Bandcamp",
-            "type": "boolean"
-          },
-          "in_local": {
-            "title": "In Local",
-            "type": "boolean"
-          },
-          "in_rekordbox": {
-            "title": "In Rekordbox",
-            "type": "boolean"
-          },
-          "in_tidal": {
-            "title": "In Tidal",
-            "type": "boolean"
           },
           "isrc": {
             "anyOf": [
@@ -1247,6 +1257,16 @@
             ],
             "title": "Position"
           },
+          "rekordbox": {
+            "enum": [
+              "present",
+              "absent",
+              "unsynced",
+              "missing"
+            ],
+            "title": "Rekordbox",
+            "type": "string"
+          },
           "removed_from_tidal": {
             "anyOf": [
               {
@@ -1258,6 +1278,22 @@
               }
             ],
             "title": "Removed From Tidal"
+          },
+          "sources": {
+            "items": {
+              "enum": [
+                "tidal",
+                "bandcamp",
+                "library"
+              ],
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "tidal_track": {
+            "title": "Tidal Track",
+            "type": "boolean"
           },
           "tidal_unavailable": {
             "title": "Tidal Unavailable",
@@ -1283,11 +1319,10 @@
           "id",
           "title",
           "artist",
-          "in_tidal",
-          "in_bandcamp",
-          "in_local",
-          "in_rekordbox",
-          "has_file",
+          "sources",
+          "tidal_track",
+          "download",
+          "rekordbox",
           "download_status",
           "tidal_unavailable"
         ],

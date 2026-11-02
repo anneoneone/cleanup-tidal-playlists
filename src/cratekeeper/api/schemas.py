@@ -9,7 +9,11 @@ from pydantic import BaseModel, Field
 
 from ..rekordbox.plan import Plan
 
-Source = Literal["tidal", "bandcamp", "local"]
+Source = Literal["tidal", "bandcamp", "library"]
+# Where a track stands for one target (its file, Rekordbox):
+# present = there and wanted, absent = not there, unsynced = there but removed
+# from every Source, missing = wanted and was there, but is gone now.
+TargetState = Literal["present", "absent", "unsynced", "missing"]
 
 
 class Check(BaseModel):
@@ -94,10 +98,12 @@ class PlaylistOut(BaseModel):
     in_rekordbox: bool
     tracks_tidal: int
     tracks_bandcamp: int
-    tracks_local: int
+    tracks_library: int
     tracks_with_file: int
     tracks_without_file: int
+    tracks_missing: int
     tracks_in_rekordbox: int
+    tracks_unsynced: int
     last_synced_at: Optional[datetime] = None
 
 
@@ -112,13 +118,12 @@ class TrackOut(BaseModel):
     isrc: Optional[str] = None
     position: Optional[int] = None
     added_at: Optional[datetime] = None
-    in_tidal: bool
-    in_bandcamp: bool
-    in_local: bool
-    in_rekordbox: bool
+    sources: list[Source]
+    tidal_track: bool
     removed_from_tidal: Optional[datetime] = None
+    download: TargetState
+    rekordbox: TargetState
     file_path: Optional[str] = None
-    has_file: bool
     download_status: str
     download_error: Optional[str] = None
     tidal_unavailable: bool

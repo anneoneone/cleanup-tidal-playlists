@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import shutil
 from collections import defaultdict
-from dataclasses import asdict
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -31,6 +32,7 @@ from .schemas import (
     RunOut,
     Source,
     StatusOut,
+    TargetState,
     TrackOut,
 )
 
@@ -188,19 +190,56 @@ def _load_rows(
     return rows
 
 
+@dataclass(frozen=True)
+class TrackState:
+    """Where one Playlist track stands: its Sources, its file and Rekordbox."""
+
+    sources: list[Source]
+    download: TargetState
+    rekordbox: TargetState
+
+
+def track_state(row: PlaylistTrack, track: Track, has_file: bool) -> TrackState:
+    """Work out the Sources and target states of one Playlist track.
+
+    A track with a Tidal ID is never a Library track, even if v1 data says so.
+    """
+    sources: list[Source] = []
+    if row.in_tidal:
+        sources.append("tidal")
+    if row.in_bandcamp:
+        sources.append("bandcamp")
+    if row.in_local and track.tidal_id is None:
+        sources.append("library")
+    wanted = bool(sources)
+    download: TargetState
+    if has_file:
+        download = "present" if wanted else "unsynced"
+    elif wanted and (track.download_status == "downloaded" or row.in_rekordbox):
+        download = "missing"
+    else:
+        download = "absent"
+    rekordbox: TargetState = "absent"
+    if row.in_rekordbox:
+        rekordbox = "present" if wanted else "unsynced"
+    return TrackState(sources=sources, download=download, rekordbox=rekordbox)
+
+
 def playlist_out(
     playlist: Playlist, rows: list[tuple[PlaylistTrack, Track]], rules: NameRules
 ) -> PlaylistOut:
     """Convert a Playlist with counts (file presence = stored path, fast)."""
+    states = [track_state(r, t, bool(t.file_paths)) for r, t in rows]
     sources: list[Source] = []
     if playlist.in_tidal:
         sources.append("tidal")
-    if any(r.in_bandcamp for r, _ in rows):
-        sources.append("bandcamp")
-    if any(r.in_local for r, _ in rows):
-        sources.append("local")
-    tidal_rows = [(r, t) for r, t in rows if r.in_tidal]
+    other: tuple[Source, ...] = ("bandcamp", "library")
+    sources += [src for src in other if any(src in s.sources for s in states)]
     tags = rules.parse(playlist.name)
+
+    def count(test: Callable[[TrackState], bool]) -> int:
+        return sum(1 for s in states if test(s))
+
     return PlaylistOut(
         id=playlist.id,
         name=playlist.name,
@@ -209,16 +248,16 @@ def playlist_out(
         folder=rules.folder_path(tags),
         rekordbox_name=rules.rekordbox_name(tags),
         in_rekordbox=playlist.rekordbox_playlist_id is not None,
-        tracks_tidal=len(tidal_rows),
-        tracks_bandcamp=sum(1 for r, _ in rows if r.in_bandcamp),
-        tracks_local=sum(1 for r, _ in rows if r.in_local),
-        tracks_with_file=sum(
-            1
-            for r, t in rows
-            if (r.in_tidal or r.in_bandcamp or r.in_local) and t.file_paths
+        tracks_tidal=count(lambda s: "tidal" in s.sources),
+        tracks_bandcamp=count(lambda s: "bandcamp" in s.sources),
+        tracks_library=count(lambda s: "library" in s.sources),
+        tracks_with_file=count(lambda s: s.download == "present"),
+        tracks_without_file=count(
+            lambda s: bool(s.sources) and s.download in ("absent", "missing")
         ),
-        tracks_without_file=sum(1 for _, t in tidal_rows if not t.file_paths),
-        tracks_in_rekordbox=sum(1 for r, _ in rows if r.in_rekordbox),
+        tracks_missing=count(lambda s: s.download == "missing"),
+        tracks_in_rekordbox=count(lambda s: s.rekordbox != "absent"),
+        tracks_unsynced=count(lambda s: "unsynced" in (s.download, s.rekordbox)),
         last_synced_at=playlist.last_synced_at,
     )
 
@@ -247,6 +286,7 @@ def playlist_detail_out(app: App, playlist_id: int) -> Optional[PlaylistDetailOu
         tracks = []
         for row, track in rows:
             path = first_existing_file(track.file_paths, music)
+            state = track_state(row, track, path is not None)
             tracks.append(
                 TrackOut(
                     id=track.id,
@@ -259,13 +299,12 @@ def playlist_detail_out(app: App, playlist_id: int) -> Optional[PlaylistDetailOu
                     added_at=added_date(
                         row.added_to_tidal, row.added_to_local, track.created_at
                     ),
-                    in_tidal=row.in_tidal,
-                    in_bandcamp=row.in_bandcamp,
-                    in_local=row.in_local,
-                    in_rekordbox=row.in_rekordbox,
+                    sources=state.sources,
+                    tidal_track=track.tidal_id is not None,
                     removed_from_tidal=row.removed_from_tidal,
+                    download=state.download,
+                    rekordbox=state.rekordbox,
                     file_path=str(path) if path else None,
-                    has_file=path is not None,
                     download_status=track.download_status,
                     download_error=track.download_error,
                     tidal_unavailable=track.tidal_unavailable,

@@ -7,27 +7,31 @@ Cratekeeper keeps a DJ's Rekordbox library in line with the playlists they curat
 ### Where music comes from
 
 **Source**:
-A place that defines playlists: **Tidal** or **Bandcamp**.
+A place that defines playlists and their tracks: **Tidal**, **Bandcamp** or the **Library**.
 _Avoid_: provider, service, origin
 
 **Tidal**:
 The streaming **Source**. Its playlists are read through the Tidal API, and its tracks are fetched by a **Download**.
 
 **Bandcamp**:
-The local **Source**: a folder tree where each sub-folder is one **Playlist** of purchased audio files.
+The **Source** of purchased files: a folder tree where each sub-folder is one **Playlist**.
 _Avoid_: local playlists, local-only tracks
 
 **Music folder**:
 The folder on disk that holds the audio files for **Tidal** tracks, with one sub-folder per **Playlist**. A Playlist keeps its sub-folder when it is renamed.
-_Avoid_: mp3 directory, library
+_Avoid_: mp3 directory
 
-**Local playlist**:
-A **Music folder** sub-folder that belongs to no **Tidal** playlist (e.g. a party or radio set put together by hand). All its files are **Local tracks**.
-_Avoid_: local-only playlist, custom playlist
+**Library**:
+The **Source** of files you put into the **Music folder** yourself: every file there that matches no **Tidal** track.
+_Avoid_: local (the v1 word)
 
-**Local track**:
-An audio file in a **Playlist**'s **Music folder** sub-folder that matches no **Tidal** track. It belongs to that Playlist like any other **Track**.
-_Avoid_: local-only track, orphan file
+**Library playlist**:
+A **Music folder** sub-folder that belongs to no **Tidal** playlist (e.g. a party or radio set put together by hand). All its files are **Library tracks**.
+_Avoid_: local playlist, custom playlist
+
+**Library track**:
+An audio file in a **Playlist**'s **Music folder** sub-folder that matches no **Tidal** track. It belongs to that Playlist like any other **Track**. A Tidal track is never a Library track.
+_Avoid_: local track, orphan file
 
 ### What is kept in sync
 
@@ -49,7 +53,13 @@ _Avoid_: MyTag (Cratekeeper does not write Rekordbox MyTags), tag (file metadata
 The Rekordbox folder a **Playlist** lands in, derived from its **Playlist tags** (Genre tree or Events tree).
 
 **Rekordbox membership**:
-The **Tracks** a **Playlist** should have in Rekordbox: those currently in the Tidal playlist that have a file, plus its **Bandcamp** files, plus its **Local tracks**. A Track removed from Tidal leaves the Rekordbox playlist; its file stays on disk.
+The **Tracks** a **Playlist** should have in Rekordbox: those currently in the Tidal playlist that have a file, plus its **Bandcamp** files, plus its **Library tracks**. A Track removed from Tidal leaves the Rekordbox playlist; its file stays on disk.
+
+**Unsynced**:
+A **Track** that was removed from every **Source** of a **Playlist** but is still on disk or still in the Rekordbox playlist.
+
+**File missing**:
+A **Track** that should have a file and had one, but the file is gone (e.g. deleted by hand).
 
 ### How a sync runs
 
@@ -73,7 +83,8 @@ A copy of Cratekeeper's database, plus the Rekordbox library files when taken ri
 
 - "dry run" in v1 meant a partial simulation that still wrote to the database and skipped track removals. In Cratekeeper it is replaced by **Plan**, which writes nothing and lists every change.
 - "sync" in v1 named three different commands. In Cratekeeper, sync means **Refresh** → **Download** → **Plan** → **Apply**.
-- `in_local` in v1 meant "Bandcamp file", "Local track" and "has a file somewhere". Cratekeeper keeps these apart: **Bandcamp** files, **Local tracks**, and Tracks with a file.
+- `in_local` in v1 meant "Bandcamp file", "Local track" and "has a file somewhere". Cratekeeper keeps these apart: **Bandcamp** files, **Library tracks**, and Tracks with a file.
+- "Library" alone means the **Source**. Rekordbox's own collection is always called the "Rekordbox library".
 
 ## Example dialogue
 
@@ -82,4 +93,4 @@ A copy of Cratekeeper's database, plus the Rekordbox library files when taken ri
 > **Dev:** And Rekordbox?
 > **DJ:** The **Plan** lists "add track to Peak Time". Its **Folder placement** is Genre → Techno, from the 🏢 **Playlist emoji**. I check the Plan, then **Apply** it, and a **Backup** is taken first.
 > **Dev:** And if I drop a file into that sub-folder by hand?
-> **DJ:** It matches no Tidal track, so it becomes a **Local track** of Peak Time and joins its **Rekordbox membership**.
+> **DJ:** It matches no Tidal track, so it becomes a **Library track** of Peak Time and joins its **Rekordbox membership**.

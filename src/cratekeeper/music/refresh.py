@@ -1,9 +1,9 @@
 """Refresh the Music folder into the database.
 
 Each sub-folder of ``<music>/Playlists`` belongs to one Playlist: a Tidal playlist
-(its downloads) or a Local playlist (a folder with no Tidal playlist). Files that
+(its downloads) or a Library playlist (a folder with no Tidal playlist). Files that
 match one of the playlist's Tidal tracks are linked to that track. All other files
-become Local tracks of the playlist. Nothing on disk is changed.
+become Library tracks of the playlist. Nothing on disk is changed.
 """
 
 from __future__ import annotations
@@ -44,11 +44,11 @@ class MusicRefreshStats:
     """Counters of one Music folder refresh."""
 
     folders: int = 0
-    local_playlists_created: int = 0
+    library_playlists_created: int = 0
     files: int = 0
     linked_to_tidal: int = 0
-    local_tracks: int = 0
-    local_tracks_gone: int = 0
+    library_tracks: int = 0
+    library_tracks_gone: int = 0
     paths_dropped: int = 0
     warnings: list[str] = field(default_factory=list)
 
@@ -59,7 +59,7 @@ def refresh_music_folder(
     ctx: Optional[JobContext] = None,
     playlist_name: Optional[str] = None,
 ) -> MusicRefreshStats:
-    """Scan ``<music>/Playlists`` and update file paths and Local tracks."""
+    """Scan ``<music>/Playlists`` and update file paths and Library tracks."""
     require_folder(music_folder, "Music folder")
     stats = MusicRefreshStats()
     root = playlists_root(music_folder)
@@ -99,11 +99,11 @@ def refresh_music_folder(
             _clear_missing_folders(session, music_folder, stats)
     logger.info(
         "Music folder: %d folders, %d files, %d linked to Tidal tracks, "
-        "%d Local tracks",
+        "%d Library tracks",
         stats.folders,
         stats.files,
         stats.linked_to_tidal,
-        stats.local_tracks,
+        stats.library_tracks,
     )
     return stats
 
@@ -111,7 +111,7 @@ def refresh_music_folder(
 def _assign_folders(
     session: Session, folders: list[Path], stats: MusicRefreshStats
 ) -> list[tuple[Path, int, str]]:
-    """Map each folder to a Playlist, creating Local playlists for unknown folders."""
+    """Map each folder to a Playlist, creating Library playlists for unknown folders."""
     playlists = repo.all_playlists(session)
     by_folder = {
         name_key(p.local_folder_path): p for p in playlists if p.local_folder_path
@@ -143,8 +143,8 @@ def _assign_folders(
             )
             session.add(playlist)
             session.flush()
-            stats.local_playlists_created += 1
-            logger.info("New Local playlist from folder: %s", folder.name)
+            stats.library_playlists_created += 1
+            logger.info("New Library playlist from folder: %s", folder.name)
         claimed.add(playlist.id)
         result.append((folder, playlist.id, playlist.name))
     return result
@@ -179,14 +179,14 @@ def _refresh_playlist_folder(
         _release_path_from_others(session, stored, track_id)
         stats.linked_to_tidal += 1
 
-    local_ids = _mark_local_tracks(
+    library_ids = _mark_library_tracks(
         session, playlist, rows, result.unmatched, stored_path_of, read_tags
     )
-    stats.local_tracks += len(local_ids)
+    stats.library_tracks += len(library_ids)
     for row in rows.values():
-        if row.in_local and row.track_id not in local_ids:
+        if row.in_local and row.track_id not in library_ids:
             row.in_local = False
-            stats.local_tracks_gone += 1
+            stats.library_tracks_gone += 1
 
     stats.paths_dropped += _drop_missing_paths(tracks.values(), folder, music_folder)
     playlist.track_count_local = len(files)
@@ -208,7 +208,7 @@ def _candidates(tracks: dict[int, Track]) -> list[Candidate]:
     ]
 
 
-def _mark_local_tracks(
+def _mark_library_tracks(
     session: Session,
     playlist: Playlist,
     rows: dict[int, PlaylistTrack],
@@ -216,16 +216,16 @@ def _mark_local_tracks(
     stored_path_of: Callable[[Path], str],
     read_tags: TagReader,
 ) -> set[int]:
-    """Make unmatched files Local tracks.
+    """Make unmatched files Library tracks.
 
     Returns their track IDs.
     """
-    local_ids: set[int] = set()
+    library_ids: set[int] = set()
     for path in files:
         stored = stored_path_of(path)
         owner = repo.track_by_stored_path(session, stored)
         if owner is not None and owner.tidal_id is not None:
-            continue  # belongs to a Tidal track: never a Local track
+            continue  # belongs to a Tidal track: never a Library track
         if owner is None:
             owner = new_file_track(path, stored, read_tags(path))
             session.add(owner)
@@ -234,8 +234,8 @@ def _mark_local_tracks(
         row.in_local = True
         if row.added_to_local is None:
             row.added_to_local = file_time(path)
-        local_ids.add(owner.id)
-    return local_ids
+        library_ids.add(owner.id)
+    return library_ids
 
 
 def _drop_missing_paths(
@@ -264,7 +264,7 @@ def _release_path_from_others(session: Session, stored: str, owner_id: int) -> N
 def _clear_missing_folders(
     session: Session, music_folder: Path, stats: MusicRefreshStats
 ) -> None:
-    """Playlists whose folder was deleted lose their Local tracks."""
+    """Playlists whose folder was deleted lose their Library tracks."""
     for playlist in repo.all_playlists(session):
         if not playlist.local_folder_path:
             continue
@@ -273,5 +273,5 @@ def _clear_missing_folders(
         for row in repo.playlist_rows(session, playlist.id).values():
             if row.in_local:
                 row.in_local = False
-                stats.local_tracks_gone += 1
+                stats.library_tracks_gone += 1
         playlist.track_count_local = 0

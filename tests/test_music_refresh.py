@@ -76,7 +76,7 @@ def test_files_link_to_tidal_tracks_and_leftovers_become_local(
 
     stats = refresh_music_folder(db, music)
 
-    assert (stats.linked_to_tidal, stats.local_tracks) == (2, 1)
+    assert (stats.linked_to_tidal, stats.library_tracks) == (2, 1)
     assert rows_of(db, pid) == [
         ("Extra", False, True),
         ("Groove", True, False),
@@ -90,7 +90,7 @@ def test_files_link_to_tidal_tracks_and_leftovers_become_local(
         assert playlist.local_folder_path == "Playlists/House"
 
     again = refresh_music_folder(db, music)
-    assert (again.linked_to_tidal, again.local_tracks) == (2, 1)
+    assert (again.linked_to_tidal, again.library_tracks) == (2, 1)
     assert rows_of(db, pid) == [
         ("Extra", False, True),
         ("Groove", True, False),
@@ -103,7 +103,7 @@ def test_folder_without_tidal_playlist_is_local_playlist(
 ) -> None:
     make_mp3(music / "Playlists" / "24-01-11 Kukumu 🎙️" / "A - B.mp3")
     stats = refresh_music_folder(db, music)
-    assert stats.local_playlists_created == 1
+    assert stats.library_playlists_created == 1
     with db.session() as s:
         playlist = repo.playlist_by_name(s, "24-01-11 Kukumu 🎙️")
         assert playlist is not None
@@ -122,7 +122,7 @@ def test_renamed_tidal_playlist_keeps_its_folder(
         assert playlist is not None
         playlist.name = "Old 💾"  # status emoji changed on Tidal
     stats = refresh_music_folder(db, music)
-    assert stats.local_playlists_created == 0
+    assert stats.library_playlists_created == 0
     assert rows_of(db, pid) == [("T", True, False)]
 
 
@@ -139,7 +139,7 @@ def test_removed_files_drop_paths_and_local_tracks(
 
     stats = refresh_music_folder(db, music)
 
-    assert (stats.paths_dropped, stats.local_tracks_gone) == (2, 1)
+    assert (stats.paths_dropped, stats.library_tracks_gone) == (2, 1)
     assert rows_of(db, pid) == [("T", True, False), ("Y", False, False)]
 
 
@@ -184,7 +184,7 @@ def test_deleted_folder_clears_local_tracks(
     file.unlink()
     file.parent.rmdir()
     stats = refresh_music_folder(db, music)
-    assert stats.local_tracks_gone == 1
+    assert stats.library_tracks_gone == 1
 
 
 def test_missing_music_folder_fails_loudly(db: Database, tmp_path: Path) -> None:
@@ -196,4 +196,4 @@ def test_single_playlist_scope(db: Database, music: Path, make_mp3) -> None:
     make_mp3(music / "Playlists" / "One" / "A - B.mp3")
     make_mp3(music / "Playlists" / "Two" / "C - D.mp3")
     stats = refresh_music_folder(db, music, playlist_name="one")
-    assert (stats.folders, stats.local_tracks) == (1, 1)
+    assert (stats.folders, stats.library_tracks) == (1, 1)
