@@ -1131,6 +1131,79 @@
         "title": "StatusOut",
         "type": "object"
       },
+      "StickOut": {
+        "description": "A USB stick with a Rekordbox export, as of its last scan.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "mounted": {
+            "title": "Mounted",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scanned_at": {
+            "format": "date-time",
+            "title": "Scanned At",
+            "type": "string"
+          },
+          "tracks_matched": {
+            "title": "Tracks Matched",
+            "type": "integer"
+          },
+          "tracks_total": {
+            "title": "Tracks Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mounted",
+          "scanned_at",
+          "tracks_total",
+          "tracks_matched"
+        ],
+        "title": "StickOut",
+        "type": "object"
+      },
+      "StickScanOut": {
+        "description": "Result of a stick scan.",
+        "properties": {
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "scanned": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Scanned",
+            "type": "array"
+          },
+          "sticks": {
+            "items": {
+              "$ref": "#/components/schemas/StickOut"
+            },
+            "title": "Sticks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scanned",
+          "problems",
+          "sticks"
+        ],
+        "title": "StickScanOut",
+        "type": "object"
+      },
       "SyncIn": {
         "description": "Start a sync.",
         "properties": {
@@ -1239,7 +1312,7 @@
         "type": "object"
       },
       "TrackOut": {
-        "description": "A Track inside a Playlist, with its presence per Source and Rekordbox.",
+        "description": "A Track inside a Playlist, with its presence per Source and target.",
         "properties": {
           "added_at": {
             "anyOf": [
@@ -1364,6 +1437,13 @@
             "title": "Sources",
             "type": "array"
           },
+          "sticks": {
+            "items": {
+              "$ref": "#/components/schemas/TrackStickOut"
+            },
+            "title": "Sticks",
+            "type": "array"
+          },
           "tidal_track": {
             "title": "Tidal Track",
             "type": "boolean"
@@ -1396,10 +1476,39 @@
           "tidal_track",
           "download",
           "rekordbox",
+          "sticks",
           "download_status",
           "tidal_unavailable"
         ],
         "title": "TrackOut",
+        "type": "object"
+      },
+      "TrackStickOut": {
+        "description": "A USB stick that holds a Track (as of the stick's last scan).",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "present",
+              "unsynced"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "state"
+        ],
+        "title": "TrackStickOut",
         "type": "object"
       },
       "ValidationError": {
@@ -2168,6 +2277,46 @@
           }
         },
         "summary": "Get Status"
+      }
+    },
+    "/api/sticks": {
+      "get": {
+        "operationId": "get_sticks_api_sticks_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StickOut"
+                  },
+                  "title": "Response Get Sticks Api Sticks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Sticks"
+      }
+    },
+    "/api/sticks/scan": {
+      "post": {
+        "operationId": "post_stick_scan_api_sticks_scan_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StickScanOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Post Stick Scan"
       }
     },
     "/api/sync": {

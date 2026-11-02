@@ -1,15 +1,19 @@
 import json
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete, select
 
 import cratekeeper.api.app as api_module
 from cratekeeper.api.app import create_app
 from cratekeeper.app import App
+from cratekeeper.db import PlaylistTrack
 from cratekeeper.jobs import held_lock
+from cratekeeper.sticks.export_pdb import ExportTrack
 from cratekeeper.tidal.auth import LoginStart
 
 HEADERS = {"X-Cratekeeper": "1"}
@@ -370,3 +374,91 @@ def test_ui_fallback(
     assert app.get("/assets/app.js").text == "console.log(1)"
     assert app.get("/../secret").text == "<html>app</html>"
     assert app.get("/api/nothing").status_code == 404
+
+
+def test_scan_sticks_and_show_them_per_track(
+    client: TestClient, core: App, no_mounted_sticks: Path, write_export: Any
+) -> None:
+    assert client.get("/api/sticks").json() == []
+    empty = client.post("/api/sticks/scan", headers=HEADERS).json()
+    assert empty == {"scanned": [], "problems": [], "sticks": []}
+
+    offline_sync(client, core)
+    one = core.settings.music_folder / "Playlists" / "Peak 🏢" / "A - One.mp3"
+    write_export(
+        no_mounted_sticks / "S1" / "PIONEER" / "rekordbox" / "export.pdb",
+        [
+            ExportTrack(
+                title="One",
+                artist="A",
+                isrc="",
+                file_name=one.name,
+                file_path=f"/Contents/A/{one.name}",
+                file_size=one.stat().st_size,
+            )
+        ],
+    )
+    (no_mounted_sticks / "S2" / "PIONEER" / "rekordbox").mkdir(parents=True)
+
+    response = client.post("/api/sticks/scan", headers=HEADERS)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["scanned"]) == 1 and body["problems"][0].startswith("S2: ")
+    (s1,) = body["sticks"]
+    assert (s1["name"], s1["mounted"], s1["tracks_total"], s1["tracks_matched"]) == (
+        "S1",
+        True,
+        1,
+        1,
+    )
+
+    playlists = client.get("/api/playlists").json()
+    peak = next(p for p in playlists if p["name"] == "Peak 🏢")
+    (track,) = client.get(f"/api/playlists/{peak['id']}").json()["tracks"]
+    assert track["sticks"] == [{"id": s1["id"], "name": "S1", "state": "present"}]
+    party = next(p for p in playlists if p["name"] != "Peak 🏢")
+    (other,) = client.get(f"/api/playlists/{party['id']}").json()["tracks"]
+    assert other["sticks"] == []
+
+    # Gone from Peak's Sources: still wanted while Party has it, unsynced after
+    with core.db.session() as session:
+        row = session.scalars(
+            select(PlaylistTrack).where(PlaylistTrack.track_id == track["id"])
+        ).one()
+        row.in_local = False
+        session.add(
+            PlaylistTrack(playlist_id=party["id"], track_id=track["id"], in_local=True)
+        )
+
+    def peak_sticks() -> Any:
+        (row,) = client.get(f"/api/playlists/{peak['id']}").json()["tracks"]
+        return [s["state"] for s in row["sticks"]]
+
+    assert peak_sticks() == ["present"]
+    with core.db.session() as session:
+        session.execute(
+            delete(PlaylistTrack).where(PlaylistTrack.playlist_id == party["id"])
+        )
+    assert peak_sticks() == ["unsynced"]
+
+    # Unplugged: the last scan stays
+    shutil.rmtree(no_mounted_sticks / "S1")
+    (kept,) = client.get("/api/sticks").json()
+    assert (kept["id"], kept["mounted"], kept["tracks_matched"]) == (s1["id"], False, 1)
+
+
+def test_stick_scan_waits_for_running_jobs(client: TestClient, core: App) -> None:
+    release = threading.Event()
+    job = core.runner.start("test", lambda ctx: release.wait(10))
+    try:
+        response = client.post("/api/sticks/scan", headers=HEADERS)
+        assert response.status_code == 409
+    finally:
+        release.set()
+        job.wait(10)
+    assert client.post("/api/sticks/scan").status_code == 403  # header required
+
+
+def test_track_sticks_are_required_in_the_schema(client: TestClient) -> None:
+    schemas = client.get("/api/openapi.json").json()["components"]["schemas"]
+    assert "sticks" in schemas["TrackOut"]["required"]

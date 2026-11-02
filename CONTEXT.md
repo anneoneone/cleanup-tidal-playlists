@@ -56,7 +56,7 @@ The Rekordbox folder a **Playlist** lands in, derived from its **Playlist tags**
 The **Tracks** a **Playlist** should have in Rekordbox: those currently in the Tidal playlist that have a file, plus its **Bandcamp** files, plus its **Library tracks**. A Track removed from Tidal leaves the Rekordbox playlist; its file stays on disk.
 
 **Unsynced**:
-A **Track** that was removed from every **Source** of a **Playlist** but is still on disk, still in the Rekordbox playlist, or still on a **USB stick**.
+A **Track** that was removed from every **Source** of a **Playlist** but is still on disk or still in the Rekordbox playlist. On a **USB stick**, a Track is unsynced when no Playlist has it in a Source any more, because a stick holds tracks, not playlists.
 
 **USB stick**:
 A USB stick or SD card with a Rekordbox export (`PIONEER/rekordbox/export.pdb`) for DJ players. Known by its volume ID, shown by its volume name (S1, S2, …). A **Track** is on a stick when the export has the same file (name and size) or the same ISRC, else the same artist and title.

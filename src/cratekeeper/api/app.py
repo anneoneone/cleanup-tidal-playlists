@@ -39,6 +39,7 @@ from ..pipeline import (
     sync,
 )
 from ..settings import Settings
+from ..sticks import scan
 from .picker import InvalidPickError, PickerBusyError, PickerError, pick_path
 from .schemas import (
     ApplyIn,
@@ -54,6 +55,8 @@ from .schemas import (
     RunOut,
     SettingsOut,
     StatusOut,
+    StickOut,
+    StickScanOut,
     SyncIn,
     TidalLoginOut,
 )
@@ -65,6 +68,7 @@ from .views import (
     playlists_out,
     run_out,
     status_out,
+    sticks_out,
 )
 
 logger = logging.getLogger(__name__)
@@ -346,6 +350,20 @@ def _router() -> APIRouter:  # noqa: C901 - one place lists every route
             core, "restore", "Restore", lambda ctx: restore(core, ctx, backup_id)
         )
 
+    @router.get("/sticks", response_model=list[StickOut])
+    def get_sticks(core: Core) -> list[StickOut]:
+        return sticks_out(core)
+
+    @router.post("/sticks/scan", response_model=StickScanOut)
+    def post_stick_scan(core: Core) -> StickScanOut:
+        try:
+            result = _scan_sticks(core)
+        except JobBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return StickScanOut(
+            scanned=result.scanned, problems=result.problems, sticks=sticks_out(core)
+        )
+
     return router
 
 
@@ -388,6 +406,12 @@ def _import_file(
         return import_library_track(
             core.db, core.settings.music_folder, playlist_id, name, data
         )
+
+
+def _scan_sticks(core: App) -> scan.ScanResult:
+    # The job lock keeps syncs (here or in the CLI) out while stick data changes.
+    with held_lock(core.home.lock_file):
+        return scan.scan_sticks(core.db, core.settings.music_folder)
 
 
 def _settings_out(core: App) -> SettingsOut:

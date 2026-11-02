@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import shutil
 from collections import defaultdict
-from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -15,7 +15,15 @@ from .. import __version__
 from ..app import App
 from ..backups import BackupInfo
 from ..db import repository as repo
-from ..db.models import Playlist, PlaylistTrack, Run, RunKind, Track
+from ..db.models import (
+    Playlist,
+    PlaylistTrack,
+    Run,
+    RunKind,
+    Stick,
+    StickTrack,
+    Track,
+)
 from ..download.tidal_dl import downloader_available
 from ..jobs import Job
 from ..migrate import v1_db_path
@@ -23,6 +31,7 @@ from ..music.paths import first_existing_file
 from ..rekordbox.connection import RekordboxError, rekordbox_running
 from ..rekordbox.naming import NameRules, added_date
 from ..rekordbox.planner import is_vanished
+from ..sticks import scan
 from .schemas import (
     BackupOut,
     Check,
@@ -32,8 +41,10 @@ from .schemas import (
     RunOut,
     Source,
     StatusOut,
+    StickOut,
     TargetState,
     TrackOut,
+    TrackStickOut,
 )
 
 
@@ -192,15 +203,16 @@ def _load_rows(
 
 @dataclass(frozen=True)
 class TrackState:
-    """Where one Playlist track stands: its Sources, its file and Rekordbox."""
+    """Where one Playlist track stands: its Sources, its file, Rekordbox, sticks."""
 
     sources: list[Source]
     download: TargetState
     rekordbox: TargetState
+    sticks: list[TrackStickOut] = field(default_factory=list)
 
 
-def track_state(row: PlaylistTrack, track: Track, has_file: bool) -> TrackState:
-    """Work out the Sources and target states of one Playlist track.
+def row_sources(row: PlaylistTrack, track: Track) -> list[Source]:
+    """Return the Sources that have this track in the row's Playlist.
 
     A track with a Tidal ID is never a Library track, even if v1 data says so.
     """
@@ -211,6 +223,23 @@ def track_state(row: PlaylistTrack, track: Track, has_file: bool) -> TrackState:
         sources.append("bandcamp")
     if row.in_local and track.tidal_id is None:
         sources.append("library")
+    return sources
+
+
+def track_state(
+    row: PlaylistTrack,
+    track: Track,
+    has_file: bool,
+    sticks: Sequence[tuple[int, str]] = (),
+    wanted_anywhere: Optional[bool] = None,
+) -> TrackState:
+    """Work out the Sources and target states of one Playlist track.
+
+    ``sticks`` are the (ID, name) of the USB sticks that hold the track. A stick
+    holds tracks, not playlists: the track is unsynced there only when no Playlist
+    has it in a Source (``wanted_anywhere``, default: this Playlist).
+    """
+    sources = row_sources(row, track)
     wanted = bool(sources)
     download: TargetState
     if has_file:
@@ -222,7 +251,14 @@ def track_state(row: PlaylistTrack, track: Track, has_file: bool) -> TrackState:
     rekordbox: TargetState = "absent"
     if row.in_rekordbox:
         rekordbox = "present" if wanted else "unsynced"
-    return TrackState(sources=sources, download=download, rekordbox=rekordbox)
+    keep = wanted if wanted_anywhere is None else wanted_anywhere
+    on_sticks = [
+        TrackStickOut(id=i, name=name, state="present" if keep else "unsynced")
+        for i, name in sticks
+    ]
+    return TrackState(
+        sources=sources, download=download, rekordbox=rekordbox, sticks=on_sticks
+    )
 
 
 def playlist_out(
@@ -282,11 +318,19 @@ def playlist_detail_out(app: App, playlist_id: int) -> Optional[PlaylistDetailOu
         if playlist is None:
             return None
         rows = _load_rows(session, [playlist_id]).get(playlist_id, [])
+        sticks = _sticks_by_track(session, playlist_id)
+        wanted = _tracks_in_a_source(session, playlist_id) if sticks else set()
         base = playlist_out(playlist, rows, rules)
         tracks = []
         for row, track in rows:
             path = first_existing_file(track.file_paths, music)
-            state = track_state(row, track, path is not None)
+            state = track_state(
+                row,
+                track,
+                path is not None,
+                sticks.get(track.id, ()),
+                wanted_anywhere=track.id in wanted,
+            )
             tracks.append(
                 TrackOut(
                     id=track.id,
@@ -304,6 +348,7 @@ def playlist_detail_out(app: App, playlist_id: int) -> Optional[PlaylistDetailOu
                     removed_from_tidal=row.removed_from_tidal,
                     download=state.download,
                     rekordbox=state.rekordbox,
+                    sticks=state.sticks,
                     file_path=str(path) if path else None,
                     download_status=track.download_status,
                     download_error=track.download_error,
@@ -312,3 +357,61 @@ def playlist_detail_out(app: App, playlist_id: int) -> Optional[PlaylistDetailOu
             )
         tracks.sort(key=lambda t: (t.added_at is None, t.added_at, t.id))
         return PlaylistDetailOut(**base.model_dump(), tracks=tracks)
+
+
+def _sticks_by_track(
+    session: Session, playlist_id: int
+) -> dict[int, list[tuple[int, str]]]:
+    """Return the sticks (ID, name) that hold each Track of a Playlist."""
+    stmt = (
+        select(StickTrack.track_id, Stick.id, Stick.name)
+        .join(Stick, Stick.id == StickTrack.stick_id)
+        .join(PlaylistTrack, PlaylistTrack.track_id == StickTrack.track_id)
+        .where(PlaylistTrack.playlist_id == playlist_id)
+        .order_by(Stick.name, Stick.id)
+    )
+    found: dict[int, list[tuple[int, str]]] = defaultdict(list)
+    for track_id, stick_id, name in session.execute(stmt):
+        found[track_id].append((stick_id, name))
+    return found
+
+
+def _tracks_in_a_source(session: Session, playlist_id: int) -> set[int]:
+    """Return the Tracks of a Playlist that any Playlist has in a Source."""
+    in_playlist = select(PlaylistTrack.track_id).where(
+        PlaylistTrack.playlist_id == playlist_id
+    )
+    stmt = (
+        select(PlaylistTrack, Track)
+        .join(Track, Track.id == PlaylistTrack.track_id)
+        .where(PlaylistTrack.track_id.in_(in_playlist))
+    )
+    return {track.id for row, track in session.execute(stmt) if row_sources(row, track)}
+
+
+def _mounted_volume_ids() -> set[str]:
+    found = set()
+    for stick in scan.find_sticks():
+        try:
+            found.add(scan.volume_id(stick.mount))
+        except scan.VolumeIdError:
+            continue
+    return found
+
+
+def sticks_out(app: App) -> list[StickOut]:
+    """Return every known USB stick and whether it is mounted now."""
+    mounted = _mounted_volume_ids()
+    with app.db.session() as session:
+        sticks = session.scalars(select(Stick).order_by(Stick.name, Stick.id)).all()
+        return [
+            StickOut(
+                id=s.id,
+                name=s.name,
+                mounted=s.volume_id in mounted,
+                scanned_at=s.scanned_at,
+                tracks_total=s.tracks_total,
+                tracks_matched=s.tracks_matched,
+            )
+            for s in sticks
+        ]
