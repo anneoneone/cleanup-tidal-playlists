@@ -23,7 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backups before every Apply (database + Rekordbox files) and every Refresh
   (database), with restore
 - `config.toml` settings, `migrate`, `status`, `login`, `backups` commands
-- Local playlists: Music folder sub-folders without a Tidal playlist
+- Library playlists: Music folder sub-folders without a Tidal playlist
+- Playlist view: Source, Download and Rekordbox state per track (unsynced, file
+  missing), with sorting and filters
 
 ### Changed
 

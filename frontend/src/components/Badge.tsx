@@ -56,12 +56,12 @@ export function StatusBadge({ status }: { status: string }) {
 const sourceLabels: Record<string, string> = {
   tidal: "Tidal",
   bandcamp: "Bandcamp",
-  local: "Local",
+  library: "Library",
 };
 const sourceTones: Record<string, Tone> = {
   tidal: "blue",
   bandcamp: "violet",
-  local: "neutral",
+  library: "neutral",
 };
 
 export function SourceBadge({ source }: { source: string }) {

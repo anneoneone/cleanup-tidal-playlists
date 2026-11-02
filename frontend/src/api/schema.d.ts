@@ -530,17 +530,21 @@ export interface components {
       /** Rekordbox Name */
       rekordbox_name: string;
       /** Sources */
-      sources: ("tidal" | "bandcamp" | "local")[];
+      sources: ("tidal" | "bandcamp" | "library")[];
       /** Tracks */
       tracks: components["schemas"]["TrackOut"][];
       /** Tracks Bandcamp */
       tracks_bandcamp: number;
       /** Tracks In Rekordbox */
       tracks_in_rekordbox: number;
-      /** Tracks Local */
-      tracks_local: number;
+      /** Tracks Library */
+      tracks_library: number;
+      /** Tracks Missing */
+      tracks_missing: number;
       /** Tracks Tidal */
       tracks_tidal: number;
+      /** Tracks Unsynced */
+      tracks_unsynced: number;
       /** Tracks With File */
       tracks_with_file: number;
       /** Tracks Without File */
@@ -582,15 +586,19 @@ export interface components {
       /** Rekordbox Name */
       rekordbox_name: string;
       /** Sources */
-      sources: ("tidal" | "bandcamp" | "local")[];
+      sources: ("tidal" | "bandcamp" | "library")[];
       /** Tracks Bandcamp */
       tracks_bandcamp: number;
       /** Tracks In Rekordbox */
       tracks_in_rekordbox: number;
-      /** Tracks Local */
-      tracks_local: number;
+      /** Tracks Library */
+      tracks_library: number;
+      /** Tracks Missing */
+      tracks_missing: number;
       /** Tracks Tidal */
       tracks_tidal: number;
+      /** Tracks Unsynced */
+      tracks_unsynced: number;
       /** Tracks With File */
       tracks_with_file: number;
       /** Tracks Without File */
@@ -737,30 +745,34 @@ export interface components {
       album?: string | null;
       /** Artist */
       artist: string;
+      /**
+       * Download
+       * @enum {string}
+       */
+      download: "present" | "absent" | "unsynced" | "missing";
       /** Download Error */
       download_error?: string | null;
       /** Download Status */
       download_status: string;
       /** File Path */
       file_path?: string | null;
-      /** Has File */
-      has_file: boolean;
       /** Id */
       id: number;
-      /** In Bandcamp */
-      in_bandcamp: boolean;
-      /** In Local */
-      in_local: boolean;
-      /** In Rekordbox */
-      in_rekordbox: boolean;
-      /** In Tidal */
-      in_tidal: boolean;
       /** Isrc */
       isrc?: string | null;
       /** Position */
       position?: number | null;
+      /**
+       * Rekordbox
+       * @enum {string}
+       */
+      rekordbox: "present" | "absent" | "unsynced" | "missing";
       /** Removed From Tidal */
       removed_from_tidal?: string | null;
+      /** Sources */
+      sources: ("tidal" | "bandcamp" | "library")[];
+      /** Tidal Track */
+      tidal_track: boolean;
       /** Tidal Unavailable */
       tidal_unavailable: boolean;
       /** Title */

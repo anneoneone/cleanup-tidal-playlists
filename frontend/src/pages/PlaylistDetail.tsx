@@ -1,11 +1,13 @@
-import { Link, useParams } from "react-router";
+import { Link, useParams, useSearchParams } from "react-router";
 import { isApiError } from "../api/client";
 import { usePlaylist } from "../api/queries";
 import type { TrackOut } from "../api/types";
-import { Badge, SourceBadges, type Tone } from "../components/Badge";
+import { Badge, SourceBadges } from "../components/Badge";
 import { cx } from "../components/cx";
 import { EmptyState, ErrorNotice, Loading } from "../components/Feedback";
+import { Select, TextInput } from "../components/form";
 import { PageHeader } from "../components/PageHeader";
+import { type SortDir, SortHeader } from "../components/SortHeader";
 import {
   folderPath,
   formatCount,
@@ -14,6 +16,45 @@ import {
   formatRelative,
   parseUtc,
 } from "../lib/format";
+import {
+  filterAndSortTracks,
+  firstSortDir,
+  isTrackSortKey,
+  type TargetState,
+  type TrackFilter,
+  type TrackSortKey,
+  type TrackSourceFilter,
+  type TrackStateFilter,
+} from "../playlists/trackFilter";
+
+const SOURCES: { value: TrackSourceFilter; label: string }[] = [
+  { value: "all", label: "All Sources" },
+  { value: "tidal", label: "Tidal" },
+  { value: "bandcamp", label: "Bandcamp" },
+  { value: "library", label: "Library" },
+  { value: "none", label: "Removed from all Sources" },
+];
+
+const STATES: { value: TrackStateFilter; label: string }[] = [
+  { value: "all", label: "Any status" },
+  { value: "to_download", label: "Not downloaded" },
+  { value: "missing", label: "File missing" },
+  { value: "unsynced", label: "Unsynced" },
+  { value: "not_in_rekordbox", label: "Not in Rekordbox" },
+  { value: "in_rekordbox", label: "In Rekordbox" },
+];
+
+function readFilter(params: URLSearchParams): TrackFilter {
+  const source = params.get("source");
+  const state = params.get("state");
+  return {
+    query: params.get("q") ?? "",
+    source: SOURCES.some((s) => s.value === source)
+      ? (source as TrackSourceFilter)
+      : "all",
+    state: STATES.some((s) => s.value === state) ? (state as TrackStateFilter) : "all",
+  };
+}
 
 export default function PlaylistDetail() {
   const id = Number(useParams().playlistId);
@@ -24,6 +65,7 @@ export default function PlaylistDetail() {
 
 function PlaylistDetailView({ id }: { id: number }) {
   const query = usePlaylist(id);
+  const [params, setParams] = useSearchParams();
 
   if (query.isPending) return <Loading />;
   if (query.isError) {
@@ -46,11 +88,37 @@ function PlaylistDetailView({ id }: { id: number }) {
   const counts: [string, number, boolean?][] = [
     ["Tidal", playlist.tracks_tidal],
     ["Bandcamp", playlist.tracks_bandcamp],
-    ["Local tracks", playlist.tracks_local],
+    ["Library", playlist.tracks_library],
     ["With file", playlist.tracks_with_file],
     ["Without file", playlist.tracks_without_file, playlist.tracks_without_file > 0],
+    ["File missing", playlist.tracks_missing, playlist.tracks_missing > 0],
     ["In Rekordbox", playlist.tracks_in_rekordbox],
+    ["Unsynced", playlist.tracks_unsynced, playlist.tracks_unsynced > 0],
   ];
+
+  const filter = readFilter(params);
+  const sortParam = params.get("sort");
+  const sort: TrackSortKey = isTrackSortKey(sortParam) ? sortParam : "added";
+  const dir: SortDir = params.get("dir") === "desc" ? "desc" : "asc";
+  const rows = filterAndSortTracks(playlist.tracks, filter, sort, dir);
+
+  const update = (changes: Record<string, string | null>) => {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === null || value === "") next.delete(key);
+      else next.set(key, value);
+    }
+    setParams(next, { replace: true });
+  };
+
+  const sortBy = (key: TrackSortKey) => {
+    const nextDir: SortDir =
+      sort === key ? (dir === "asc" ? "desc" : "asc") : firstSortDir(key);
+    update({
+      sort: key === "added" ? null : key,
+      dir: nextDir === "asc" ? null : "desc",
+    });
+  };
 
   return (
     <>
@@ -91,7 +159,7 @@ function PlaylistDetailView({ id }: { id: number }) {
             </dd>
           </div>
         </dl>
-        <dl className="mt-4 grid grid-cols-3 gap-3 border-t border-line pt-4 sm:grid-cols-6">
+        <dl className="mt-4 grid grid-cols-4 gap-3 border-t border-line pt-4 lg:grid-cols-8">
           {counts.map(([label, value, warn]) => (
             <div key={label}>
               <dt className="text-xs text-muted">{label}</dt>
@@ -117,31 +185,115 @@ function PlaylistDetailView({ id }: { id: number }) {
       {playlist.tracks.length === 0 ? (
         <EmptyState title="No tracks" />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-surface">
-          <table className="w-full min-w-[52rem] text-sm">
-            <thead className="border-b border-line bg-surface-2 text-left text-xs text-muted">
-              <tr>
-                <th scope="col" className="px-3 py-2 font-medium">
-                  Track
-                </th>
-                <th scope="col" className="px-3 py-2 font-medium">
-                  Added
-                </th>
-                <th scope="col" className="px-3 py-2 font-medium">
-                  Present in
-                </th>
-                <th scope="col" className="px-3 py-2 font-medium">
-                  Download
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {playlist.tracks.map((track) => (
-                <TrackRow key={track.id} track={track} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_auto_auto]">
+            <div className="sm:col-span-2 lg:col-span-1">
+              <label htmlFor="track-search" className="sr-only">
+                Search tracks
+              </label>
+              <TextInput
+                id="track-search"
+                type="search"
+                placeholder="Search artist, title, album or file"
+                value={filter.query}
+                onChange={(event) => update({ q: event.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="track-source" className="sr-only">
+                Source
+              </label>
+              <Select
+                id="track-source"
+                value={filter.source}
+                onChange={(event) =>
+                  update({
+                    source: event.target.value === "all" ? null : event.target.value,
+                  })
+                }
+              >
+                {SOURCES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label htmlFor="track-state" className="sr-only">
+                Status
+              </label>
+              <Select
+                id="track-state"
+                value={filter.state}
+                onChange={(event) =>
+                  update({
+                    state: event.target.value === "all" ? null : event.target.value,
+                  })
+                }
+              >
+                {STATES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          <p className="mb-2 text-xs text-muted" aria-live="polite">
+            {rows.length === playlist.tracks.length
+              ? `${formatCount(rows.length)} tracks`
+              : `${formatCount(rows.length)} of ${formatCount(playlist.tracks.length)} tracks`}
+          </p>
+          {rows.length === 0 ? (
+            <EmptyState title="No track matches the filters" />
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-line bg-surface">
+              <table className="w-full min-w-[48rem] text-sm">
+                <thead className="border-b border-line bg-surface-2 text-left text-xs text-muted">
+                  <tr>
+                    <SortHeader
+                      label="Track"
+                      column="track"
+                      sort={sort}
+                      dir={dir}
+                      onSort={sortBy}
+                    />
+                    <SortHeader
+                      label="Added"
+                      column="added"
+                      sort={sort}
+                      dir={dir}
+                      onSort={sortBy}
+                    />
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Source
+                    </th>
+                    <SortHeader
+                      label="Download"
+                      column="download"
+                      sort={sort}
+                      dir={dir}
+                      onSort={sortBy}
+                    />
+                    <SortHeader
+                      label="Rekordbox"
+                      column="rekordbox"
+                      sort={sort}
+                      dir={dir}
+                      onSort={sortBy}
+                    />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {rows.map((track) => (
+                    <TrackRow key={track.id} track={track} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </>
   );
@@ -158,12 +310,59 @@ function BackLink() {
   );
 }
 
-const downloadTones: Record<string, Tone> = {
-  downloaded: "green",
-  downloading: "blue",
-  error: "red",
-  not_downloaded: "neutral",
+/** Text for screen readers and tooltips, per target and state. */
+const STATE_TEXT: Record<"download" | "rekordbox", Record<TargetState, string>> = {
+  download: {
+    present: "File on disk",
+    absent: "Not downloaded",
+    unsynced: "File still on disk, but removed from every Source",
+    missing: "File missing: it was downloaded, but is gone now",
+  },
+  rekordbox: {
+    present: "In the Rekordbox playlist",
+    absent: "Not in the Rekordbox playlist",
+    unsynced: "Still in Rekordbox, but removed from every Source",
+    missing: "Missing from Rekordbox",
+  },
 };
+
+function TargetCell({
+  target,
+  state,
+}: {
+  target: "download" | "rekordbox";
+  state: TargetState;
+}) {
+  const text = STATE_TEXT[target][state];
+  switch (state) {
+    case "present":
+      return (
+        <span title={text} className="font-semibold text-green-700 dark:text-green-400">
+          <span aria-hidden="true">✓</span>
+          <span className="sr-only">{text}</span>
+        </span>
+      );
+    case "absent":
+      return (
+        <span title={text} className="text-muted">
+          <span aria-hidden="true">–</span>
+          <span className="sr-only">{text}</span>
+        </span>
+      );
+    case "unsynced":
+      return (
+        <Badge tone="amber">
+          <span title={text}>⚠ unsynced</span>
+        </Badge>
+      );
+    case "missing":
+      return (
+        <Badge tone="red">
+          <span title={text}>✗ missing</span>
+        </Badge>
+      );
+  }
+}
 
 function TrackRow({ track }: { track: TrackOut }) {
   const removed = track.removed_from_tidal ? parseUtc(track.removed_from_tidal) : null;
@@ -192,42 +391,37 @@ function TrackRow({ track }: { track: TrackOut }) {
         {track.added_at ? formatDate(parseUtc(track.added_at)) : "–"}
       </td>
       <td className="px-3 py-2.5">
-        <div className="flex flex-wrap gap-1">
-          {track.in_tidal && <Badge tone="blue">Tidal</Badge>}
-          {track.in_bandcamp && <Badge tone="violet">Bandcamp</Badge>}
-          {track.in_local && <Badge>Local</Badge>}
-          {track.has_file ? (
-            <Badge tone="green">file</Badge>
-          ) : (
-            <Badge tone="amber">no file</Badge>
-          )}
-          {track.in_rekordbox && <Badge tone="accent">Rekordbox</Badge>}
-        </div>
-        {removed && (
-          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-            Removed from Tidal {formatDate(removed)}
-          </p>
+        {track.sources.length > 0 ? (
+          <SourceBadges sources={track.sources} />
+        ) : track.tidal_track ? (
+          <span className="text-xs text-muted">
+            <span className="line-through">Tidal</span>{" "}
+            {removed ? `removed ${formatDate(removed)}` : "removed"}
+          </span>
+        ) : (
+          <span className="text-muted">–</span>
         )}
-        {track.tidal_unavailable && (
+      </td>
+      <td className="px-3 py-2.5">
+        <TargetCell target="download" state={track.download} />
+        {track.download === "absent" && track.tidal_unavailable && (
           <p className="mt-1">
             <Badge tone="red">unavailable on Tidal</Badge>
           </p>
         )}
-      </td>
-      <td className="px-3 py-2.5">
-        {/* Download only applies to Tidal tracks. */}
-        {track.in_tidal || track.download_status === "error" ? (
-          <Badge tone={downloadTones[track.download_status] ?? "neutral"}>
-            {track.download_status.replace(/_/g, " ")}
-          </Badge>
-        ) : (
-          <span className="text-muted">–</span>
+        {track.download_status === "downloading" && (
+          <p className="mt-1">
+            <Badge tone="blue">downloading</Badge>
+          </p>
         )}
         {track.download_error && (
           <p className="mt-1 max-w-xs text-xs break-words text-red-700 dark:text-red-400">
             {track.download_error}
           </p>
         )}
+      </td>
+      <td className="px-3 py-2.5">
+        <TargetCell target="rekordbox" state={track.rekordbox} />
       </td>
     </tr>
   );

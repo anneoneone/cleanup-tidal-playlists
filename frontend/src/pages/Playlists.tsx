@@ -5,8 +5,8 @@ import { Badge, SourceBadges } from "../components/Badge";
 import { cx } from "../components/cx";
 import { EmptyState, ErrorNotice, Loading } from "../components/Feedback";
 import { Select, TextInput } from "../components/form";
-import { ArrowUpDownIcon, ChevronIcon } from "../components/icons";
 import { PageHeader } from "../components/PageHeader";
+import { SortHeader } from "../components/SortHeader";
 import { folderPath, formatCount } from "../lib/format";
 import {
   filterAndSort,
@@ -22,7 +22,7 @@ const SOURCES: { value: SourceFilter; label: string }[] = [
   { value: "all", label: "All Sources" },
   { value: "tidal", label: "Tidal" },
   { value: "bandcamp", label: "Bandcamp" },
-  { value: "local", label: "Local" },
+  { value: "library", label: "Library" },
 ];
 
 const GONE: { value: GoneFilter; label: string }[] = [
@@ -228,49 +228,6 @@ export default function Playlists() {
         </>
       )}
     </>
-  );
-}
-
-function SortHeader({
-  label,
-  column,
-  sort,
-  dir,
-  onSort,
-  numeric = false,
-}: {
-  label: string;
-  column: SortKey;
-  sort: SortKey;
-  dir: SortDir;
-  onSort: (key: SortKey) => void;
-  numeric?: boolean;
-}) {
-  const active = sort === column;
-  return (
-    <th
-      scope="col"
-      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
-      className={cx("px-3 py-2 font-medium whitespace-nowrap", numeric && "text-right")}
-    >
-      <button
-        type="button"
-        onClick={() => onSort(column)}
-        className={cx(
-          "inline-flex items-center gap-1 rounded hover:text-fg",
-          active && "text-fg",
-        )}
-      >
-        {label}
-        {active ? (
-          <ChevronIcon
-            className={cx("size-3.5", dir === "asc" ? "-rotate-90" : "rotate-90")}
-          />
-        ) : (
-          <ArrowUpDownIcon className="size-3.5 opacity-50" />
-        )}
-      </button>
-    </th>
   );
 }
 
