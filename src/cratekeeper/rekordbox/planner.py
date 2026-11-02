@@ -253,7 +253,9 @@ class Planner:
     def _members(self, rows: list[PlaylistTrack]) -> list[_Member]:
         members = []
         for row in rows:
-            if not (row.in_tidal or row.in_bandcamp or row.in_local):
+            # A Tidal track is never a Library track (v1 data may say so).
+            library = row.in_local and row.track.tidal_id is None
+            if not (row.in_tidal or row.in_bandcamp or library):
                 continue
             path = first_existing_file(row.track.file_paths, self.music_folder)
             if path is None:

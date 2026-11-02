@@ -211,6 +211,18 @@ def test_removed_tidal_track_leaves_playlist_and_numbers_stay_contiguous(
         assert repo.playlist_rows(s, pid)[gone].in_rekordbox is False
 
 
+def test_removed_tidal_track_leaves_even_with_a_v1_local_flag(world: World) -> None:
+    pid = world.playlist("Mix 🏢")
+    world.track(pid, "A", "One", datetime(2025, 1, 1))
+    gone = world.track(pid, "B", "Two", datetime(2025, 1, 2))
+    world.apply(world.plan())
+    with world.db.session() as s:
+        row = repo.playlist_rows(s, pid)[gone]
+        row.in_tidal, row.in_local = False, True  # v1: "has a file"
+
+    assert kinds(world.plan()) == ["remove_track"]
+
+
 def test_hand_added_song_is_removed_only_when_pruning(world: World) -> None:
     pid = world.playlist("Mix 🏢")
     world.track(pid, "A", "One", datetime(2025, 1, 1))
