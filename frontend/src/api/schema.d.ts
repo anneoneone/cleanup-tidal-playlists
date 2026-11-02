@@ -244,6 +244,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/settings/pick-path": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Post Pick Path */
+    post: operations["post_pick_path_api_settings_pick_path_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/settings/tag-mapping": {
     parameters: {
       query?: never;
@@ -435,6 +452,27 @@ export interface components {
       status: "running" | "succeeded" | "failed" | "cancelled";
       /** Step */
       step?: string | null;
+    };
+    /**
+     * PickPathIn
+     * @description Open the Finder dialog for one Settings path.
+     */
+    PickPathIn: {
+      /**
+       * Field
+       * @enum {string}
+       */
+      field: "music_folder" | "bandcamp_folder" | "rekordbox_db" | "tag_mapping";
+      /** Start */
+      start?: string | null;
+    };
+    /**
+     * PickPathOut
+     * @description The chosen path, or null when the dialog was cancelled.
+     */
+    PickPathOut: {
+      /** Path */
+      path?: string | null;
     };
     /**
      * Plan
@@ -1230,6 +1268,39 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SettingsOut"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  post_pick_path_api_settings_pick_path_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PickPathIn"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PickPathOut"];
         };
       };
       /** @description Validation Error */

@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Library playlists: Music folder sub-folders without a Tidal playlist
 - Playlist view: Source, Download and Rekordbox state per track (unsynced, file
   missing), with sorting and filters
+- Settings: a "Choose…" button next to each path opens the macOS Finder dialog
 
 ### Changed
 

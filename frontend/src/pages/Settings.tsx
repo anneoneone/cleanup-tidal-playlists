@@ -1,12 +1,18 @@
 import { type FormEvent, useState } from "react";
 import { isApiError } from "../api/client";
 import { useSaveSettings, useSettings } from "../api/queries";
-import { DOWNLOAD_QUALITIES, type SettingsOut, TARGET_FORMATS } from "../api/types";
+import {
+  DOWNLOAD_QUALITIES,
+  type PickField,
+  type SettingsOut,
+  TARGET_FORMATS,
+} from "../api/types";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { ErrorNotice, Loading, Notice } from "../components/Feedback";
 import { Field, Select, TextInput, Toggle } from "../components/form";
 import { PageHeader } from "../components/PageHeader";
+import { PathInput } from "../settings/PathInput";
 import {
   errorsFromServer,
   type SettingsErrors,
@@ -81,21 +87,16 @@ function SettingsEditor({ data }: { data: SettingsOut }) {
     });
   };
 
-  const text = (
-    field: SettingsField,
-    label: string,
-    hint?: string,
-    placeholder?: string,
-  ) => (
+  const path = (field: PickField, label: string, hint?: string, placeholder?: string) => (
     <Field label={label} hint={hint} error={errors[field]}>
       {(props) => (
-        <TextInput
+        <PathInput
           {...props}
-          value={String(form[field])}
+          field={field}
+          label={label}
+          value={form[field]}
           placeholder={placeholder}
-          onChange={(event) => set(field, event.target.value)}
-          autoComplete="off"
-          spellCheck={false}
+          onChange={(value) => set(field, value)}
         />
       )}
     </Field>
@@ -128,24 +129,24 @@ function SettingsEditor({ data }: { data: SettingsOut }) {
     <form onSubmit={submit} noValidate className="space-y-6">
       <Card title="Files">
         <div className="grid gap-5 md:grid-cols-2">
-          {text(
+          {path(
             "music_folder",
             "Music folder",
             "Audio files for Tidal tracks, one sub-folder per Playlist.",
           )}
-          {text(
+          {path(
             "bandcamp_folder",
             "Bandcamp folder",
             "Optional. One sub-folder per Playlist.",
             "Not used",
           )}
-          {text(
+          {path(
             "rekordbox_db",
             "Rekordbox library",
             "Optional. Path to master.db.",
             "Find it automatically",
           )}
-          {text(
+          {path(
             "tag_mapping",
             "Playlist tag mapping file",
             "Optional. A JSON file.",
