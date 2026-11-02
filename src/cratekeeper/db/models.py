@@ -561,3 +561,36 @@ class Run(Base):
     def __repr__(self) -> str:
         """String representation of Run."""
         return f"<Run(id={self.id}, kind='{self.kind}', status='{self.status}')>"
+
+
+class Stick(Base):
+    """A USB stick with a Rekordbox export, as of its last scan."""
+
+    __tablename__ = "sticks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Volume UUID, or "name:<volume name>" when the system has none
+    volume_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    scanned_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    tracks_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tracks_matched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    def __repr__(self) -> str:
+        """String representation of Stick."""
+        return f"<Stick(id={self.id}, name='{self.name}')>"
+
+
+class StickTrack(Base):
+    """A Track found on a USB stick in its last scan."""
+
+    __tablename__ = "stick_tracks"
+
+    stick_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("sticks.id", ondelete="CASCADE"), primary_key=True
+    )
+    track_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    __table_args__ = (Index("idx_stick_track", "track_id"),)

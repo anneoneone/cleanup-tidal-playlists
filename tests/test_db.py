@@ -10,6 +10,8 @@ from cratekeeper.db import (
     PlaylistTrack,
     RunKind,
     RunStatus,
+    Stick,
+    StickTrack,
     head_revision,
 )
 from cratekeeper.db import repository as repo
@@ -66,6 +68,7 @@ def test_v1_database_is_upgraded_and_keeps_rows(tmp_path: Path) -> None:
     db.prepare()
 
     assert db.schema_revision() == head_revision()
+    assert {"sticks", "stick_tracks"} <= set(table_names(db.engine))
     with db.session() as session:
         row = session.scalars(select(PlaylistTrack)).one()
         assert row.in_local is True
@@ -143,3 +146,18 @@ def test_library_counts_on_empty_db(tmp_path: Path) -> None:
             "tidal_tracks": 0,
             "tracks_in_rekordbox": 0,
         }
+
+
+def test_upgraded_stick_tracks_go_with_their_track(tmp_path: Path) -> None:
+    path = tmp_path / "v1.db"
+    make_v1_database(path)
+    db = Database(path)
+    db.prepare()
+    with db.session() as session:
+        session.add(Stick(id=1, volume_id="u1", name="S1", scanned_at=repo.utc_now()))
+        session.flush()
+        session.add(StickTrack(stick_id=1, track_id=1))
+    with db.session() as session:
+        session.execute(text("DELETE FROM tracks WHERE id = 1"))
+    with db.session() as session:
+        assert session.scalars(select(StickTrack)).all() == []
