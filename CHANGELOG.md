@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Settings: a "Choose…" button next to each path opens the macOS Finder dialog
 - Playlist view: "Import tracks" copies audio files from this Mac into the
   Playlist's Music folder sub-folder as Library tracks (never overwrites a file)
+- USB sticks: "Scan sticks" on the Dashboard reads the Rekordbox export
+  (`export.pdb`) of each plugged-in stick, read-only. The playlist view shows per
+  track on which sticks it is (or "unsynced" there: in no Source of any playlist),
+  with a stick filter
 
 ### Changed
 

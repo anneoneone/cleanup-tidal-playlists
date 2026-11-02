@@ -18,6 +18,8 @@ import type {
   RunOut,
   SettingsOut,
   StatusOut,
+  StickOut,
+  StickScanOut,
   SyncIn,
   TagMapping,
   TidalLoginOut,
@@ -35,6 +37,7 @@ export const queryKeys = {
   tagMapping: ["tag-mapping"] as const,
   tidalLogin: ["auth", "tidal"] as const,
   backups: ["backups"] as const,
+  sticks: ["sticks"] as const,
   currentJob: ["jobs", "current"] as const,
   job: (id: string) => ["jobs", id] as const,
 };
@@ -134,6 +137,25 @@ export function useBackups() {
   return useQuery({
     queryKey: queryKeys.backups,
     queryFn: ({ signal }) => api.get<BackupOut[]>("/api/backups", signal),
+  });
+}
+
+export function useSticks() {
+  return useQuery({
+    queryKey: queryKeys.sticks,
+    queryFn: ({ signal }) => api.get<StickOut[]>("/api/sticks", signal),
+  });
+}
+
+/** Read the plugged-in USB sticks (never writes to them). */
+export function useScanSticks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<StickScanOut>("/api/sticks/scan"),
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.sticks, data.sticks);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.playlists });
+    },
   });
 }
 
